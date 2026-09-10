@@ -36,7 +36,9 @@ store_settings  store_id (pk, fk),
 ```
 
 Later additions (own migrations): `order_prefix`, `google_login_enabled`,
-a Pathao sandbox flag (base URL stays global for now).
+a Pathao sandbox flag (base URL stays global for now),
+`bdcourier_api_key_enc` (migration 0025, replacing the unused
+`fraudbd_api_key_enc` — left in place, never read).
 
 Typed columns rather than a generic key/value table: the admin form is typed,
 validation is typed, and a wrong key cannot be misspelled into existence.
@@ -188,7 +190,7 @@ holds only the template id. Adding a template is a developer task and a
 deploy.
 
 **Store creation** is three fields: domain, store name, template (slug
-derived from the name). The store's integrations (Meta, Pathao, FraudBD)
+derived from the name). The store's integrations (Meta, Pathao, BDCourier)
 and, later, its content live under that store's own **Settings**, reached
 through the switcher and gated by the `settings` permission (owners and
 super admins).

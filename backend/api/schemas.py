@@ -115,19 +115,28 @@ class OrderItemOut(BaseModel):
 class FraudCourierOut(BaseModel):
     name: str
     logo: str | None = None
-    data_type: str
     total: int = 0
     success: int = 0
     cancel: int = 0
-    rating: str | None = None
-    risk: str | None = None
-    message: str | None = None
     success_rate: float | None = None
 
 
+class FraudReportOut(BaseModel):
+    id: str
+    name: str | None = None
+    details: str | None = None
+    created_at: str | None = None
+    courier_name: str | None = None
+    courier_logo: str | None = None
+
+
 class FraudCheckOut(BaseModel):
-    """A FraudBD lookup for a phone: courier delivery history and Pathao's
-    rating. `error` set means FraudBD could not answer that time."""
+    """A BDCourier lookup for a phone: courier delivery history and any fraud
+    reports filed against it. `error` set means BDCourier could not answer
+    that time.
+
+    pathao_rating/pathao_risk are a leftover from the old FraudBD provider;
+    BDCourier never sets them, so they read null on every new check."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -140,6 +149,7 @@ class FraudCheckOut(BaseModel):
     pathao_rating: str | None
     pathao_risk: str | None
     couriers: list[FraudCourierOut] = []
+    reports: list[FraudReportOut] = []
     error: str | None = None
 
 
@@ -186,7 +196,7 @@ class OrderOut(BaseModel):
 
     # From the model: "<store prefix>-<id>".
     order_no: str
-    # The FraudBD check run for this phone, once it has (see api.services.fraudbd).
+    # The BDCourier check run for this phone, once it has (see api.services.bdcourier).
     fraud_check: FraudCheckOut | None = None
 
     @computed_field

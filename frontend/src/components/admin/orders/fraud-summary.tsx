@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, ShieldAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { FraudCheck, FraudCourier } from "@/lib/orders";
@@ -28,19 +28,6 @@ const TONE_STROKE = {
   none: "#94a3b8",
 } as const;
 
-const RATING_LABEL: Record<string, string> = {
-  excellent_customer: "Excellent",
-  good_customer: "Good",
-  moderate_customer: "Moderate",
-  risky_customer: "Risky",
-  new_customer: "New",
-};
-
-export function ratingLabel(rating: string | null): string | null {
-  if (!rating) return null;
-  return RATING_LABEL[rating] ?? rating.replace(/_/g, " ");
-}
-
 /** A small ring showing the delivered share. */
 function Ring({ rate, size = 40 }: { rate: number | null; size?: number }) {
   const r = (size - 6) / 2;
@@ -65,8 +52,9 @@ function Ring({ rate, size = 40 }: { rate: number | null; size?: number }) {
 }
 
 /**
- * The table cell: ring, delivered share, delivered/total and Pathao's rating.
- * "0" when there is no history at all; "—" while the check has not run.
+ * The table cell: ring, delivered share, delivered/total and a flag if any
+ * courier has reported this number for fraud. "0" when there is no history
+ * at all; "—" while the check has not run.
  */
 export function FraudBadge({ fraud }: { fraud: FraudCheck | null }) {
   if (!fraud) return <span className="text-muted-foreground">—</span>;
@@ -77,8 +65,9 @@ export function FraudBadge({ fraud }: { fraud: FraudCheck | null }) {
       </span>
     );
   }
-  const rating = ratingLabel(fraud.pathaoRating);
-  if (fraud.total === 0 && !rating) return <span className="text-muted-foreground">0</span>;
+  if (fraud.total === 0 && fraud.reports.length === 0) {
+    return <span className="text-muted-foreground">0</span>;
+  }
   const tone = rateTone(fraud.successRate);
   return (
     <div className="flex items-center gap-2.5">
@@ -93,9 +82,12 @@ export function FraudBadge({ fraud }: { fraud: FraudCheck | null }) {
         <div>
           Order: <span className={cn("font-medium", TONE_TEXT[tone])}>{fraud.success}/{fraud.total}</span>
         </div>
-        {rating && (
-          <div>
-            Pathao: <span className={cn("font-medium", TONE_TEXT[riskTone(fraud.pathaoRisk)])}>{rating}</span>
+        {fraud.reports.length > 0 && (
+          <div className="flex items-center gap-1 text-[#dc2626]">
+            <ShieldAlert className="size-3" />
+            <span className="font-medium">
+              {fraud.reports.length} fraud report{fraud.reports.length === 1 ? "" : "s"}
+            </span>
           </div>
         )}
       </div>
@@ -103,22 +95,8 @@ export function FraudBadge({ fraud }: { fraud: FraudCheck | null }) {
   );
 }
 
-function riskTone(risk: string | null): keyof typeof TONE_TEXT {
-  switch (risk) {
-    case "low":
-      return "good";
-    case "medium":
-      return "warn";
-    case "high":
-    case "very_high":
-      return "bad";
-    default:
-      return "none";
-  }
-}
-
-/** The couriers the cards always show, in this order, whether or not FraudBD
- * returned them (CarryBee has no data yet: it shows dashes). */
+/** The couriers the cards always show, in this order, whether or not
+ * BDCourier returned them (CarryBee has no data yet: it shows dashes). */
 const COURIERS: { key: string; title: string }[] = [
   { key: "pathao", title: "Pathao" },
   { key: "steadfast", title: "Steadfast" },
@@ -127,7 +105,7 @@ const COURIERS: { key: string; title: string }[] = [
 ];
 
 function courierRate(c: FraudCourier): number | null {
-  if (c.dataType === "rating") return c.successRate;
+  if (c.successRate !== null) return c.successRate;
   return c.total > 0 ? Math.round((c.success / c.total) * 1000) / 10 : null;
 }
 
@@ -139,7 +117,6 @@ function Card({
   total,
   success,
   cancel,
-  rating,
   empty,
   onRefresh,
   refreshing,
@@ -150,8 +127,7 @@ function Card({
   total: number;
   success: number;
   cancel: number;
-  rating?: string | null;
-  /** No data from FraudBD for this courier. */
+  /** No data from BDCourier for this courier. */
   empty?: boolean;
   onRefresh?: () => void;
   refreshing?: boolean;
@@ -182,21 +158,12 @@ function Card({
         <dd className={cn("font-semibold tabular-nums", TONE_TEXT[tone])}>
           {empty || rate === null ? dash : `${Math.round(rate)}%`}
         </dd>
-        {rating ? (
-          <>
-            <dt className="text-muted-foreground">Rating</dt>
-            <dd className="font-medium">{rating}</dd>
-          </>
-        ) : (
-          <>
-            <dt className="text-muted-foreground">Total</dt>
-            <dd className="tabular-nums">{empty ? dash : total}</dd>
-            <dt className="text-muted-foreground">Success</dt>
-            <dd className="tabular-nums">{empty ? dash : success}</dd>
-            <dt className="text-muted-foreground">Cancelled</dt>
-            <dd className="tabular-nums">{empty ? dash : cancel}</dd>
-          </>
-        )}
+        <dt className="text-muted-foreground">Total</dt>
+        <dd className="tabular-nums">{empty ? dash : total}</dd>
+        <dt className="text-muted-foreground">Success</dt>
+        <dd className="tabular-nums">{empty ? dash : success}</dd>
+        <dt className="text-muted-foreground">Cancelled</dt>
+        <dd className="tabular-nums">{empty ? dash : cancel}</dd>
       </dl>
       <div className="mx-2 my-2 h-1 overflow-hidden rounded-full bg-muted">
         <div
@@ -208,11 +175,11 @@ function Card({
   );
 }
 
-/** A courier logo from FraudBD's response; hidden if it fails to load. */
+/** A courier logo from BDCourier's response; hidden if it fails to load. */
 function Logo({ src, alt }: { src: string; alt: string }) {
   const [broken, setBroken] = React.useState(false);
   if (broken) return null;
-  // Plain img: the URL is FraudBD's, not ours to optimise.
+  // Plain img: the URL is BDCourier's, not ours to optimise.
   // eslint-disable-next-line @next/next/no-img-element
   return <img src={src} alt={alt} className="size-4 shrink-0 rounded-sm object-contain" onError={() => setBroken(true)} />;
 }
@@ -252,7 +219,26 @@ export function FraudCards({
   const byKey = new Map(fraud.couriers.map((c) => [c.name.toLowerCase(), c]));
 
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+    <div className="flex flex-col gap-2">
+      {fraud.reports.length > 0 && (
+        <div className="flex items-start gap-2 rounded-lg border border-[#dc2626]/40 bg-[#dc2626]/5 px-3 py-2 text-xs text-[#dc2626]">
+          <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
+          <div>
+            <span className="font-medium">
+              {fraud.reports.length} fraud report{fraud.reports.length === 1 ? "" : "s"} filed against this number
+            </span>
+            <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[#dc2626]/90">
+              {fraud.reports.map((r) => (
+                <li key={r.id}>
+                  {r.courierName ? `${r.courierName}: ` : ""}
+                  {r.details || "No details given"}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
         <Card
           title="Overall"
           rate={fraud.successRate}
@@ -273,12 +259,12 @@ export function FraudCards({
               total={c.total}
               success={c.success}
               cancel={c.cancel}
-              rating={c.dataType === "rating" ? ratingLabel(c.rating) : null}
             />
           ) : (
             <Card key={key} title={title} rate={null} total={0} success={0} cancel={0} empty />
           );
         })}
+      </div>
     </div>
   );
 }

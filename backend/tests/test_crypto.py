@@ -69,15 +69,15 @@ def test_redact_exposes_flags_and_hints_only(monkeypatch):
         pathao_email="a@b.c", pathao_password_enc=crypto.encrypt("pw"),
         pathao_store_id=7, pathao_item_type="parcel",
         pathao_parcel_weight_kg=Decimal("1.5"),
-        fraudbd_api_key_enc=crypto.encrypt("fraudkey0001"),
+        bdcourier_api_key_enc=crypto.encrypt("courierkey0001"),
     )
     out = redact(row)  # type: ignore[arg-type]
     dumped = out.model_dump_json()
-    assert "EAABtoken9999" not in dumped and "fraudkey0001" not in dumped and '"pw"' not in dumped
+    assert "EAABtoken9999" not in dumped and "courierkey0001" not in dumped and '"pw"' not in dumped
     assert out.meta_capi_token_set and out.meta_capi_token_hint == "9999"
     assert not out.pathao_client_secret_set and out.pathao_client_secret_hint is None
     assert out.pathao_password_set
-    assert out.fraudbd_api_key_hint == "0001"
+    assert out.bdcourier_api_key_hint == "0001"
     assert out.encryption_available
 
 

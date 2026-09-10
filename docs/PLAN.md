@@ -111,16 +111,24 @@ staff UI, manual order variant scoping (with orders in Phase 3).
 3. `google_login_enabled` wired to `/api/auth/providers` per host (see the
    assumption in DESIGN-V2 §5).
 
-## FraudBD (done 2026-09-10)
+## Courier check: FraudBD → BDCourier (swapped 2026-09-10)
 
-Per-store key in Settings; `FRAUDBD_SANDBOX=1` in dev routes to fraudbd.com's
-sandbox. `api/services/fraudbd.py` looks a phone up, stores the answer in
-`fraud_checks` (migration 0024), reuses a check under 24 h, and pins it to the
-order (`orders.fraud_check_id`). Runs in the background for every web and
-manual order; `GET /api/orders/fraud-check?phone=` feeds the manual order
-form; `POST /api/orders/{id}/fraud-check` is the modal's refresh. UI: a
-"Success Rate" column in every order table, courier cards on top of the order
-modal and under the phone field on Manual Order.
+Per-store key in Settings. `api/services/bdcourier.py` looks a phone up,
+stores the answer in `fraud_checks` (migration 0024, `reports` column added
+in 0025), reuses a check under 24 h, and pins it to the order
+(`orders.fraud_check_id`). Runs in the background for every web and manual
+order; `GET /api/orders/fraud-check?phone=` feeds the manual order form;
+`POST /api/orders/{id}/fraud-check` is the modal's refresh. UI: a "Success
+Rate" column in every order table (now also flagging fraud reports), courier
+cards on top of the order modal and under the phone field on Manual Order.
+
+Originally built against FraudBD (fraudbd.com, done 2026-09-10), which
+returned bad data for our numbers. Replaced same-day with BDCourier
+(api.bdcourier.com): no sandbox mode (`FRAUDBD_SANDBOX` removed), bearer-token
+auth, uniform per-courier stats for every courier including Pathao (no more
+separate "rating" data type), plus a `reports` list of fraud reports per
+phone that FraudBD never provided. `store_settings.fraudbd_api_key_enc` is
+left in the table, unread, alongside the new `bdcourier_api_key_enc`.
 
 ## Phase 5 — ad attribution capture (deferred at the user's request, 2026-09-10)
 

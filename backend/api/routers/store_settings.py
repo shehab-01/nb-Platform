@@ -1,5 +1,5 @@
 """Per-store integration settings: Meta Pixel / Conversions API, Pathao,
-FraudBD. Edited from the store's own Settings page by anyone with the
+BDCourier. Edited from the store's own Settings page by anyone with the
 "settings" permission there (owners, and super admins everywhere). The store
 in the path must be the one named by X-Admin-Store: the header is what the
 membership check is made against, so the two can never disagree.
@@ -70,8 +70,8 @@ class StoreSettingsOut(BaseModel):
     pathao_store_id: int | None
     pathao_item_type: str
     pathao_parcel_weight_kg: Decimal
-    fraudbd_api_key_set: bool
-    fraudbd_api_key_hint: str | None
+    bdcourier_api_key_set: bool
+    bdcourier_api_key_hint: str | None
     encryption_available: bool
 
 
@@ -86,7 +86,7 @@ class StoreSettingsUpdate(BaseModel):
     pathao_store_id: int | None = Field(default=None, ge=0)
     pathao_item_type: ItemType = "parcel"
     pathao_parcel_weight_kg: Decimal = Field(default=Decimal("1"), ge=Decimal("0.5"), le=Decimal("10"))
-    fraudbd_api_key: str | None = Field(default=None, max_length=500)
+    bdcourier_api_key: str | None = Field(default=None, max_length=500)
 
 
 def redact(row: StoreSettings | None) -> StoreSettingsOut:
@@ -111,12 +111,12 @@ def redact(row: StoreSettings | None) -> StoreSettingsOut:
             pathao_client_id="", pathao_client_secret_set=False, pathao_client_secret_hint=None,
             pathao_email="", pathao_password_set=False, pathao_store_id=None,
             pathao_item_type="parcel", pathao_parcel_weight_kg=Decimal("1"),
-            fraudbd_api_key_set=False, fraudbd_api_key_hint=None,
+            bdcourier_api_key_set=False, bdcourier_api_key_hint=None,
             encryption_available=ok,
         )
     capi = peek(row.meta_capi_token_enc)
     secret = peek(row.pathao_client_secret_enc)
-    fraud = peek(row.fraudbd_api_key_enc)
+    fraud = peek(row.bdcourier_api_key_enc)
     return StoreSettingsOut(
         meta_pixel_id=row.meta_pixel_id,
         meta_test_event_code=row.meta_test_event_code,
@@ -130,8 +130,8 @@ def redact(row: StoreSettings | None) -> StoreSettingsOut:
         pathao_store_id=row.pathao_store_id,
         pathao_item_type=row.pathao_item_type,
         pathao_parcel_weight_kg=row.pathao_parcel_weight_kg,
-        fraudbd_api_key_set=fraud[0],
-        fraudbd_api_key_hint=fraud[1],
+        bdcourier_api_key_set=fraud[0],
+        bdcourier_api_key_hint=fraud[1],
         encryption_available=ok,
     )
 
@@ -164,7 +164,7 @@ async def put_settings(
     wants_secret = any(
         v for v in (
             payload.meta_capi_token, payload.pathao_client_secret,
-            payload.pathao_password, payload.fraudbd_api_key,
+            payload.pathao_password, payload.bdcourier_api_key,
         )
     )
     if wants_secret and not crypto.available():
@@ -186,7 +186,7 @@ async def put_settings(
     row.pathao_store_id = payload.pathao_store_id
     row.pathao_item_type = payload.pathao_item_type
     row.pathao_parcel_weight_kg = payload.pathao_parcel_weight_kg
-    row.fraudbd_api_key_enc = apply_secret(row.fraudbd_api_key_enc, payload.fraudbd_api_key)
+    row.bdcourier_api_key_enc = apply_secret(row.bdcourier_api_key_enc, payload.bdcourier_api_key)
     await session.commit()
     await session.refresh(row)
     # Services read a cached, decrypted copy; drop it so the change is live.

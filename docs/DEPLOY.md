@@ -22,7 +22,7 @@ example's value.
 |---|---|
 | `POSTGRES_PASSWORD` | TODO — `openssl rand -hex 24` |
 | `SESSION_SECRET` | TODO — `openssl rand -hex 32` |
-| `APP_ENCRYPTION_KEY` | TODO — `docker run --rm python:3.12-slim sh -c "pip -q install cryptography && python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"`. **Back it up with `.env`**: without it every stored CAPI token, Pathao password and FraudBD key is unreadable. |
+| `APP_ENCRYPTION_KEY` | TODO — `docker run --rm python:3.12-slim sh -c "pip -q install cryptography && python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"`. **Back it up with `.env`**: without it every stored CAPI token, Pathao password and BDCourier key is unreadable. |
 | `ADMIN_HOST` | TODO — `admin.naturebazar.bd` |
 | `SUPER_ADMIN_EMAILS` | TODO — your Google address(es), comma-separated; always super admin |
 | `GOOGLE_CLIENT_ID` | TODO — the OAuth client id (see §4) |
@@ -32,11 +32,11 @@ example's value.
 | `API_PORT` / `WEB_PORT` | `8001` / `8090` |
 | `UVICORN_WORKERS` | `2` |
 | `GTM_ID` | optional, else empty |
-| `DEV_LOGIN_EMAIL`, `DEV_STORE_FALLBACK`, `DEV_STORE_HOSTS`, `FRAUDBD_SANDBOX`, `SHOW_LEGACY_LANDING` | **empty** |
+| `DEV_LOGIN_EMAIL`, `DEV_STORE_FALLBACK`, `DEV_STORE_HOSTS`, `SHOW_LEGACY_LANDING` | **empty** |
 
-Per-store values (Meta pixel and CAPI token, Pathao credentials, FraudBD key,
-pictures, order prefix) are entered in the admin after the store exists —
-never in `.env`.
+Per-store values (Meta pixel and CAPI token, Pathao credentials, BDCourier
+key, pictures, order prefix) are entered in the admin after the store
+exists — never in `.env`.
 
 ```bash
 docker compose up -d --build
@@ -131,7 +131,7 @@ until a super admin approves them and assigns a store.
    prefix, template, pictures.
 2. Switch to it → Settings: Pixel ID, CAPI token, test event code; Pathao
    client id/secret/email/password → **Test connection** → pick the store id;
-   item type, weight; FraudBD key.
+   item type, weight; BDCourier key.
 3. Products: add and activate.
 4. Users: approve staff, assign to the store with a role.
 5. Verify Meta with the test event code from the live domain (browser + server

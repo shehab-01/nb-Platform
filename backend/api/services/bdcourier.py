@@ -1,22 +1,22 @@
-"""FraudBD: a customer's courier history and risk, by phone number.
+"""BDCourier: a customer's courier history and fraud reports, by phone number.
 
-POST https://fraudbd.com/api/check-courier-info with the store's API key and a
-phone number returns, per courier, how many parcels were delivered and how
-many cancelled — or, for Pathao, a customer rating instead of counts. The
-answer is written to fraud_checks and pointed at from the order, so the
-order lists and modals show it without asking again. A check younger than
-REUSE_FOR is reused for the same store and phone.
+POST https://api.bdcourier.com/courier-check with the store's API key (as a
+bearer token) and a phone number returns, per courier, how many parcels were
+delivered and how many cancelled, plus any fraud reports filed against the
+number. The answer is written to fraud_checks and pointed at from the order,
+so the order lists and modals show it without asking again. A check younger
+than REUSE_FOR is reused for the same store and phone.
 
-Sandbox: FRAUDBD_SANDBOX=1 (dev) sends every call to /api/sandbox/…, where the
-published sandbox key works and the data is deterministic by last digit.
+Replaces FraudBD (fraudbd.com), which returned bad data for our numbers.
+There is no sandbox mode: BDCourier meters by subscription, not by a
+separate test endpoint.
 
-Docs: https://fraudbd.com (API section).
+Docs: https://api.bdcourier.com (Courier Check).
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -28,9 +28,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.models import FraudCheck, Order
 from api.phone import phone_key
 
-log = logging.getLogger("fraudbd")
+log = logging.getLogger("bdcourier")
 
-BASE_URL = "https://fraudbd.com/api"
+URL = "https://api.bdcourier.com/courier-check"
 TIMEOUT_SECONDS = 12
 REUSE_FOR = timedelta(hours=24)
 
@@ -39,24 +39,12 @@ transport: httpx.AsyncBaseTransport | None = None
 _tasks: set[asyncio.Task] = set()
 
 
-def sandbox() -> bool:
-    return os.getenv("FRAUDBD_SANDBOX", "") == "1"
-
-
-def _url() -> str:
-    return f"{BASE_URL}/{'sandbox/' if sandbox() else ''}check-courier-info"
-
-
 @dataclass(frozen=True)
 class CourierSummary:
     name: str
-    data_type: str  # "delivery" | "rating"
     total: int = 0
     success: int = 0
     cancel: int = 0
-    rating: str | None = None
-    risk: str | None = None
-    message: str | None = None
     success_rate: float | None = None
     logo: str | None = None
 
@@ -64,14 +52,30 @@ class CourierSummary:
         return {
             "name": self.name,
             "logo": self.logo,
-            "data_type": self.data_type,
             "total": self.total,
             "success": self.success,
             "cancel": self.cancel,
-            "rating": self.rating,
-            "risk": self.risk,
-            "message": self.message,
             "success_rate": self.success_rate,
+        }
+
+
+@dataclass(frozen=True)
+class FraudReport:
+    id: str
+    name: str | None = None
+    details: str | None = None
+    created_at: str | None = None
+    courier_name: str | None = None
+    courier_logo: str | None = None
+
+    def as_json(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "details": self.details,
+            "created_at": self.created_at,
+            "courier_name": self.courier_name,
+            "courier_logo": self.courier_logo,
         }
 
 
@@ -81,79 +85,81 @@ class FraudResult:
     success: int = 0
     cancel: int = 0
     success_rate: Decimal | None = None
-    pathao_rating: str | None = None
-    pathao_risk: str | None = None
     couriers: tuple[CourierSummary, ...] = field(default_factory=tuple)
+    reports: tuple[FraudReport, ...] = field(default_factory=tuple)
     error: str | None = None
 
 
-class FraudbdError(Exception):
-    """FraudBD said no, or could not be reached. `message` is safe for staff."""
+class BdcourierError(Exception):
+    """BDCourier said no, or could not be reached. `message` is safe for staff."""
 
 
 def parse(body: dict) -> FraudResult:
-    """The API's response body, or FraudbdError when it reports a failure."""
-    if not body.get("status"):
-        raise FraudbdError(str(body.get("message") or "FraudBD request failed"))
+    """The API's response body, or BdcourierError when it reports a failure."""
+    if body.get("status") != "success":
+        raise BdcourierError(str(body.get("message") or "BDCourier request failed"))
     data = body.get("data") or {}
-    summaries = data.get("Summaries") or {}
     couriers: list[CourierSummary] = []
-    pathao_rating = pathao_risk = None
-    for name, raw in summaries.items():
-        if not isinstance(raw, dict):
+    for name, raw in data.items():
+        if name == "summary" or not isinstance(raw, dict):
             continue
-        data_type = str(raw.get("data_type") or "delivery")
-        rate = raw.get("success_rate")
-        summary = CourierSummary(
-            name=str(name),
-            data_type=data_type,
-            total=int(raw.get("total") or 0),
-            success=int(raw.get("success") or 0),
-            cancel=int(raw.get("cancel") or 0),
-            rating=raw.get("customer_rating"),
-            risk=raw.get("risk_level"),
-            message=raw.get("message"),
-            success_rate=float(rate) if rate not in (None, "") else None,
-            logo=str(raw["logo"]) if raw.get("logo") else None,
+        rate = raw.get("success_ratio")
+        couriers.append(
+            CourierSummary(
+                name=str(raw.get("name") or name),
+                total=int(raw.get("total_parcel") or 0),
+                success=int(raw.get("success_parcel") or 0),
+                cancel=int(raw.get("cancelled_parcel") or 0),
+                success_rate=float(rate) if rate not in (None, "") else None,
+                logo=str(raw["logo"]) if raw.get("logo") else None,
+            )
         )
-        couriers.append(summary)
-        if data_type == "rating" and name.lower() == "pathao":
-            pathao_rating, pathao_risk = summary.rating, summary.risk
-    totals = data.get("totalSummary") or {}
-    total = int(totals.get("total") or 0)
-    rate = totals.get("successRate")
+    summary = data.get("summary") or {}
+    total = int(summary.get("total_parcel") or 0)
+    rate = summary.get("success_ratio")
+    reports = tuple(
+        FraudReport(
+            id=str(r.get("id")),
+            name=r.get("name"),
+            details=r.get("details"),
+            created_at=r.get("created_at"),
+            courier_name=r.get("courierName"),
+            courier_logo=r.get("courierLogo"),
+        )
+        for r in (body.get("reports") or [])
+        if isinstance(r, dict) and r.get("id") is not None
+    )
     return FraudResult(
         total=total,
-        success=int(totals.get("success") or 0),
-        cancel=int(totals.get("cancel") or 0),
+        success=int(summary.get("success_parcel") or 0),
+        cancel=int(summary.get("cancelled_parcel") or 0),
         success_rate=Decimal(str(round(float(rate), 2))) if total and rate is not None else None,
-        pathao_rating=pathao_rating,
-        pathao_risk=pathao_risk,
         couriers=tuple(couriers),
+        reports=reports,
     )
 
 
 async def lookup(phone: str, api_key: str) -> FraudResult:
-    """One call to FraudBD. Raises FraudbdError on any failure."""
+    """One call to BDCourier. Raises BdcourierError on any failure."""
     if not api_key:
-        raise FraudbdError("FraudBD is not configured for this store")
+        raise BdcourierError("BDCourier is not configured for this store")
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS, transport=transport) as client:
             res = await client.post(
-                _url(),
-                json={"phone_number": phone},
-                headers={"api_key": api_key, "Content-Type": "application/json"},
+                URL,
+                json={"phone": phone},
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             )
     except httpx.HTTPError as exc:
-        raise FraudbdError(f"Could not reach FraudBD: {type(exc).__name__}") from exc
+        raise BdcourierError(f"Could not reach BDCourier: {type(exc).__name__}") from exc
     try:
         body = res.json()
     except ValueError:
-        raise FraudbdError(f"FraudBD answered {res.status_code} without JSON") from None
+        raise BdcourierError(f"BDCourier answered {res.status_code} without JSON") from None
     if not isinstance(body, dict):
-        raise FraudbdError("FraudBD answered with an unexpected body")
+        raise BdcourierError("BDCourier answered with an unexpected body")
     if res.status_code == 429:
-        raise FraudbdError("FraudBD rate limit reached; try again in a minute")
+        raise BdcourierError("BDCourier rate limit reached; try again in a minute")
     return parse(body)
 
 
@@ -166,9 +172,8 @@ def _row(store_id: int, phone: str, result: FraudResult) -> FraudCheck:
         success=result.success,
         cancel=result.cancel,
         success_rate=result.success_rate,
-        pathao_rating=result.pathao_rating,
-        pathao_risk=result.pathao_risk,
         couriers=[c.as_json() for c in result.couriers],
+        reports=[r.as_json() for r in result.reports],
         error=result.error,
     )
 
@@ -201,7 +206,7 @@ async def check(
             return cached
     try:
         result = await lookup(phone, api_key)
-    except FraudbdError as exc:
+    except BdcourierError as exc:
         result = FraudResult(error=str(exc))
     row = _row(store_id, phone, result)
     session.add(row)
@@ -221,12 +226,12 @@ async def _check_order(order_id: int, store_id: int, phone: str, api_key: str) -
                 order.fraud_check_id = row.id
             await session.commit()
     except Exception:  # noqa: BLE001 — a failed check must never surface as a 500
-        log.exception("FraudBD check for order %s failed", order_id)
+        log.exception("BDCourier check for order %s failed", order_id)
 
 
 def check_order_later(order_id: int, store_id: int, phone: str, api_key: str) -> None:
     """Run the check for a new order as its own task: the order response
-    never waits on FraudBD. No key, no task."""
+    never waits on BDCourier. No key, no task."""
     if not api_key:
         return
     try:

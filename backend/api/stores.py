@@ -256,7 +256,7 @@ class Integrations:
     order_prefix: str
     meta: MetaConfig
     pathao: PathaoConfig
-    fraudbd_api_key: str = ""
+    bdcourier_api_key: str = ""
 
 
 _integrations = _Cache(CACHE_TTL_SECONDS)
@@ -295,7 +295,7 @@ def integrations_from(store: Store, row: StoreSettings | None) -> Integrations:
             item_type=row.pathao_item_type or "parcel",
             unit_weight_kg=float(row.pathao_parcel_weight_kg or 1),
         ),
-        fraudbd_api_key=_decrypt(row.fraudbd_api_key_enc),
+        bdcourier_api_key=_decrypt(row.bdcourier_api_key_enc),
     )
 
 

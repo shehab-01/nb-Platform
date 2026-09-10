@@ -130,8 +130,8 @@ class Order(Base):
         ForeignKey("users.id", ondelete="SET NULL")
     )
 
-    # The FraudBD check run for this order's phone (see api.services.fraudbd);
-    # null until the check has run, or when the store has no FraudBD key.
+    # The BDCourier check run for this order's phone (see api.services.bdcourier);
+    # null until the check has run, or when the store has no BDCourier key.
     fraud_check_id: Mapped[int | None] = mapped_column(
         ForeignKey("fraud_checks.id", ondelete="SET NULL")
     )
@@ -614,7 +614,10 @@ class StoreSettings(Base):
     pathao_store_id: Mapped[int | None] = mapped_column(Integer)
     pathao_item_type: Mapped[str] = mapped_column(String(20), default="parcel")
     pathao_parcel_weight_kg: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=Decimal("1"))
+    # Superseded by bdcourier_api_key_enc; kept, unread, so old encrypted data
+    # is never dropped.
     fraudbd_api_key_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
+    bdcourier_api_key_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -622,10 +625,14 @@ class StoreSettings(Base):
 
 class FraudCheck(Base):
     """
-    One FraudBD lookup: how this phone number behaved with the couriers
-    (delivered vs cancelled parcels, and Pathao's customer rating). Kept per
-    store, since each store pays with its own key. A recent row is reused
-    rather than asking again; see api.services.fraudbd.
+    One BDCourier lookup: how this phone number behaved with the couriers
+    (delivered vs cancelled parcels) and any fraud reports filed against it.
+    Kept per store, since each store pays with its own key. A recent row is
+    reused rather than asking again; see api.services.bdcourier.
+
+    pathao_rating/pathao_risk are a leftover from the old FraudBD provider,
+    which returned a Pathao customer rating that BDCourier does not — new
+    rows leave them null.
     """
 
     __tablename__ = "fraud_checks"
@@ -644,6 +651,8 @@ class FraudCheck(Base):
     pathao_rating: Mapped[str | None] = mapped_column(String(40))
     pathao_risk: Mapped[str | None] = mapped_column(String(20))
     couriers: Mapped[list] = mapped_column(JSONB, default=list)
+    # Fraud reports filed against this phone with any courier, from BDCourier.
+    reports: Mapped[list] = mapped_column(JSONB, default=list)
     error: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (

@@ -63,7 +63,7 @@ export default function ManualOrderPage() {
 
   const [previous, setPrevious] = React.useState<PhoneLookup>(NO_LOOKUP);
   const [lookupLoading, setLookupLoading] = React.useState(false);
-  // FraudBD courier history for the typed number; null until known, and
+  // BDCourier courier history for the typed number; null until known, and
   // stays null when the store has no key (the request answers 503).
   const [fraud, setFraud] = React.useState<FraudCheck | null>(null);
   const [fraudLoading, setFraudLoading] = React.useState(false);

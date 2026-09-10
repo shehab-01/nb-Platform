@@ -25,7 +25,7 @@ from api.models import (
 from api.phone import phone_digits, phone_key
 from api.ratelimit import client_ip, drafts_limiter, orders_limiter
 from api import catalogue, stores, tenancy
-from api.services import fraudbd, meta_capi, pathao, pathao_sync
+from api.services import bdcourier, meta_capi, pathao, pathao_sync
 from api.schemas import (
     FraudCheckOut,
     BulkOrderResult,
@@ -509,7 +509,7 @@ async def create_order(
     # The customer's courier history, looked up in the background and pinned
     # to the order for the lists and the modal. Skipped without a key.
     if integrations is not None:
-        fraudbd.check_order_later(order.id, store.id, order.phone, integrations.fraudbd_api_key)
+        bdcourier.check_order_later(order.id, store.id, order.phone, integrations.bdcourier_api_key)
     return order
 
 
@@ -951,15 +951,15 @@ async def fraud_check_phone(
     """
     The customer's courier history for the manual order form, shown as soon
     as the number is typed. A check from the last 24 hours is reused; else
-    FraudBD is asked with this store's key. 503 when the store has no key.
+    BDCourier is asked with this store's key. 503 when the store has no key.
     """
     integrations = await stores.load_integrations(session, ctx.store.id)
-    if integrations is None or not integrations.fraudbd_api_key:
-        raise HTTPException(status_code=503, detail="FraudBD is not configured for this store")
+    if integrations is None or not integrations.bdcourier_api_key:
+        raise HTTPException(status_code=503, detail="BDCourier is not configured for this store")
     phone = phone.strip()
     if not phone_key(phone):
         raise HTTPException(status_code=400, detail="Not a phone number")
-    row = await fraudbd.check(session, ctx.store.id, phone, integrations.fraudbd_api_key)
+    row = await bdcourier.check(session, ctx.store.id, phone, integrations.bdcourier_api_key)
     await session.commit()
     return row
 
@@ -970,16 +970,16 @@ async def fraud_check_order(
     session: AsyncSession = Depends(get_session),
     ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
 ) -> Order:
-    """Ask FraudBD again for this order's phone (the refresh button on the
+    """Ask BDCourier again for this order's phone (the refresh button on the
     modal) and pin the new answer to the order."""
     integrations = await stores.load_integrations(session, ctx.store.id)
-    if integrations is None or not integrations.fraudbd_api_key:
-        raise HTTPException(status_code=503, detail="FraudBD is not configured for this store")
+    if integrations is None or not integrations.bdcourier_api_key:
+        raise HTTPException(status_code=503, detail="BDCourier is not configured for this store")
     order = await session.get(Order, order_id)
     if order is None or order.store_id != ctx.store.id:
         raise HTTPException(status_code=404, detail="Order not found")
-    row = await fraudbd.check(
-        session, ctx.store.id, order.phone, integrations.fraudbd_api_key, force=True
+    row = await bdcourier.check(
+        session, ctx.store.id, order.phone, integrations.bdcourier_api_key, force=True
     )
     order.fraud_check_id = row.id
     await session.commit()
@@ -1080,7 +1080,7 @@ async def create_manual_order(
     await session.commit()
     integrations = await stores.load_integrations(session, ctx.store.id)
     if integrations is not None:
-        fraudbd.check_order_later(order.id, ctx.store.id, order.phone, integrations.fraudbd_api_key)
+        bdcourier.check_order_later(order.id, ctx.store.id, order.phone, integrations.bdcourier_api_key)
     return await _get_fresh_order(session, order.id)
 
 

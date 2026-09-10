@@ -45,8 +45,8 @@ are), `docs/ARCHITECTURE-V1.md` (what we inherited), `DEV.md` (running it),
   containers bound to 127.0.0.1, `WEB_PORT=8090`, `API_PORT=8001`, compose
   project `nbplatform`. Same ports locally so v1 (`../natureBazar`, 8085/8000)
   and v2 coexist.
-- `DEV_LOGIN_EMAIL`, `DEV_STORE_FALLBACK` and `FRAUDBD_SANDBOX` are
-  development switches and must be empty in production. Live Meta or Pathao credentials never go in
+- `DEV_LOGIN_EMAIL` and `DEV_STORE_FALLBACK` are development switches and
+  must be empty in production. Live Meta or Pathao credentials never go in
   the dev `.env`.
 - Ask before anything irreversible (dropping data, cutover, changing a
   migration's meaning). Do not push or deploy unless asked.

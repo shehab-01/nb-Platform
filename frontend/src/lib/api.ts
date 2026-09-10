@@ -61,19 +61,21 @@ type ApiFraudCheck = {
   success: number;
   cancel: number;
   success_rate: string | number | null;
-  pathao_rating: string | null;
-  pathao_risk: string | null;
   couriers: {
     name: string;
     logo: string | null;
-    data_type: string;
     total: number;
     success: number;
     cancel: number;
-    rating: string | null;
-    risk: string | null;
-    message: string | null;
     success_rate: number | null;
+  }[];
+  reports: {
+    id: string;
+    name: string | null;
+    details: string | null;
+    created_at: string | null;
+    courier_name: string | null;
+    courier_logo: string | null;
   }[];
   error: string | null;
 };
@@ -87,19 +89,21 @@ function mapFraud(f: ApiFraudCheck | null | undefined): FraudCheck | null {
     success: f.success,
     cancel: f.cancel,
     successRate: f.success_rate == null ? null : Number(f.success_rate),
-    pathaoRating: f.pathao_rating,
-    pathaoRisk: f.pathao_risk,
     couriers: (f.couriers ?? []).map((c) => ({
       name: c.name,
       logo: c.logo ?? null,
-      dataType: c.data_type,
       total: c.total,
       success: c.success,
       cancel: c.cancel,
-      rating: c.rating,
-      risk: c.risk,
-      message: c.message,
       successRate: c.success_rate,
+    })),
+    reports: (f.reports ?? []).map((r) => ({
+      id: r.id,
+      name: r.name,
+      details: r.details,
+      createdAt: r.created_at,
+      courierName: r.courier_name,
+      courierLogo: r.courier_logo,
     })),
     error: f.error,
   };
@@ -1115,8 +1119,8 @@ export type StoreSettings = {
   pathaoStoreId: number | null;
   pathaoItemType: "document" | "parcel" | "fragile";
   pathaoParcelWeightKg: string;
-  fraudbdApiKeySet: boolean;
-  fraudbdApiKeyHint: string | null;
+  bdcourierApiKeySet: boolean;
+  bdcourierApiKeyHint: string | null;
   encryptionAvailable: boolean;
 };
 
@@ -1133,8 +1137,8 @@ type ApiStoreSettings = {
   pathao_store_id: number | null;
   pathao_item_type: "document" | "parcel" | "fragile";
   pathao_parcel_weight_kg: string | number;
-  fraudbd_api_key_set: boolean;
-  fraudbd_api_key_hint: string | null;
+  bdcourier_api_key_set: boolean;
+  bdcourier_api_key_hint: string | null;
   encryption_available: boolean;
 };
 
@@ -1152,8 +1156,8 @@ function mapSettings(s: ApiStoreSettings): StoreSettings {
     pathaoStoreId: s.pathao_store_id,
     pathaoItemType: s.pathao_item_type,
     pathaoParcelWeightKg: String(s.pathao_parcel_weight_kg),
-    fraudbdApiKeySet: s.fraudbd_api_key_set,
-    fraudbdApiKeyHint: s.fraudbd_api_key_hint,
+    bdcourierApiKeySet: s.bdcourier_api_key_set,
+    bdcourierApiKeyHint: s.bdcourier_api_key_hint,
     encryptionAvailable: s.encryption_available,
   };
 }
@@ -1170,7 +1174,7 @@ export type StoreSettingsInput = {
   pathaoStoreId: number | null;
   pathaoItemType: "document" | "parcel" | "fragile";
   pathaoParcelWeightKg: string;
-  fraudbdApiKey?: string;
+  bdcourierApiKey?: string;
 };
 
 export async function getStoreSettings(storeId: number): Promise<StoreSettings> {
@@ -1195,7 +1199,7 @@ export async function saveStoreSettings(
         pathao_store_id: input.pathaoStoreId,
         pathao_item_type: input.pathaoItemType,
         pathao_parcel_weight_kg: input.pathaoParcelWeightKg,
-        fraudbd_api_key: input.fraudbdApiKey ?? null,
+        bdcourier_api_key: input.bdcourierApiKey ?? null,
       }),
     })
   );
@@ -1259,10 +1263,10 @@ export async function testPathao(storeId: number): Promise<PathaoTest> {
   };
 }
 
-// ---- FraudBD ----
+// ---- BDCourier ----
 
 /** The customer's courier history for a phone (manual order form). 503
- * when the store has no FraudBD key: callers treat that as "no data". */
+ * when the store has no BDCourier key: callers treat that as "no data". */
 export async function getFraudCheck(phone: string): Promise<FraudCheck | null> {
   const data = await request<ApiFraudCheck>(
     `/api/orders/fraud-check?phone=${encodeURIComponent(phone)}`
@@ -1270,7 +1274,7 @@ export async function getFraudCheck(phone: string): Promise<FraudCheck | null> {
   return mapFraud(data);
 }
 
-/** Ask FraudBD again for an order's phone and pin the answer to the order. */
+/** Ask BDCourier again for an order's phone and pin the answer to the order. */
 export async function recheckOrderFraud(orderId: number): Promise<Order> {
   return mapOrder(
     await request<ApiOrder>(`/api/orders/${orderId}/fraud-check`, { method: "POST" })

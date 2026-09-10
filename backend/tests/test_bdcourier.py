@@ -1,4 +1,4 @@
-"""api.services.fraudbd: parsing FraudBD's answers and the HTTP call.
+"""api.services.bdcourier: parsing BDCourier's answers and the HTTP call.
 Run from backend/: python -m pytest tests -q"""
 import asyncio
 from decimal import Decimal
@@ -6,94 +6,93 @@ from decimal import Decimal
 import httpx
 import pytest
 
-from api.services import fraudbd
+from api.services import bdcourier
 
-RATING = {
-    "status": True,
-    "message": "ok",
+RESPONSE = {
+    "status": "success",
     "data": {
-        "Summaries": {
-            "Pathao": {"logo": "https://example.com/pathao-logo.png",
-                        "data_type": "rating", "customer_rating": "good_customer",
-                        "risk_level": "low", "message": "Good", "success_rate": 85,
-                        "total": 0, "success": 0, "cancel": 0},
-            "Steadfast": {"data_type": "delivery", "total": 8, "success": 7, "cancel": 1},
+        "pathao": {
+            "name": "Pathao", "logo": "https://example.com/pathao-logo.png",
+            "total_parcel": 8, "success_parcel": 7, "cancelled_parcel": 1, "success_ratio": 87.5,
         },
-        "totalSummary": {"total": 8, "success": 7, "cancel": 1, "successRate": 87.5, "cancelRate": 12.5},
+        "steadfast": {
+            "name": "SteadFast", "total_parcel": 2, "success_parcel": 1,
+            "cancelled_parcel": 1, "success_ratio": 50,
+        },
+        "summary": {
+            "total_parcel": 10, "success_parcel": 8, "cancelled_parcel": 2, "success_ratio": 80,
+        },
     },
+    "reports": [
+        {
+            "id": "abc123", "name": "John Doe", "details": "Fraud reported by merchant",
+            "created_at": "2024-01-01T00:00:00.000000Z",
+            "courierLogo": "https://example.com/steadfast-logo.png", "courierName": "SteadFast",
+        }
+    ],
 }
 
 
-def test_parse_rating_and_delivery_mix():
-    r = fraudbd.parse(RATING)
-    assert (r.total, r.success, r.cancel) == (8, 7, 1)
-    assert r.success_rate == Decimal("87.50")
-    assert r.pathao_rating == "good_customer" and r.pathao_risk == "low"
+def test_parse_couriers_and_summary():
+    r = bdcourier.parse(RESPONSE)
+    assert (r.total, r.success, r.cancel) == (10, 8, 2)
+    assert r.success_rate == Decimal("80.00")
     names = {c.name: c for c in r.couriers}
-    assert names["Pathao"].data_type == "rating" and names["Pathao"].success_rate == 85
-    assert names["Steadfast"].success == 7
+    assert names["Pathao"].success_rate == 87.5
     assert names["Pathao"].logo == "https://example.com/pathao-logo.png"
-    assert names["Pathao"].as_json()["logo"] == "https://example.com/pathao-logo.png"
+    assert names["Pathao"].as_json()["success"] == 7
+    assert names["SteadFast"].cancel == 1
+    assert len(r.reports) == 1
+    assert r.reports[0].name == "John Doe" and r.reports[0].courier_name == "SteadFast"
+    assert r.reports[0].as_json()["id"] == "abc123"
 
 
 def test_parse_new_customer_has_no_rate():
-    body = {"status": True, "data": {"Summaries": {}, "totalSummary": {"total": 0, "successRate": 0}}}
-    r = fraudbd.parse(body)
-    assert r.total == 0 and r.success_rate is None and r.couriers == ()
+    body = {"status": "success", "data": {"summary": {"total_parcel": 0, "success_ratio": 0}}}
+    r = bdcourier.parse(body)
+    assert r.total == 0 and r.success_rate is None and r.couriers == () and r.reports == ()
 
 
 def test_parse_failure_raises():
-    with pytest.raises(fraudbd.FraudbdError, match="Usage limit"):
-        fraudbd.parse({"status": False, "message": "Usage limit (daily) reached.", "data": None})
+    with pytest.raises(bdcourier.BdcourierError, match="Usage limit"):
+        bdcourier.parse({"status": "error", "message": "Usage limit (daily) reached."})
 
 
 def test_lookup_sends_key_and_phone(monkeypatch):
-    monkeypatch.setenv("FRAUDBD_SANDBOX", "1")
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        return httpx.Response(200, json=RATING)
+        return httpx.Response(200, json=RESPONSE)
 
-    monkeypatch.setattr(fraudbd, "transport", httpx.MockTransport(handler))
-    r = asyncio.run(fraudbd.lookup("01712345678", "k3y"))
-    assert r.success == 7
+    monkeypatch.setattr(bdcourier, "transport", httpx.MockTransport(handler))
+    r = asyncio.run(bdcourier.lookup("01712345678", "k3y"))
+    assert r.success == 8
     req = seen[0]
-    assert req.url.path == "/api/sandbox/check-courier-info"
-    assert req.headers["api_key"] == "k3y"
-    assert httpx.Response(200, content=req.content).json() == {"phone_number": "01712345678"}
-
-
-def test_lookup_production_url(monkeypatch):
-    monkeypatch.delenv("FRAUDBD_SANDBOX", raising=False)
-    seen: list[httpx.Request] = []
-    monkeypatch.setattr(
-        fraudbd, "transport",
-        httpx.MockTransport(lambda r: (seen.append(r), httpx.Response(200, json=RATING))[1]),
-    )
-    asyncio.run(fraudbd.lookup("01712345678", "k"))
-    assert seen[0].url.path == "/api/check-courier-info"
+    assert req.url == "https://api.bdcourier.com/courier-check"
+    assert req.headers["authorization"] == "Bearer k3y"
+    assert httpx.Response(200, content=req.content).json() == {"phone": "01712345678"}
 
 
 def test_lookup_errors(monkeypatch):
-    monkeypatch.setattr(fraudbd, "transport", httpx.MockTransport(
-        lambda r: httpx.Response(429, json={"status": False, "message": "slow down"})))
-    with pytest.raises(fraudbd.FraudbdError, match="rate limit"):
-        asyncio.run(fraudbd.lookup("01712345678", "k"))
+    monkeypatch.setattr(bdcourier, "transport", httpx.MockTransport(
+        lambda r: httpx.Response(429, json={"status": "error", "message": "slow down"})))
+    with pytest.raises(bdcourier.BdcourierError, match="rate limit"):
+        asyncio.run(bdcourier.lookup("01712345678", "k"))
 
     def boom(request):
         raise httpx.ConnectError("down")
 
-    monkeypatch.setattr(fraudbd, "transport", httpx.MockTransport(boom))
-    with pytest.raises(fraudbd.FraudbdError, match="Could not reach"):
-        asyncio.run(fraudbd.lookup("01712345678", "k"))
-    with pytest.raises(fraudbd.FraudbdError, match="not configured"):
-        asyncio.run(fraudbd.lookup("01712345678", ""))
+    monkeypatch.setattr(bdcourier, "transport", httpx.MockTransport(boom))
+    with pytest.raises(bdcourier.BdcourierError, match="Could not reach"):
+        asyncio.run(bdcourier.lookup("01712345678", "k"))
+    with pytest.raises(bdcourier.BdcourierError, match="not configured"):
+        asyncio.run(bdcourier.lookup("01712345678", ""))
 
 
 def test_check_order_later_without_key_is_noop():
     async def scenario():
-        fraudbd.check_order_later(1, 1, "01712345678", "")
-        assert not fraudbd._tasks
+        bdcourier.check_order_later(1, 1, "01712345678", "")
+        assert not bdcourier._tasks
 
     asyncio.run(scenario())

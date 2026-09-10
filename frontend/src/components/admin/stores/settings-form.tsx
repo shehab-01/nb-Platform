@@ -28,10 +28,10 @@ type Draft = {
   pathaoStoreId: string;
   pathaoItemType: ItemType;
   pathaoParcelWeightKg: string;
-  fraudbdApiKey?: string;
+  bdcourierApiKey?: string;
 };
 
-/** The store's integrations: Meta, Pathao, FraudBD. Secrets are write-only. */
+/** The store's integrations: Meta, Pathao, BDCourier. Secrets are write-only. */
 export function SettingsForm({
   storeId,
   settings,
@@ -101,7 +101,7 @@ export function SettingsForm({
         pathaoStoreId: d.pathaoStoreId === "" ? null : Number(d.pathaoStoreId),
         pathaoItemType: d.pathaoItemType,
         pathaoParcelWeightKg: d.pathaoParcelWeightKg,
-        fraudbdApiKey: d.fraudbdApiKey,
+        bdcourierApiKey: d.bdcourierApiKey,
       });
       setCurrent(saved);
       // Secrets were written (or cleared); the boxes go back to "keep".
@@ -110,7 +110,7 @@ export function SettingsForm({
         metaCapiToken: undefined,
         pathaoClientSecret: undefined,
         pathaoPassword: undefined,
-        fraudbdApiKey: undefined,
+        bdcourierApiKey: undefined,
       }));
       setStatus({ ok: true, text: "Saved" });
       setDirty(false);
@@ -212,9 +212,9 @@ export function SettingsForm({
         </Field>
       </Section>
 
-      <Section title="FraudBD">
+      <Section title="BDCourier">
         <Field label="API key" htmlFor="fraud">
-          <SecretInput id="fraud" isSet={current.fraudbdApiKeySet} hint={current.fraudbdApiKeyHint} value={d.fraudbdApiKey} onChange={(v) => set("fraudbdApiKey", v)} />
+          <SecretInput id="fraud" isSet={current.bdcourierApiKeySet} hint={current.bdcourierApiKeyHint} value={d.bdcourierApiKey} onChange={(v) => set("bdcourierApiKey", v)} />
         </Field>
       </Section>
 

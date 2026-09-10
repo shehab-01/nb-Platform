@@ -248,7 +248,7 @@ export function OrderDetailsModal({
 
         <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
           {/* The customer's courier history, first and full width: it is
-              what decides how the call goes. Refresh asks FraudBD again. */}
+              what decides how the call goes. Refresh asks BDCourier again. */}
           {order.fraud && (
             <FraudCards
               fraud={order.fraud}

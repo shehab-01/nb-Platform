@@ -65,7 +65,21 @@ def _store_hosts() -> dict[str, list[str]]:
     return out
 
 
+def allowed(environ: dict, argv: list[str]) -> bool:
+    """Only a development server may be seeded: one with the dev switches on,
+    or an explicit --force. A production .env has both switches empty, so an
+    accidental `python -m scripts.seed_dev` there does nothing."""
+    dev = environ.get("DEV_STORE_FALLBACK") == "1" and bool(environ.get("DEV_LOGIN_EMAIL"))
+    return dev or "--force" in argv
+
+
 async def seed() -> None:
+    if not allowed(dict(os.environ), sys.argv[1:]):
+        sys.exit(
+            "Refusing to seed: this is not a development server "
+            "(DEV_STORE_FALLBACK=1 and DEV_LOGIN_EMAIL are not both set). "
+            "Pass --force if you really mean it."
+        )
     email = settings.dev_login_email or next(iter(sorted(settings.super_admin_emails)), "")
     if not email:
         sys.exit("Set DEV_LOGIN_EMAIL (or SUPER_ADMIN_EMAILS) before seeding")

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import { notFound } from "next/navigation";
 
 import "@/templates/classic/landing.css";
 import { getStore, getStoreDirectory, storeHeaders, themeVars } from "@/lib/store";
@@ -48,14 +49,15 @@ export default async function Home() {
 }
 
 /** No store answers on this hostname. In development the seeded stores are
- * listed with links; in production the directory is empty and this is just a
- * plain "nothing here". */
+ * listed with links; in production (empty directory) it is a real 404 with
+ * the plain not-found page, so a stray hostname learns nothing. */
 async function NoStore() {
+  const directory = await getStoreDirectory();
+  if (directory.length === 0) notFound();
   const h = await headers();
   const requested = h.get("x-store-host") || h.get("host") || "";
   const port = (h.get("host") ?? "").split(":")[1];
   const suffix = port ? `:${port}` : "";
-  const directory = await getStoreDirectory();
   return (
     <main className="nb-landing">
       <div className="nb-stack">
@@ -63,7 +65,7 @@ async function NoStore() {
           <h1>No store at {requested || "this address"}</h1>
           {directory.length > 0 ? (
             <>
-              <p>Stores on this platform:</p>
+              <p>Stores on this platform (development only):</p>
               <ul style={{ textAlign: "left", lineHeight: 1.9 }}>
                 {directory.map((s) => (
                   <li key={s.slug}>

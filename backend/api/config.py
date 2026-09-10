@@ -21,12 +21,6 @@ class Settings:
     db_pool_size: int = int(os.getenv("DB_POOL_SIZE", "10"))
     db_max_overflow: int = int(os.getenv("DB_MAX_OVERFLOW", "10"))
 
-    cors_origins: list[str] = [
-        origin.strip()
-        for origin in os.getenv("FRONTEND_ORIGIN", "http://localhost:3000").split(",")
-        if origin.strip()
-    ]
-
     # The fallback product, used only if the products table is empty — every
     # order normally prices against the active row (see api.routers.products).
     # Price is decided server-side either way; client-sent totals are never

@@ -24,7 +24,6 @@ example's value.
 | `SESSION_SECRET` | TODO — `openssl rand -hex 32` |
 | `APP_ENCRYPTION_KEY` | TODO — `docker run --rm python:3.12-slim sh -c "pip -q install cryptography && python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"`. **Back it up with `.env`**: without it every stored CAPI token, Pathao password and FraudBD key is unreadable. |
 | `ADMIN_HOST` | TODO — `admin.naturebazar.bd` |
-| `FRONTEND_ORIGIN` | TODO — `https://admin.naturebazar.bd` |
 | `SUPER_ADMIN_EMAILS` | TODO — your Google address(es), comma-separated; always super admin |
 | `GOOGLE_CLIENT_ID` | TODO — the OAuth client id (see §4) |
 | `COOKIE_SECURE` | `true` |

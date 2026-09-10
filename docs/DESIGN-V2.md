@@ -332,9 +332,9 @@ exists; demo stores are dev-only and never seeded in production.
   per-store figures.
 - **Cookies**: `_fbp/_fbc` are per hostname already. `nb_session` is set on
   the admin host only. The dev `__store` cookie is dev-only.
-- **CORS `FRONTEND_ORIGIN`** is irrelevant while everything is same-origin
-  through the Next rewrite; keep it that way for arbitrary domains rather
-  than opening CORS.
+- **CORS**: removed (2026-09-10). Every browser call is same-origin through
+  the Next `/api` rewrite whatever the store domain, and the API port is
+  loopback-only, so there is no allow-list to keep in step with store domains.
 - **Reverse proxy**: OpenLiteSpeed must forward the original `Host` to
   127.0.0.1:8090 unchanged (no host rewrite) and keep `X-Forwarded-For`.
   Arbitrary customer domains need a wildcard/catch-all vhost and per-domain

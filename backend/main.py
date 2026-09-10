@@ -3,7 +3,6 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
@@ -51,13 +50,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="nbPlatform API", version="2.0.0-dev", lifespan=lifespan)
 
 app.add_middleware(monitoring.TrafficMiddleware)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# No CORS middleware on purpose: every browser call reaches this API through
+# the web app's same-origin /api rewrite, whatever the store's domain, and the
+# API port is bound to 127.0.0.1. An allow-list would only have to be kept in
+# step with every store domain for requests that never happen.
 
 app.include_router(auth_router, prefix="/api")
 app.include_router(orders_router, prefix="/api")

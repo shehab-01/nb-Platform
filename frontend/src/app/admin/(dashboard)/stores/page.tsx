@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 
 import { useAuth } from "@/components/admin/auth-context";
@@ -24,6 +24,7 @@ import { templateInfo } from "@/templates/catalog";
  */
 export default function StoresPage() {
   const { isSuperAdmin } = useAuth();
+  const router = useRouter();
   const [stores, setStores] = React.useState<Store[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -54,11 +55,11 @@ export default function StoresPage() {
           Every storefront on the platform, the domains it answers on and the
           template it renders with. Staff access is assigned under Users.
         </p>
-        <Button size="sm" asChild>
-          <Link href="/admin/stores/new">
-            <Plus className="size-4" />
-            New store
-          </Link>
+        {/* Not asChild+Link: the global anchor colour would override the
+            button's text colour and hide the label. */}
+        <Button size="sm" onClick={() => router.push("/admin/stores/new")}>
+          <Plus className="size-4" />
+          New store
         </Button>
       </div>
 
@@ -122,8 +123,12 @@ export default function StoresPage() {
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button variant="outline" size="sm" asChild>
-                      <Link href={`/admin/stores/${store.id}`}>Edit</Link>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => router.push(`/admin/stores/${store.id}`)}
+                    >
+                      Edit
                     </Button>
                   </TableCell>
                 </TableRow>

@@ -1,5 +1,6 @@
 import { request, requestForm, requestVoid } from "@/lib/http";
 import type {
+  FraudCheck,
   Order,
   OrderItem,
   OrderSource,
@@ -50,7 +51,59 @@ type ApiOrder = {
     created_by_nickname: string | null;
   }[];
   items: ApiOrderItem[];
+  fraud_check: ApiFraudCheck | null;
 };
+
+type ApiFraudCheck = {
+  id: number;
+  checked_at: string;
+  total: number;
+  success: number;
+  cancel: number;
+  success_rate: string | number | null;
+  pathao_rating: string | null;
+  pathao_risk: string | null;
+  couriers: {
+    name: string;
+    logo: string | null;
+    data_type: string;
+    total: number;
+    success: number;
+    cancel: number;
+    rating: string | null;
+    risk: string | null;
+    message: string | null;
+    success_rate: number | null;
+  }[];
+  error: string | null;
+};
+
+function mapFraud(f: ApiFraudCheck | null | undefined): FraudCheck | null {
+  if (!f) return null;
+  return {
+    id: f.id,
+    checkedAt: f.checked_at,
+    total: f.total,
+    success: f.success,
+    cancel: f.cancel,
+    successRate: f.success_rate == null ? null : Number(f.success_rate),
+    pathaoRating: f.pathao_rating,
+    pathaoRisk: f.pathao_risk,
+    couriers: (f.couriers ?? []).map((c) => ({
+      name: c.name,
+      logo: c.logo ?? null,
+      dataType: c.data_type,
+      total: c.total,
+      success: c.success,
+      cancel: c.cancel,
+      rating: c.rating,
+      risk: c.risk,
+      message: c.message,
+      successRate: c.success_rate,
+    })),
+    error: f.error,
+  };
+}
 
 type ApiOrderItem = {
   id: number;
@@ -119,6 +172,7 @@ function mapOrder(order: ApiOrder): Order {
     pathaoDeliveryFee: order.pathao_delivery_fee ?? null,
     pathaoSentAt: order.pathao_sent_at ?? null,
     pathaoTrackingUrl: order.pathao_tracking_url ?? null,
+    fraud: mapFraud(order.fraud_check),
     items: (order.items ?? []).map(
       (item): OrderItem => ({
         id: item.id,
@@ -1167,4 +1221,56 @@ export async function uploadStoreImage(
 /** Back to the template's default picture for `key`. */
 export async function resetStoreImage(storeId: number, key: string): Promise<StoreContent> {
   return request<StoreContent>(`/api/stores/${storeId}/content/${key}`, { method: "DELETE" });
+}
+
+// ---- Pathao connection test (saved credentials) ----
+
+export type PathaoTest = {
+  enabled: boolean;
+  sandbox: boolean;
+  baseUrl: string;
+  storeId: number;
+  stores: { id: number; name: string; address: string }[];
+  error: string | null;
+};
+
+export async function testPathao(storeId: number): Promise<PathaoTest> {
+  const r = await request<{
+    enabled: boolean;
+    sandbox: boolean;
+    base_url: string;
+    store_id: number;
+    stores: Record<string, unknown>[];
+    error: string | null;
+  }>(`/api/stores/${storeId}/settings/pathao-test`, { method: "POST" });
+  return {
+    enabled: r.enabled,
+    sandbox: r.sandbox,
+    baseUrl: r.base_url,
+    storeId: r.store_id,
+    stores: r.stores.map((s) => ({
+      id: Number(s.store_id ?? s.id ?? 0),
+      name: String(s.store_name ?? s.name ?? ""),
+      address: String(s.store_address ?? s.address ?? ""),
+    })),
+    error: r.error,
+  };
+}
+
+// ---- FraudBD ----
+
+/** The customer's courier history for a phone (manual order form). 503
+ * when the store has no FraudBD key: callers treat that as "no data". */
+export async function getFraudCheck(phone: string): Promise<FraudCheck | null> {
+  const data = await request<ApiFraudCheck>(
+    `/api/orders/fraud-check?phone=${encodeURIComponent(phone)}`
+  );
+  return mapFraud(data);
+}
+
+/** Ask FraudBD again for an order's phone and pin the answer to the order. */
+export async function recheckOrderFraud(orderId: number): Promise<Order> {
+  return mapOrder(
+    await request<ApiOrder>(`/api/orders/${orderId}/fraud-check`, { method: "POST" })
+  );
 }

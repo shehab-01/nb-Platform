@@ -10,6 +10,7 @@ from api.auth import get_current_user
 from api.config import settings
 from api.db import get_session
 from api.models import (
+    FraudCheck,
     Order,
     OrderEvent,
     OrderItem,
@@ -24,8 +25,9 @@ from api.models import (
 from api.phone import phone_digits, phone_key
 from api.ratelimit import client_ip, drafts_limiter, orders_limiter
 from api import catalogue, stores, tenancy
-from api.services import meta_capi, pathao, pathao_sync
+from api.services import fraudbd, meta_capi, pathao, pathao_sync
 from api.schemas import (
+    FraudCheckOut,
     BulkOrderResult,
     BulkOrderUpdate,
     BulkSkipped,
@@ -498,6 +500,10 @@ async def create_order(
             # sides of the Purchase deduplicate against one product.
             sku=product.sku,
         )
+    # The customer's courier history, looked up in the background and pinned
+    # to the order for the lists and the modal. Skipped without a key.
+    if integrations is not None:
+        fraudbd.check_order_later(order.id, store.id, order.phone, integrations.fraudbd_api_key)
     return order
 
 
@@ -930,6 +936,50 @@ async def lookup_by_phone(
     return PhoneLookupOut(phone=key, orders=placed, incomplete=abandoned)
 
 
+@router.get("/fraud-check", response_model=FraudCheckOut)
+async def fraud_check_phone(
+    phone: str = Query(min_length=6, max_length=32),
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
+) -> FraudCheck:
+    """
+    The customer's courier history for the manual order form, shown as soon
+    as the number is typed. A check from the last 24 hours is reused; else
+    FraudBD is asked with this store's key. 503 when the store has no key.
+    """
+    integrations = await stores.load_integrations(session, ctx.store.id)
+    if integrations is None or not integrations.fraudbd_api_key:
+        raise HTTPException(status_code=503, detail="FraudBD is not configured for this store")
+    phone = phone.strip()
+    if not phone_key(phone):
+        raise HTTPException(status_code=400, detail="Not a phone number")
+    row = await fraudbd.check(session, ctx.store.id, phone, integrations.fraudbd_api_key)
+    await session.commit()
+    return row
+
+
+@router.post("/{order_id}/fraud-check", response_model=OrderOut)
+async def fraud_check_order(
+    order_id: int,
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
+) -> Order:
+    """Ask FraudBD again for this order's phone (the refresh button on the
+    modal) and pin the new answer to the order."""
+    integrations = await stores.load_integrations(session, ctx.store.id)
+    if integrations is None or not integrations.fraudbd_api_key:
+        raise HTTPException(status_code=503, detail="FraudBD is not configured for this store")
+    order = await session.get(Order, order_id)
+    if order is None or order.store_id != ctx.store.id:
+        raise HTTPException(status_code=404, detail="Order not found")
+    row = await fraudbd.check(
+        session, ctx.store.id, order.phone, integrations.fraudbd_api_key, force=True
+    )
+    order.fraud_check_id = row.id
+    await session.commit()
+    return await _get_fresh_order(session, order_id)
+
+
 @router.post("/manual", response_model=OrderOut, status_code=201)
 async def create_manual_order(
     payload: ManualOrderCreate,
@@ -1017,6 +1067,9 @@ async def create_manual_order(
         )
     )
     await session.commit()
+    integrations = await stores.load_integrations(session, ctx.store.id)
+    if integrations is not None:
+        fraudbd.check_order_later(order.id, ctx.store.id, order.phone, integrations.fraudbd_api_key)
     return await _get_fresh_order(session, order.id)
 
 

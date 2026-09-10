@@ -13,7 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { StoreSettings, StoreSettingsInput } from "@/lib/api";
+import { testPathao, type PathaoTest, type StoreSettings, type StoreSettingsInput } from "@/lib/api";
 
 type ItemType = StoreSettings["pathaoItemType"];
 
@@ -33,9 +33,11 @@ type Draft = {
 
 /** The store's integrations: Meta, Pathao, FraudBD. Secrets are write-only. */
 export function SettingsForm({
+  storeId,
   settings,
   onSave,
 }: {
+  storeId: number;
   settings: StoreSettings;
   onSave: (input: StoreSettingsInput) => Promise<StoreSettings>;
 }) {
@@ -51,8 +53,33 @@ export function SettingsForm({
   }));
   const [busy, setBusy] = React.useState(false);
   const [status, setStatus] = React.useState<{ ok: boolean; text: string } | null>(null);
-  const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
+  const [testing, setTesting] = React.useState(false);
+  const [test, setTest] = React.useState<PathaoTest | null>(null);
+  // Edits since the last save: the test runs against saved credentials only.
+  const [dirty, setDirty] = React.useState(false);
+  const set = <K extends keyof Draft>(key: K, value: Draft[K]) => {
     setD((prev) => ({ ...prev, [key]: value }));
+    setDirty(true);
+  };
+
+  const runTest = async () => {
+    setTesting(true);
+    setTest(null);
+    try {
+      setTest(await testPathao(storeId));
+    } catch (err) {
+      setTest({
+        enabled: false,
+        sandbox: true,
+        baseUrl: "",
+        storeId: 0,
+        stores: [],
+        error: err instanceof Error ? err.message : "Test failed",
+      });
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const weight = Number(d.pathaoParcelWeightKg);
   const valid = weight >= 0.5 && weight <= 10 && (d.pathaoStoreId === "" || /^\d+$/.test(d.pathaoStoreId));
@@ -86,6 +113,7 @@ export function SettingsForm({
         fraudbdApiKey: undefined,
       }));
       setStatus({ ok: true, text: "Saved" });
+      setDirty(false);
     } catch (err) {
       setStatus({ ok: false, text: err instanceof Error ? err.message : "Save failed" });
     } finally {
@@ -135,6 +163,52 @@ export function SettingsForm({
         </Field>
         <Field label="Parcel weight (kg)" htmlFor="p-weight">
           <Input id="p-weight" type="number" step="0.5" min={0.5} max={10} value={d.pathaoParcelWeightKg} onChange={(e) => set("pathaoParcelWeightKg", e.target.value)} />
+        </Field>
+        <Field label="">
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-3">
+              <Button type="button" variant="outline" size="sm" disabled={testing} onClick={runTest}>
+                {testing ? "Testing…" : "Test connection"}
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                {dirty ? "Save first: the test uses saved credentials." : "Logs in to Pathao with the saved credentials."}
+              </span>
+            </div>
+            {test && (
+              <div className="rounded-lg border p-3 text-sm">
+                {test.error ? (
+                  <p className="text-destructive">{test.error}</p>
+                ) : (
+                  <p className="text-muted-foreground">
+                    Connected to Pathao {test.sandbox ? "sandbox" : "live"}.
+                    {test.stores.length > 0
+                      ? " Merchant stores on this account:"
+                      : " The account has no merchant stores yet."}
+                  </p>
+                )}
+                {test.stores.length > 0 && (
+                  <ul className="mt-2 flex flex-col gap-1">
+                    {test.stores.map((s) => (
+                      <li key={s.id} className="flex items-center justify-between gap-3">
+                        <span>
+                          <span className="font-medium">{s.name}</span>{" "}
+                          <span className="text-muted-foreground">#{s.id}</span>
+                          {s.address && <span className="text-muted-foreground"> · {s.address}</span>}
+                        </span>
+                        {String(s.id) === d.pathaoStoreId ? (
+                          <span className="text-xs text-muted-foreground">selected</span>
+                        ) : (
+                          <Button type="button" variant="ghost" size="sm" onClick={() => set("pathaoStoreId", String(s.id))}>
+                            Use this id
+                          </Button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
         </Field>
       </Section>
 

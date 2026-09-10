@@ -130,7 +130,14 @@ class Order(Base):
         ForeignKey("users.id", ondelete="SET NULL")
     )
 
+    # The FraudBD check run for this order's phone (see api.services.fraudbd);
+    # null until the check has run, or when the store has no FraudBD key.
+    fraud_check_id: Mapped[int | None] = mapped_column(
+        ForeignKey("fraud_checks.id", ondelete="SET NULL")
+    )
+
     store: Mapped["Store"] = relationship(lazy="joined")
+    fraud_check: Mapped["FraudCheck | None"] = relationship(lazy="joined")
     assignee: Mapped["User | None"] = relationship(
         lazy="joined", foreign_keys=[assigned_to]
     )
@@ -610,4 +617,35 @@ class StoreSettings(Base):
     fraudbd_api_key_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class FraudCheck(Base):
+    """
+    One FraudBD lookup: how this phone number behaved with the couriers
+    (delivered vs cancelled parcels, and Pathao's customer rating). Kept per
+    store, since each store pays with its own key. A recent row is reused
+    rather than asking again; see api.services.fraudbd.
+    """
+
+    __tablename__ = "fraud_checks"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
+    phone_key: Mapped[str] = mapped_column(String(20))
+    phone: Mapped[str] = mapped_column(String(32))
+    checked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    success: Mapped[int] = mapped_column(Integer, default=0)
+    cancel: Mapped[int] = mapped_column(Integer, default=0)
+    success_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    pathao_rating: Mapped[str | None] = mapped_column(String(40))
+    pathao_risk: Mapped[str | None] = mapped_column(String(20))
+    couriers: Mapped[list] = mapped_column(JSONB, default=list)
+    error: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        Index("ix_fraud_checks_store_phone_checked", "store_id", "phone_key", "checked_at"),
     )

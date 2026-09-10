@@ -105,12 +105,24 @@ staff UI, manual order variant scoping (with orders in Phase 3).
 1. ~~`PathaoConfig` per store; `integration_tokens` keyed `(store_id,
    provider)`; `pathao_sync` iterates active stores with Pathao configured;
    send/refresh use the store's settings, item type and weight~~.
-2. ~~`/api/system/pathao` for the selected store~~. Still to do: a "Test
-   connection" button on the Settings page.
+2. ~~`/api/system/pathao` for the selected store; "Test connection" on the
+   Settings page (`POST /api/stores/{id}/settings/pathao-test`, saved
+   credentials, lists merchant stores with a fill-in)~~ done 2026-09-10.
 3. `google_login_enabled` wired to `/api/auth/providers` per host (see the
    assumption in DESIGN-V2 §5).
 
-## Phase 5 — ad attribution capture
+## FraudBD (done 2026-09-10)
+
+Per-store key in Settings; `FRAUDBD_SANDBOX=1` in dev routes to fraudbd.com's
+sandbox. `api/services/fraudbd.py` looks a phone up, stores the answer in
+`fraud_checks` (migration 0024), reuses a check under 24 h, and pins it to the
+order (`orders.fraud_check_id`). Runs in the background for every web and
+manual order; `GET /api/orders/fraud-check?phone=` feeds the manual order
+form; `POST /api/orders/{id}/fraud-check` is the modal's refresh. UI: a
+"Success Rate" column in every order table, courier cards on top of the order
+modal and under the phone field on Manual Order.
+
+## Phase 5 — ad attribution capture (deferred at the user's request, 2026-09-10)
 
 1. Migration: attribution columns on `visits` and `orders`, `orders.visit_id`.
 2. Bootstrap writes `nb_attr` first-touch cookie; `/api/track` PageView

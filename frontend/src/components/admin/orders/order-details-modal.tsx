@@ -4,6 +4,7 @@ import * as React from "react";
 import { ArrowLeft, ExternalLink, Phone } from "lucide-react";
 
 import { useAuth } from "@/components/admin/auth-context";
+import { FraudCards } from "@/components/admin/orders/fraud-summary";
 import { OrderTags } from "@/components/admin/orders/order-tags";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,7 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { updateOrder } from "@/lib/api";
+import { recheckOrderFraud, updateOrder } from "@/lib/api";
 import {
   CHANGE_STATUS_OPTIONS,
   ORDER_SOURCE_LABELS,
@@ -70,6 +71,7 @@ export function OrderDetailsModal({
   const [discount, setDiscount] = React.useState("");
   const [editName, setEditName] = React.useState("");
   const [editPhone, setEditPhone] = React.useState("");
+  const [rechecking, setRechecking] = React.useState(false);
   const [editAddress, setEditAddress] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -244,7 +246,26 @@ export function OrderDetailsModal({
           </div>
         </DialogHeader>
 
-        <div className="grid flex-1 gap-6 overflow-y-auto p-6 lg:grid-cols-[2fr_1fr]">
+        <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
+          {/* The customer's courier history, first and full width: it is
+              what decides how the call goes. Refresh asks FraudBD again. */}
+          {order.fraud && (
+            <FraudCards
+              fraud={order.fraud}
+              onRefresh={async () => {
+                setRechecking(true);
+                try {
+                  onOrderUpdated(await recheckOrderFraud(order.id));
+                } catch {
+                  // The card keeps the previous answer; nothing else to do.
+                } finally {
+                  setRechecking(false);
+                }
+              }}
+              refreshing={rechecking}
+            />
+          )}
+        <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
           {/* Main column */}
           <div className="flex flex-col gap-6">
             <div className="flex flex-col gap-2">
@@ -548,6 +569,7 @@ export function OrderDetailsModal({
               </div>
             </div>
           </div>
+        </div>
         </div>
       </DialogContent>
 

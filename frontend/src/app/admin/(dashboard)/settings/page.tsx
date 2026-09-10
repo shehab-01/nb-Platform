@@ -43,6 +43,7 @@ export default function StoreSettingsPage() {
       </section>
       <SettingsForm
         key={store.storeId}
+        storeId={store.storeId}
         settings={settings}
         onSave={(input) => saveStoreSettings(store.storeId, input)}
       />

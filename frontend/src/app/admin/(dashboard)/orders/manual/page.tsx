@@ -6,6 +6,7 @@ import { Loader2, Minus, Plus, Trash2 } from "lucide-react";
 
 import { useAuth } from "@/components/admin/auth-context";
 import { OrderSummaryModal } from "@/components/admin/orders/order-summary-modal";
+import { FraudCards } from "@/components/admin/orders/fraud-summary";
 import { PreviousOrders } from "@/components/admin/orders/previous-orders";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,9 +23,11 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   createManualOrder,
   listProducts,
+  getFraudCheck,
   lookupOrdersByPhone,
   type PhoneLookup,
 } from "@/lib/api";
+import type { FraudCheck } from "@/lib/orders";
 import { cleanPhoneInput, toBdMobile } from "@/lib/phone";
 import type { Order } from "@/lib/orders";
 import { variantTitle, type Variant } from "@/lib/products";
@@ -58,6 +61,10 @@ export default function ManualOrderPage() {
 
   const [previous, setPrevious] = React.useState<PhoneLookup>(NO_LOOKUP);
   const [lookupLoading, setLookupLoading] = React.useState(false);
+  // FraudBD courier history for the typed number; null until known, and
+  // stays null when the store has no key (the request answers 503).
+  const [fraud, setFraud] = React.useState<FraudCheck | null>(null);
+  const [fraudLoading, setFraudLoading] = React.useState(false);
   const [searched, setSearched] = React.useState(false);
 
   const [saving, setSaving] = React.useState(false);
@@ -96,11 +103,27 @@ export default function ManualOrderPage() {
       setPrevious(NO_LOOKUP);
       setSearched(false);
       setLookupLoading(false);
+      setFraud(null);
+      setFraudLoading(false);
       return;
     }
     let cancelled = false;
     setLookupLoading(true);
+    setFraudLoading(true);
+    setFraud(null);
     const timer = setTimeout(async () => {
+      // Courier history in parallel with our own order lookup; neither
+      // waits on the other, and a failure of either never blocks the form.
+      getFraudCheck(normalisedPhone)
+        .then((f) => {
+          if (!cancelled) setFraud(f);
+        })
+        .catch(() => {
+          if (!cancelled) setFraud(null);
+        })
+        .finally(() => {
+          if (!cancelled) setFraudLoading(false);
+        });
       try {
         const found = await lookupOrdersByPhone(normalisedPhone);
         if (cancelled) return;
@@ -327,6 +350,12 @@ export default function ManualOrderPage() {
               </div>
             </div>
           </div>
+
+          {normalisedPhone && (fraud || fraudLoading) && (
+            <div className="rounded-xl border bg-card p-4 shadow-xs">
+              <FraudCards fraud={fraud} loading={fraudLoading} />
+            </div>
+          )}
 
           <PreviousOrders
             lookup={previous}

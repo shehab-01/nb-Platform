@@ -209,6 +209,8 @@ export type Order = {
   pathaoDeliveryFee: number | null;
   pathaoSentAt: string | null;
   pathaoTrackingUrl: string | null;
+  /** FraudBD courier history for this phone, once checked. */
+  fraud: FraudCheck | null;
 };
 
 export function formatOrderDateTime(iso: string): string {
@@ -243,3 +245,33 @@ export function activeClaim(order: Order): ActiveClaim | null {
     fullName: order.assignedToName ?? "",
   };
 }
+
+
+/** One courier's answer from FraudBD: delivery counts, or Pathao's rating. */
+export type FraudCourier = {
+  name: string;
+  logo: string | null;
+  dataType: "delivery" | "rating" | string;
+  total: number;
+  success: number;
+  cancel: number;
+  rating: string | null;
+  risk: string | null;
+  message: string | null;
+  successRate: number | null;
+};
+
+export type FraudCheck = {
+  id: number;
+  checkedAt: string;
+  total: number;
+  success: number;
+  cancel: number;
+  /** Delivered share across couriers in percent; null with no history. */
+  successRate: number | null;
+  pathaoRating: string | null;
+  pathaoRisk: string | null;
+  couriers: FraudCourier[];
+  /** Set when FraudBD could not answer that time. */
+  error: string | null;
+};

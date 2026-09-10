@@ -4,6 +4,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Check, ExternalLink, Lock } from "lucide-react";
 
 import { SortableHeader } from "@/components/admin/data-table/data-table-sort-header";
+import { FraudBadge } from "@/components/admin/orders/fraud-summary";
 import { OrderTags } from "@/components/admin/orders/order-tags";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -144,7 +145,9 @@ export function getOrderColumns({
       meta: { label: "Customer" },
       header: "Customer",
       cell: ({ row }) => (
-        <div className="flex flex-col gap-0.5">
+        // Wraps inside a fixed width: the table cell is nowrap by default,
+        // and a long name must fold onto more lines, never widen the table.
+        <div className="flex max-w-[200px] flex-col gap-0.5 whitespace-normal break-words">
           <span className="font-medium">
             {row.original.customerName || (
               <span className="text-muted-foreground">No name given</span>
@@ -171,7 +174,7 @@ export function getOrderColumns({
       header: "Note",
       enableSorting: false,
       cell: ({ row }) => (
-        <div className="flex max-w-[240px] flex-col gap-0.5">
+        <div className="flex max-w-[240px] flex-col gap-0.5 whitespace-normal break-words">
           <span className="text-xs text-muted-foreground">
             Updated {timeAgo(row.original.updatedAt)}
           </span>
@@ -186,10 +189,22 @@ export function getOrderColumns({
       meta: { label: "Address" },
       header: "Address",
       cell: ({ row }) => (
-        <span className="line-clamp-2 max-w-[220px] text-sm text-muted-foreground">
+        <span className="line-clamp-3 max-w-[220px] whitespace-normal break-words text-sm text-muted-foreground">
           {row.original.address}
         </span>
       ),
+    },
+    {
+      id: "fraud",
+      meta: { label: "Success Rate" },
+      header: ({ column }) => (
+        <SortableHeader
+          label="Success Rate"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        />
+      ),
+      accessorFn: (row) => row.fraud?.successRate ?? -1,
+      cell: ({ row }) => <FraudBadge fraud={row.original.fraud} />,
     },
     {
       id: "tags",

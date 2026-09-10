@@ -17,8 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import crypto, stores, tenancy
 from api.auth import get_current_user
+from api.config import settings as app_settings
 from api.db import get_session
 from api.models import StoreSettings, User, UserRole
+from api.schemas import PathaoStatusOut
+from api.services import pathao
 
 router = APIRouter(prefix="/stores", tags=["Stores"])
 
@@ -189,3 +192,49 @@ async def put_settings(
     # Services read a cached, decrypted copy; drop it so the change is live.
     stores.invalidate()
     return redact(row)
+
+
+@router.post("/{store_id}/settings/pathao-test", response_model=PathaoStatusOut)
+async def test_pathao(
+    store_id: int,
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(settings_store),
+) -> PathaoStatusOut:
+    """
+    Log in to Pathao with the store's *saved* credentials and list the
+    merchant stores they can see, so the Pathao store id can be copied rather
+    than guessed. Unsaved edits are not tested: save first. A stale cached
+    copy is dropped so the test reflects what was just saved.
+    """
+    stores.invalidate()
+    integrations = await stores.load_integrations(session, ctx.store.id)
+    cfg = integrations.pathao if integrations else stores.PathaoConfig()
+    out = PathaoStatusOut(
+        enabled=cfg.enabled,
+        sandbox=pathao.is_sandbox(),
+        base_url=app_settings.pathao_base_url,
+        store_id=cfg.store_id,
+        unit_weight_kg=cfg.unit_weight_kg,
+    )
+    if not cfg.enabled:
+        missing = [
+            name
+            for name, value in (
+                ("client id", cfg.client_id),
+                ("client secret", cfg.client_secret),
+                ("client email", cfg.username),
+                ("password", cfg.password),
+                ("store id", cfg.store_id),
+            )
+            if not value
+        ]
+        out.error = "Missing: " + ", ".join(missing)
+        return out
+    try:
+        # force=True: a test must prove the credentials work now, not that a
+        # token from last week is still cached.
+        await pathao.get_access_token(cfg, ctx.store.id, force=True)
+        out.stores = await pathao.list_stores(cfg, ctx.store.id)
+    except pathao.PathaoError as exc:
+        out.error = pathao.error_text(exc)
+    return out

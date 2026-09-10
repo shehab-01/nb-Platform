@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Clock3, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -67,7 +67,16 @@ type Gate =
  */
 export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [gate, setGate] = React.useState<Gate>({ kind: "checking" });
+
+  // A platform with no stores yet (first login in production): the dashboard
+  // has nothing to show, so a super admin starts on the Stores page.
+  React.useEffect(() => {
+    if (gate.kind === "ready" && gate.store === null && pathname === "/admin") {
+      router.replace("/admin/stores");
+    }
+  }, [gate, pathname, router]);
 
   React.useEffect(() => {
     let cancelled = false;

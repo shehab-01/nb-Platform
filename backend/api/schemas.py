@@ -1,5 +1,6 @@
 import re
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
@@ -111,6 +112,37 @@ class OrderItemOut(BaseModel):
         return self.unit_price * self.quantity
 
 
+class FraudCourierOut(BaseModel):
+    name: str
+    logo: str | None = None
+    data_type: str
+    total: int = 0
+    success: int = 0
+    cancel: int = 0
+    rating: str | None = None
+    risk: str | None = None
+    message: str | None = None
+    success_rate: float | None = None
+
+
+class FraudCheckOut(BaseModel):
+    """A FraudBD lookup for a phone: courier delivery history and Pathao's
+    rating. `error` set means FraudBD could not answer that time."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    checked_at: datetime
+    total: int
+    success: int
+    cancel: int
+    success_rate: Decimal | None
+    pathao_rating: str | None
+    pathao_risk: str | None
+    couriers: list[FraudCourierOut] = []
+    error: str | None = None
+
+
 class OrderOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -154,6 +186,8 @@ class OrderOut(BaseModel):
 
     # From the model: "<store prefix>-<id>".
     order_no: str
+    # The FraudBD check run for this phone, once it has (see api.services.fraudbd).
+    fraud_check: FraudCheckOut | None = None
 
     @computed_field
     @property

@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { uuid } from "@/lib/uuid";
 import type { ProductSaveInput } from "@/lib/api";
 import { variantTitle, type Product } from "@/lib/products";
 
@@ -37,7 +38,7 @@ type Draft = { title: string; description: string; rows: Row[] };
 
 function newRow(isDefault: boolean): Row {
   return {
-    key: crypto.randomUUID(),
+    key: uuid(),
     id: null,
     label: "",
     unitPrice: 0,

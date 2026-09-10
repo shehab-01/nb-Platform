@@ -21,6 +21,7 @@ import hashlib
 import logging
 import re
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlparse
 
@@ -32,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.config import settings
 from api.models import MetaCapiFailedEvent
 from api.ratelimit import client_ip
+from api.stores import MetaConfig
 
 log = logging.getLogger("meta_capi")
 
@@ -69,8 +71,8 @@ class Delivery:
     last_error: str = ""
 
 
-def enabled() -> bool:
-    return bool(settings.meta_pixel_id and settings.meta_capi_access_token)
+def enabled(meta: MetaConfig) -> bool:
+    return meta.enabled
 
 
 def _sha256(value: str) -> str:
@@ -224,17 +226,14 @@ def build_purchase_event(
 # --- delivery ----------------------------------------------------------------
 
 
-def _events_url() -> str:
-    return (
-        f"https://graph.facebook.com/{settings.meta_api_version}/"
-        f"{settings.meta_pixel_id}/events"
-    )
+def _events_url(meta: MetaConfig) -> str:
+    return f"https://graph.facebook.com/{settings.meta_api_version}/{meta.pixel_id}/events"
 
 
-def _payload(event: dict) -> dict:
+def _payload(event: dict, meta: MetaConfig) -> dict:
     payload: dict = {"data": [event]}
-    if settings.meta_test_event_code:
-        payload["test_event_code"] = settings.meta_test_event_code
+    if meta.test_event_code:
+        payload["test_event_code"] = meta.test_event_code
     return payload
 
 
@@ -242,7 +241,7 @@ def _label(event: dict) -> str:
     return f"{event.get('event_name')} {event.get('event_id')}"
 
 
-async def deliver(event: dict, *, retry: bool = True) -> Delivery:
+async def deliver(event: dict, meta: MetaConfig, *, retry: bool = True) -> Delivery:
     """
     Post one event, retrying on timeouts, connection errors, 5xx and 429 with
     the RETRY_DELAYS backoff. Other 4xx are final: the payload or the token
@@ -259,9 +258,9 @@ async def deliver(event: dict, *, retry: bool = True) -> Delivery:
             attempts += 1
             try:
                 res = await client.post(
-                    _events_url(),
-                    json=_payload(event),
-                    params={"access_token": settings.meta_capi_access_token},
+                    _events_url(meta),
+                    json=_payload(event, meta),
+                    params={"access_token": meta.access_token},
                 )
             except httpx.HTTPError as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
@@ -279,7 +278,7 @@ async def deliver(event: dict, *, retry: bool = True) -> Delivery:
     return Delivery(ok=False, attempts=attempts, last_error=last_error)
 
 
-async def persist_failed(event: dict, attempts: int, last_error: str) -> None:
+async def persist_failed(event: dict, store_id: int, attempts: int, last_error: str) -> None:
     """Park an undeliverable event for a later resend. Never raises."""
     # Imported here so the sender can be tested without a database engine.
     from api.db import async_session
@@ -288,7 +287,10 @@ async def persist_failed(event: dict, attempts: int, last_error: str) -> None:
         async with async_session() as session:
             session.add(
                 MetaCapiFailedEvent(
-                    payload=event, attempts=attempts, last_error=last_error[:2000]
+                    store_id=store_id,
+                    payload=event,
+                    attempts=attempts,
+                    last_error=last_error[:2000],
                 )
             )
             await session.commit()
@@ -302,27 +304,28 @@ async def persist_failed(event: dict, attempts: int, last_error: str) -> None:
         log.exception("CAPI %s could not be parked after failing: %s", _label(event), last_error)
 
 
-async def deliver_or_park(event: dict) -> Delivery:
+async def deliver_or_park(event: dict, meta: MetaConfig, store_id: int) -> Delivery:
     """The full path for a new event: deliver with retries, park on failure."""
-    result = await deliver(event)
+    result = await deliver(event, meta)
     if not result.ok:
-        await persist_failed(event, result.attempts, result.last_error)
+        await persist_failed(event, store_id, result.attempts, result.last_error)
     return result
 
 
-def dispatch(event: dict) -> None:
+def dispatch(event: dict, meta: MetaConfig, store_id: int) -> None:
     """
-    Schedule delivery as a task of its own. Returns at once; the request that
-    produced the event never waits on Meta, and the task outlives it.
+    Schedule delivery as a task of its own, with the store's pixel and token.
+    Returns at once; the request that produced the event never waits on Meta,
+    and the task outlives it. A store without CAPI configured sends nothing.
     """
-    if not enabled():
+    if not meta.enabled:
         return
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         log.warning("CAPI %s dropped: no running event loop", _label(event))
         return
-    task = loop.create_task(deliver_or_park(event))
+    task = loop.create_task(deliver_or_park(event, meta, store_id))
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
 
@@ -341,37 +344,50 @@ async def drain(timeout: float = 20.0) -> None:
     await asyncio.wait(live, timeout=timeout)
 
 
-def send_purchase(**kwargs) -> None:
+def send_purchase(meta: MetaConfig, store_id: int, **kwargs) -> None:
     """Send a Purchase event for a web order (see build_purchase_event)."""
-    if not enabled():
+    if not meta.enabled:
         return
-    dispatch(build_purchase_event(**kwargs))
+    dispatch(build_purchase_event(**kwargs), meta, store_id)
 
 
 # --- parked events -----------------------------------------------------------
 
 
-async def failed_count(session: AsyncSession) -> int:
-    return int(
-        await session.scalar(select(func.count()).select_from(MetaCapiFailedEvent)) or 0
-    )
+async def failed_count(session: AsyncSession, store_id: int | None = None) -> int:
+    query = select(func.count()).select_from(MetaCapiFailedEvent)
+    if store_id is not None:
+        query = query.where(MetaCapiFailedEvent.store_id == store_id)
+    return int(await session.scalar(query) or 0)
 
 
 async def resend_failed(
-    session: AsyncSession, ids: list[int] | None = None, limit: int = 100
+    session: AsyncSession,
+    meta_for: "Callable[[int], Awaitable[MetaConfig | None]]",
+    ids: list[int] | None = None,
+    limit: int = 100,
+    store_id: int | None = None,
 ) -> dict:
     """
     Try each parked event once more (one attempt, no backoff: the operator is
-    waiting). Delivered rows are deleted; the rest keep the new error.
+    waiting), each with its own store's pixel and token via `meta_for`.
+    Delivered rows are deleted; the rest keep the new error.
     """
     query = select(MetaCapiFailedEvent).order_by(MetaCapiFailedEvent.id).limit(limit)
     if ids:
         query = query.where(MetaCapiFailedEvent.id.in_(ids))
+    if store_id is not None:
+        query = query.where(MetaCapiFailedEvent.store_id == store_id)
     rows = (await session.scalars(query)).all()
     sent = 0
     still_failing = 0
     for row in rows:
-        result = await deliver(row.payload, retry=False)
+        meta = await meta_for(row.store_id)
+        if meta is None or not meta.enabled:
+            row.last_error = "Conversions API is not configured for this store"
+            still_failing += 1
+            continue
+        result = await deliver(row.payload, meta, retry=False)
         if result.ok:
             await session.delete(row)
             sent += 1
@@ -383,5 +399,5 @@ async def resend_failed(
     return {
         "sent": sent,
         "failed": still_failing,
-        "remaining": await failed_count(session),
+        "remaining": await failed_count(session, store_id),
     }

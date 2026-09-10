@@ -1,15 +1,25 @@
 // Ecommerce event tracking.
 //
 // Every event is pushed to `window.dataLayer` in the GA4 ecommerce format
-// (so a GTM container can consume it) and, when NEXT_PUBLIC_META_PIXEL_ID is
-// set, mapped to the matching Meta Pixel standard event. With no Pixel ID the
-// events are logged to the console in development so the flow can be verified
-// before the ID exists.
+// (so a GTM container can consume it) and, when the store has a Meta Pixel
+// id, mapped to the matching Meta Pixel standard event. The pixel id is the
+// store's, read at runtime from the page (lib/store-public); with none the
+// events are logged to the console in development so the flow can be
+// verified before the id exists.
 
 import { metaCookies } from "@/lib/meta-cookies";
+import { publicStoreConfig } from "@/lib/store-public";
+import { uuid } from "@/lib/uuid";
 
-export const PIXEL_ID = process.env.NEXT_PUBLIC_META_PIXEL_ID ?? "";
-export const GTM_ID = process.env.NEXT_PUBLIC_GTM_ID ?? "";
+/** The current store's Meta Pixel id, "" when it has none. */
+export function pixelId(): string {
+  return publicStoreConfig().pixelId;
+}
+
+/** The platform's GTM container id, "" when there is none. */
+export function gtmId(): string {
+  return publicStoreConfig().gtmId;
+}
 
 export const CURRENCY = "BDT";
 export const SHIPPING = 0;
@@ -57,7 +67,7 @@ function debugEnabled(): boolean {
   } catch {
     // storage blocked; fall through
   }
-  return process.env.NODE_ENV !== "production" && !PIXEL_ID;
+  return process.env.NODE_ENV !== "production" && !pixelId();
 }
 
 function cartValue(items: TrackedItem[]): number {
@@ -80,8 +90,9 @@ function push(payload: Record<string, unknown>) {
  * browser, and this is not an admin page (staff traffic never reaches Meta).
  */
 function pixelActive(): boolean {
-  if (typeof window === "undefined" || !PIXEL_ID) return false;
-  return !window.location.pathname.startsWith("/admin");
+  if (typeof window === "undefined" || !pixelId()) return false;
+  const path = window.location.pathname;
+  return !path.startsWith("/admin") && !path.startsWith("/preview");
 }
 
 /**
@@ -105,13 +116,7 @@ function fbq(...args: unknown[]) {
 
 /** A fresh event id, shared by the browser and server copy of one event. */
 export function newEventId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    return (c === "x" ? r : (r & 3) | 8).toString(16);
-  });
+  return uuid();
 }
 
 /** Where the server copies go; the Next rewrite proxies it to the API. */

@@ -23,7 +23,7 @@ from api.models import (
 )
 from api.phone import phone_digits, phone_key
 from api.ratelimit import client_ip, drafts_limiter, orders_limiter
-from api import catalogue
+from api import catalogue, stores, tenancy
 from api.services import meta_capi, pathao, pathao_sync
 from api.schemas import (
     BulkOrderResult,
@@ -67,7 +67,9 @@ def _line(sold: catalogue.Sellable, quantity: int) -> OrderItem:
         quantity=quantity,
     )
 
-ORDER_NO_RE = re.compile(r"^NB-?(\d+)$", re.IGNORECASE)
+# "<prefix>-<id>" with any store's prefix (letters first, so a bare number
+# is never mistaken for one); the id is what the lookup uses.
+ORDER_NO_RE = re.compile(r"^[A-Z][A-Z0-9]{0,7}-?(\d+)$", re.IGNORECASE)
 
 SORTABLE = {
     "id": Order.id,
@@ -151,6 +153,7 @@ def _move_status(
         return False
     session.add(
         OrderEvent(
+            store_id=order.store_id,
             order_id=order.id,
             actor_id=user.id,
             event_type="status_changed",
@@ -168,6 +171,7 @@ def _move_status(
         order.assigned_at = None
         session.add(
             OrderEvent(
+                store_id=order.store_id,
                 order_id=order.id,
                 actor_id=user.id,
                 event_type="released",
@@ -185,6 +189,7 @@ def _set_flag(
     setattr(order, flag, value)
     session.add(
         OrderEvent(
+            store_id=order.store_id,
             order_id=order.id,
             actor_id=user.id,
             event_type=f"{flag}_{'set' if value else 'cleared'}",
@@ -212,15 +217,18 @@ def _client_context(request: Request) -> meta_capi.ClientContext:
     )
 
 
-async def _find_by_draft_key(session: AsyncSession, key: str) -> Order | None:
-    return await session.scalar(select(Order).where(Order.draft_key == key))
+async def _find_by_draft_key(session: AsyncSession, store_id: int, key: str) -> Order | None:
+    return await session.scalar(
+        select(Order).where(Order.store_id == store_id, Order.draft_key == key)
+    )
 
 
-async def _find_open_draft(session: AsyncSession, key: str) -> Order | None:
-    """The newest Incomplete row auto-captured for this phone, if any."""
+async def _find_open_draft(session: AsyncSession, store_id: int, key: str) -> Order | None:
+    """The newest Incomplete row auto-captured for this phone in this store."""
     return await session.scalar(
         select(Order)
         .where(
+            Order.store_id == store_id,
             Order.phone_key == key,
             Order.status == OrderStatus.incomplete.value,
             Order.draft_key.is_not(None),
@@ -230,14 +238,15 @@ async def _find_open_draft(session: AsyncSession, key: str) -> Order | None:
     )
 
 
-async def _has_real_order(session: AsyncSession, key: str) -> bool:
+async def _has_real_order(session: AsyncSession, store_id: int, key: str) -> bool:
     """
-    Whether this phone already reached the live order lists. Such a customer is
-    never captured again as an abandoned form: one person, one table.
+    Whether this phone already reached this store's live order lists. Such a
+    customer is never captured again as an abandoned form: one person, one table.
     """
     found = await session.scalar(
         select(Order.id)
         .where(
+            Order.store_id == store_id,
             Order.phone_key == key,
             Order.status != OrderStatus.incomplete.value,
         )
@@ -254,6 +263,7 @@ async def _has_real_order(session: AsyncSession, key: str) -> bool:
 async def save_order_draft(
     payload: OrderDraft,
     session: AsyncSession = Depends(get_session),
+    store: stores.StoreConfig = Depends(stores.current_store),
 ) -> OrderDraftOut:
     """
     Autosave a storefront form that has not been submitted, so a visitor who
@@ -268,7 +278,7 @@ async def save_order_draft(
     if len(phone_digits(phone)) < DRAFT_MIN_PHONE_DIGITS:
         return OrderDraftOut(saved=False)
 
-    order = await _find_by_draft_key(session, payload.draft_key)
+    order = await _find_by_draft_key(session, store.id, payload.draft_key)
     if order is not None and order.status != OrderStatus.incomplete.value:
         # Already submitted or worked by staff — never drag it back to a draft.
         return OrderDraftOut(saved=False)
@@ -276,8 +286,8 @@ async def save_order_draft(
     if order is None:
         # A reload starts a new draft key; keep writing to the row this phone
         # already has rather than stacking up duplicates.
-        order = await _find_open_draft(session, key)
-        if order is None and await _has_real_order(session, key):
+        order = await _find_open_draft(session, store.id, key)
+        if order is None and await _has_real_order(session, store.id, key):
             return OrderDraftOut(saved=False)
 
     name = payload.customer_name.strip()
@@ -287,10 +297,11 @@ async def save_order_draft(
         # A new lead is written against what is on sale, so the Incomplete
         # list shows what they were about to buy. Nothing live, nothing to
         # record it against — and nothing they could have ordered anyway.
-        product = await catalogue.active(session)
+        product = await catalogue.active(session, store.id)
         if product is None:
             return OrderDraftOut(saved=False)
         order = Order(
+            store_id=store.id,
             customer_name=name,
             phone=phone,
             phone_key=key,
@@ -308,6 +319,7 @@ async def save_order_draft(
         await session.flush()
         session.add(
             OrderEvent(
+                store_id=order.store_id,
                 order_id=order.id,
                 event_type="draft_captured",
                 new_status=OrderStatus.incomplete.value,
@@ -338,6 +350,7 @@ async def create_order(
     payload: OrderCreate,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    store: stores.StoreConfig = Depends(stores.current_store),
 ) -> Order:
     name = payload.customer_name.strip()
     phone = payload.phone.strip()
@@ -348,7 +361,9 @@ async def create_order(
     # The variant the customer picked, priced from the catalogue row it names.
     # Checked before anything else: a bad id is a broken page, not an order,
     # and with nothing live there is nothing to sell at any price.
-    product = await catalogue.for_order(session, payload.variant_id)
+    # Priced from this store's catalogue only. (orders.store_id lands in
+    # Phase 3; until then the row itself is not yet store-tagged.)
+    product = await catalogue.for_order(session, store.id, payload.variant_id)
     if product is None:
         raise HTTPException(
             status_code=400,
@@ -367,6 +382,7 @@ async def create_order(
     recent = await session.scalar(
         select(Order.id)
         .where(
+            Order.store_id == store.id,
             Order.phone_key == key,
             Order.status != OrderStatus.incomplete.value,
             Order.created_at >= cooldown_start,
@@ -387,11 +403,11 @@ async def create_order(
     # in both tables.
     draft = None
     if payload.draft_key:
-        draft = await _find_by_draft_key(session, payload.draft_key)
+        draft = await _find_by_draft_key(session, store.id, payload.draft_key)
         if draft is not None and draft.status != OrderStatus.incomplete.value:
             draft = None
     if draft is None:
-        draft = await _find_open_draft(session, key)
+        draft = await _find_open_draft(session, store.id, key)
 
     if draft is not None:
         order = draft
@@ -423,6 +439,7 @@ async def create_order(
         event_type = "draft_submitted"
     else:
         order = Order(
+            store_id=store.id,
             customer_name=name,
             phone=phone,
             phone_key=key,
@@ -440,6 +457,7 @@ async def create_order(
 
     session.add(
         OrderEvent(
+            store_id=order.store_id,
             order_id=order.id,
             event_type=event_type,
             old_status=OrderStatus.incomplete.value if draft else None,
@@ -451,6 +469,7 @@ async def create_order(
     # they cannot linger in Incomplete after ordering.
     await session.execute(
         delete(Order).where(
+            Order.store_id == store.id,
             Order.phone_key == key,
             Order.status == OrderStatus.incomplete.value,
             Order.draft_key.is_not(None),
@@ -460,11 +479,15 @@ async def create_order(
     await session.commit()
     order = await _get_fresh_order(session, order.id)
     # The server copy of the Purchase the browser Pixel fires with the order
-    # number as eventID. Scheduled as its own task (retries, then parked on
-    # failure — see meta_capi), so the response is never held up by Meta.
-    if meta_capi.enabled():
+    # number as eventID, using this store's pixel and token. Scheduled as its
+    # own task (retries, then parked on failure — see meta_capi), so the
+    # response is never held up by Meta.
+    integrations = await stores.load_integrations(session, store.id)
+    if integrations is not None and integrations.meta.enabled:
         meta_capi.send_purchase(
-            order_no=f"NB-{order.id}",
+            integrations.meta,
+            store.id,
+            order_no=order.order_no,
             customer_name=order.customer_name,
             phone=order.phone,
             quantity=order.quantity,
@@ -488,9 +511,9 @@ async def list_orders(
     q: str | None = Query(None, max_length=100),
     sort: str = Query("-created_at", pattern=r"^-?(id|total|created_at)$"),
     session: AsyncSession = Depends(get_session),
-    _user: User = Depends(get_current_user),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
 ) -> OrderListOut:
-    filters = []
+    filters = [Order.store_id == ctx.store.id]
     if status:
         filters.append(Order.status.in_(status))
     if date_from:
@@ -539,12 +562,14 @@ async def list_orders(
 @router.get("/counts", response_model=OrderCountsOut)
 async def order_counts(
     session: AsyncSession = Depends(get_session),
-    _user: User = Depends(get_current_user),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
 ) -> OrderCountsOut:
     """How many rows sit under each status, for the sidebar counters."""
     counts = {status.value: 0 for status in OrderStatus}
     rows = await session.execute(
-        select(Order.status, func.count()).group_by(Order.status)
+        select(Order.status, func.count())
+        .where(Order.store_id == ctx.store.id)
+        .group_by(Order.status)
     )
     for status, count in rows:
         # A status retired from the vocabulary but still in old rows is ignored
@@ -557,7 +582,7 @@ async def order_counts(
 @router.get("/claims", response_model=ClaimsOut)
 async def list_claims(
     session: AsyncSession = Depends(get_session),
-    _user: User = Depends(get_current_user),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
 ) -> ClaimsOut:
     """
     Who has which order open, right now. Tiny and indexed, so the order
@@ -566,6 +591,7 @@ async def list_claims(
     """
     rows = await session.scalars(
         select(Order).where(
+            Order.store_id == ctx.store.id,
             Order.assigned_to.is_not(None),
             Order.assigned_at >= _claim_stale_before(),
         )
@@ -588,7 +614,7 @@ async def list_claims(
 @router.get("/stats", response_model=OrderStatsOut)
 async def order_stats(
     session: AsyncSession = Depends(get_session),
-    _user: User = Depends(get_current_user),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
 ) -> OrderStatsOut:
     incomplete = OrderStatus.incomplete.value
     # Incomplete rows are mostly abandoned forms — nobody ordered them, so they
@@ -618,7 +644,7 @@ async def order_stats(
                     0,
                 ),
                 func.count().filter(Order.status == incomplete),
-            )
+            ).where(Order.store_id == ctx.store.id)
         )
     ).one()
     total, in_progress, confirmed, cancelled, revenue, incomplete_count = row
@@ -668,7 +694,9 @@ _DELIVERED = or_(
 )
 
 
-async def _counts(session: AsyncSession, start: datetime, end: datetime) -> dict:
+async def _counts(
+    session: AsyncSession, store_id: int, start: datetime, end: datetime
+) -> dict:
     """Every dashboard count for the orders created in [start, end), in one
     query: each figure is a filtered count over the same rows.
 
@@ -691,7 +719,11 @@ async def _counts(session: AsyncSession, start: datetime, end: datetime) -> dict
                 count.filter(_IS_LEAD),
                 count.filter(_IS_LEAD, Order.status == OrderStatus.incomplete.value),
                 count.filter(_IS_LEAD, Order.status.in_(WON)),
-            ).where(Order.created_at >= start, Order.created_at < end)
+            ).where(
+                Order.store_id == store_id,
+                Order.created_at >= start,
+                Order.created_at < end,
+            )
         )
     ).one()
     keys = (
@@ -735,7 +767,7 @@ async def dashboard(
     date_from: date | None = Query(None, alias="from"),
     date_to: date | None = Query(None, alias="to"),
     session: AsyncSession = Depends(get_session),
-    _user: User = Depends(get_current_user),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
 ) -> DashboardOut:
     """The figures the admin home page leads with: the chosen days in detail
     (today, by default), and the month the range ends in.
@@ -749,9 +781,9 @@ async def dashboard(
     month_start, month_end = _dhaka_month(end_day)
     last_month_start, _ = _dhaka_month((month_start - timedelta(days=1)).date())
 
-    period = await _counts(session, start, end)
-    this_month = await _counts(session, month_start, month_end)
-    last_month = await _counts(session, last_month_start, month_start)
+    period = await _counts(session, ctx.store.id, start, end)
+    this_month = await _counts(session, ctx.store.id, month_start, month_end)
+    last_month = await _counts(session, ctx.store.id, last_month_start, month_start)
 
     # The five most productive people, from the audit trail. Ranked by orders
     # confirmed (one credit per order, however many times it was moved), then
@@ -765,6 +797,7 @@ async def dashboard(
         select(User.id, User.name, User.nickname, confirmed_by, handled)
         .join(User, User.id == OrderEvent.actor_id)
         .where(
+            OrderEvent.store_id == ctx.store.id,
             OrderEvent.event_type == "status_changed",
             OrderEvent.created_at >= start,
             OrderEvent.created_at < end,
@@ -805,7 +838,7 @@ async def dashboard_activity(
     date_from: date | None = Query(None, alias="from"),
     date_to: date | None = Query(None, alias="to"),
     session: AsyncSession = Depends(get_session),
-    _user: User = Depends(get_current_user),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
 ) -> list[ActivityOut]:
     """The orders one staff member confirmed over the chosen days, newest
     first: the list behind their number on the performers card."""
@@ -814,6 +847,7 @@ async def dashboard_activity(
         select(OrderEvent, Order.customer_name)
         .join(Order, Order.id == OrderEvent.order_id)
         .where(
+            OrderEvent.store_id == ctx.store.id,
             OrderEvent.actor_id == user_id,
             OrderEvent.event_type == "status_changed",
             OrderEvent.new_status == OrderStatus.confirmed.value,
@@ -827,7 +861,7 @@ async def dashboard_activity(
         ActivityOut(
             id=event.id,
             order_id=event.order_id,
-            order_no=f"NB-{event.order_id}",
+            order_no=f"{ctx.store.order_prefix}-{event.order_id}",
             customer_name=customer_name,
             event_type=event.event_type,
             old_status=event.old_status,
@@ -858,7 +892,7 @@ LOOKUP_STATUSES = (
 async def lookup_by_phone(
     phone: str = Query(min_length=6, max_length=32),
     session: AsyncSession = Depends(get_session),
-    _user: User = Depends(get_current_user),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
 ) -> PhoneLookupOut:
     """
     What this number has ordered before, for the staff taking a new order.
@@ -876,6 +910,7 @@ async def lookup_by_phone(
     rows = await session.execute(
         select(Order)
         .where(
+            Order.store_id == ctx.store.id,
             Order.phone_key == key,
             Order.status.in_((*LOOKUP_STATUSES, OrderStatus.incomplete.value)),
         )
@@ -900,6 +935,7 @@ async def create_manual_order(
     payload: ManualOrderCreate,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
 ) -> Order:
     """
     An order typed in by staff rather than placed on the site.
@@ -921,7 +957,10 @@ async def create_manual_order(
     rows = await session.execute(
         select(ProductVariant, Product)
         .join(Product, Product.id == ProductVariant.product_id)
-        .where(ProductVariant.id.in_([i.variant_id for i in payload.items]))
+        .where(
+            Product.store_id == ctx.store.id,
+            ProductVariant.id.in_([i.variant_id for i in payload.items]),
+        )
     )
     on_sale = {
         variant.id: catalogue.sellable(product, variant)
@@ -942,6 +981,7 @@ async def create_manual_order(
         OrderStatus.confirmed.value if payload.approved else OrderStatus.processing.value
     )
     order = Order(
+        store_id=ctx.store.id,
         customer_name=payload.customer_name.strip(),
         phone=payload.phone,
         phone_key=phone_key(payload.phone),
@@ -969,6 +1009,7 @@ async def create_manual_order(
     await session.flush()
     session.add(
         OrderEvent(
+            store_id=order.store_id,
             order_id=order.id,
             actor_id=user.id,
             event_type="manual_created",
@@ -992,6 +1033,7 @@ async def claim_order(
     order_id: int,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
 ) -> Order:
     """
     Take the order: opening the modal calls this, and while it succeeds nobody
@@ -1005,6 +1047,7 @@ async def claim_order(
         update(Order)
         .where(
             Order.id == order_id,
+            Order.store_id == ctx.store.id,
             or_(
                 Order.assigned_to.is_(None),
                 Order.assigned_to == user.id,
@@ -1018,7 +1061,7 @@ async def claim_order(
         holder = await session.scalar(
             select(func.coalesce(User.nickname, User.name))
             .join(Order, Order.assigned_to == User.id)
-            .where(Order.id == order_id)
+            .where(Order.id == order_id, Order.store_id == ctx.store.id)
         )
         if holder is None:
             raise HTTPException(status_code=404, detail="Order not found")
@@ -1027,7 +1070,9 @@ async def claim_order(
         )
 
     session.add(
-        OrderEvent(order_id=order_id, actor_id=user.id, event_type="claimed")
+        OrderEvent(
+            store_id=ctx.store.id, order_id=order_id, actor_id=user.id, event_type="claimed"
+        )
     )
     await session.commit()
     return await _get_fresh_order(session, order_id)
@@ -1038,8 +1083,9 @@ async def release_order(
     order_id: int,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
 ) -> Order:
-    conditions = [Order.id == order_id]
+    conditions = [Order.id == order_id, Order.store_id == ctx.store.id]
     if user.role != UserRole.super_admin:
         conditions.append(Order.assigned_to == user.id)
 
@@ -1050,7 +1096,9 @@ async def release_order(
         .returning(Order.id)
     )
     if released is None:
-        exists = await session.scalar(select(Order.id).where(Order.id == order_id))
+        exists = await session.scalar(
+            select(Order.id).where(Order.id == order_id, Order.store_id == ctx.store.id)
+        )
         if exists is None:
             raise HTTPException(status_code=404, detail="Order not found")
         raise HTTPException(
@@ -1058,7 +1106,9 @@ async def release_order(
         )
 
     session.add(
-        OrderEvent(order_id=order_id, actor_id=user.id, event_type="released")
+        OrderEvent(
+            store_id=ctx.store.id, order_id=order_id, actor_id=user.id, event_type="released"
+        )
     )
     await session.commit()
     return await _get_fresh_order(session, order_id)
@@ -1070,8 +1120,11 @@ async def add_tag(
     payload: TagCreate,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
 ) -> Order:
-    exists = await session.scalar(select(Order.id).where(Order.id == order_id))
+    exists = await session.scalar(
+        select(Order.id).where(Order.id == order_id, Order.store_id == ctx.store.id)
+    )
     if exists is None:
         raise HTTPException(status_code=404, detail="Order not found")
 
@@ -1079,6 +1132,7 @@ async def add_tag(
     session.add(OrderTag(order_id=order_id, created_by=user.id, label=label))
     session.add(
         OrderEvent(
+            store_id=ctx.store.id,
             order_id=order_id, actor_id=user.id, event_type="tag_added", note=label
         )
     )
@@ -1091,6 +1145,7 @@ async def bulk_update(
     payload: BulkOrderUpdate,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
 ) -> BulkOrderResult:
     """
     Apply one change to many orders — the "Send to Shipping" button on the
@@ -1104,16 +1159,16 @@ async def bulk_update(
     skipped: list[BulkSkipped] = []
     for order_id in dict.fromkeys(payload.order_ids):
         order = await session.get(Order, order_id, with_for_update={"of": Order})
-        if order is None:
+        if order is None or order.store_id != ctx.store.id:
             skipped.append(
-                BulkSkipped(order_id=order_id, order_no=f"NB-{order_id}", reason="Not found")
+                BulkSkipped(order_id=order_id, order_no=f"{ctx.store.order_prefix}-{order_id}", reason="Not found")
             )
             continue
         if _held_by_someone_else(order, user):
             skipped.append(
                 BulkSkipped(
                     order_id=order.id,
-                    order_no=f"NB-{order.id}",
+                    order_no=order.order_no,
                     reason=f"{order.assigned_to_display or 'Another worker'} is handling it",
                 )
             )
@@ -1130,7 +1185,7 @@ async def bulk_update(
         else:
             skipped.append(
                 BulkSkipped(
-                    order_id=order.id, order_no=f"NB-{order.id}", reason="Already there"
+                    order_id=order.id, order_no=order.order_no, reason="Already there"
                 )
             )
     await session.commit()
@@ -1149,16 +1204,19 @@ async def send_to_pathao(
     payload: PathaoSendIn,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
 ) -> PathaoSendOut:
     """
     Book each order with Pathao and store the consignment id. Each success is
     committed on its own, so a failure half-way never loses a booking Pathao
     has already made. Failures come back per order with Pathao's reason.
     """
-    if not pathao.enabled():
-        raise HTTPException(status_code=503, detail="Pathao is not configured on the server")
+    integrations = await stores.load_integrations(session, ctx.store.id)
+    if integrations is None or not integrations.pathao.enabled:
+        raise HTTPException(status_code=503, detail="Pathao is not configured for this store")
+    cfg = integrations.pathao
     try:
-        await pathao.get_access_token()
+        await pathao.get_access_token(cfg, ctx.store.id)
     except pathao.PathaoError as exc:
         raise HTTPException(status_code=502, detail=pathao.error_text(exc)) from exc
 
@@ -1167,12 +1225,12 @@ async def send_to_pathao(
 
     def fail(order_id: int, reason: str) -> None:
         failed.append(
-            PathaoFailure(order_id=order_id, order_no=f"NB-{order_id}", error=reason)
+            PathaoFailure(order_id=order_id, order_no=f"{ctx.store.order_prefix}-{order_id}", error=reason)
         )
 
     for order_id in dict.fromkeys(payload.order_ids):
         order = await session.get(Order, order_id, with_for_update={"of": Order})
-        if order is None:
+        if order is None or order.store_id != ctx.store.id:
             fail(order_id, "Not found")
             continue
         if order.pathao_consignment_id:
@@ -1188,7 +1246,7 @@ async def send_to_pathao(
             await session.rollback()
             continue
         try:
-            consignment = await pathao.create_order(order)
+            consignment = await pathao.create_order(order, cfg, order.order_no)
         except pathao.PathaoError as exc:
             fail(order_id, pathao.error_text(exc))
             await session.rollback()
@@ -1200,6 +1258,7 @@ async def send_to_pathao(
         _set_flag(session, order, user, "courier", True)
         session.add(
             OrderEvent(
+                store_id=order.store_id,
                 order_id=order.id,
                 actor_id=user.id,
                 event_type="pathao_sent",
@@ -1217,31 +1276,34 @@ async def refresh_pathao(
     payload: PathaoSendIn,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
 ) -> PathaoSendOut:
     """Pull the current delivery status from Pathao for each booked order."""
-    if not pathao.enabled():
-        raise HTTPException(status_code=503, detail="Pathao is not configured on the server")
+    integrations = await stores.load_integrations(session, ctx.store.id)
+    if integrations is None or not integrations.pathao.enabled:
+        raise HTTPException(status_code=503, detail="Pathao is not configured for this store")
+    cfg = integrations.pathao
 
     refreshed_ids: list[int] = []
     failed: list[PathaoFailure] = []
     for order_id in dict.fromkeys(payload.order_ids):
         order = await session.get(Order, order_id)
-        if order is None or not order.pathao_consignment_id:
+        if order is None or order.store_id != ctx.store.id or not order.pathao_consignment_id:
             failed.append(
                 PathaoFailure(
                     order_id=order_id,
-                    order_no=f"NB-{order_id}",
+                    order_no=f"{ctx.store.order_prefix}-{order_id}",
                     error="Not sent to Pathao yet",
                 )
             )
             continue
         try:
-            await pathao_sync.refresh_order(session, order, actor_id=user.id)
+            await pathao_sync.refresh_order(session, order, cfg, actor_id=user.id)
         except pathao.PathaoError as exc:
             failed.append(
                 PathaoFailure(
                     order_id=order.id,
-                    order_no=f"NB-{order.id}",
+                    order_no=order.order_no,
                     error=pathao.error_text(exc),
                 )
             )
@@ -1257,6 +1319,7 @@ async def update_order(
     payload: OrderUpdate,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
 ) -> Order:
     if all(
         value is None
@@ -1275,7 +1338,7 @@ async def update_order(
     # Lock only the orders row — FOR UPDATE can't cover the outer-joined
     # assignee relationship.
     order = await session.get(Order, order_id, with_for_update={"of": Order})
-    if order is None:
+    if order is None or order.store_id != ctx.store.id:
         raise HTTPException(status_code=404, detail="Order not found")
 
     if _held_by_someone_else(order, user):
@@ -1295,6 +1358,7 @@ async def update_order(
     if payload.comment is not None and payload.comment != order.comment:
         session.add(
             OrderEvent(
+                store_id=order.store_id,
                 order_id=order.id,
                 actor_id=user.id,
                 event_type="comment_updated",
@@ -1323,6 +1387,7 @@ async def update_order(
     if details_changed:
         session.add(
             OrderEvent(
+                store_id=order.store_id,
                 order_id=order.id,
                 actor_id=user.id,
                 event_type="details_updated",

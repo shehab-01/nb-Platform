@@ -1,3 +1,4 @@
+import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 from uuid import UUID
@@ -151,10 +152,8 @@ class OrderOut(BaseModel):
             return None
         return tracking_url(self.pathao_consignment_id, self.phone)
 
-    @computed_field
-    @property
-    def order_no(self) -> str:
-        return f"NB-{self.id}"
+    # From the model: "<store prefix>-<id>".
+    order_no: str
 
     @computed_field
     @property
@@ -340,6 +339,7 @@ class UserOut(BaseModel):
 
 
 class UserWithActivityOut(UserOut):
+    memberships: list["MembershipOut"] = Field(default_factory=list)
     orders_confirmed: int = 0
     orders_shipped: int = 0
     # Super admin by server configuration (SUPER_ADMIN_EMAILS): the role is
@@ -601,3 +601,159 @@ class CapiFailedEventOut(BaseModel):
     @property
     def event_id(self) -> str:
         return str(self.payload.get("event_id", ""))
+
+
+# --- stores ------------------------------------------------------------------
+
+
+class StoreConfigOut(BaseModel):
+    """The store a storefront request resolved to. No secrets: this is read by
+    the page renderer and could be read by anyone on the store's hostname."""
+
+    id: int
+    slug: str
+    name: str
+    template: str
+    currency: str
+    theme: dict
+    content: dict[str, str]
+    host: str | None
+    domains: list[str]
+    # Public by nature (it is in the page source); the browser pixel needs it.
+    meta_pixel_id: str = ""
+    order_prefix: str = "NB"
+
+
+class StoreDirectoryEntry(BaseModel):
+    slug: str
+    name: str
+    domains: list[str]
+
+
+class StoreAccessOut(BaseModel):
+    """A store the signed-in user may open, and as what."""
+
+    store_id: int
+    slug: str
+    name: str
+    role: str
+
+
+class StoreOut(BaseModel):
+    """A store as the platform admin sees it."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    slug: str
+    name: str
+    template: str
+    currency: str
+    order_prefix: str
+    theme: dict
+    is_active: bool
+    domains: list[str]
+    primary_domain: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+_SLUG_RE = r"^[a-z0-9][a-z0-9-]{0,39}$"
+_HOST_RE = r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?)*$"
+
+
+_PREFIX_RE = r"^[A-Z][A-Z0-9]{0,7}$"
+
+
+class StoreCreate(BaseModel):
+    slug: str = Field(pattern=_SLUG_RE)
+    name: str = Field(min_length=1, max_length=120)
+    # "NB" in "NB-1042". Uppercase letters and digits, unique across stores.
+    order_prefix: str = Field(min_length=1, max_length=8)
+    template: str = Field(default="classic", max_length=40)
+    currency: str = Field(default="BDT", min_length=3, max_length=3)
+    theme: dict[str, str] = Field(default_factory=dict)
+    # The first is the primary domain. Normalised (lowercased, port dropped)
+    # before validation and storage.
+    domains: list[str] = Field(default_factory=list, max_length=20)
+    is_active: bool = True
+
+    @field_validator("domains")
+    @classmethod
+    def _domains(cls, values: list[str]) -> list[str]:
+        from api.stores import normalise_host
+
+        out: list[str] = []
+        for raw in values:
+            host = normalise_host(raw)
+            if host is None:
+                continue
+            if not re.match(_HOST_RE, host) and host != "localhost":
+                raise ValueError(f"Not a hostname: {raw!r}")
+            if host not in out:
+                out.append(host)
+        return out
+
+    @field_validator("currency")
+    @classmethod
+    def _currency(cls, value: str) -> str:
+        return value.upper()
+
+    @field_validator("order_prefix")
+    @classmethod
+    def _prefix(cls, value: str) -> str:
+        value = value.strip().upper()
+        if not re.match(_PREFIX_RE, value):
+            raise ValueError("Prefix: 1-8 letters or digits, starting with a letter")
+        return value
+
+    @field_validator("theme")
+    @classmethod
+    def _theme(cls, value: dict[str, str]) -> dict[str, str]:
+        if len(value) > 30:
+            raise ValueError("Too many theme keys")
+        for k, v in value.items():
+            if len(k) > 40 or len(v) > 200:
+                raise ValueError("Theme entry too long")
+        return value
+
+
+class StoreUpdate(BaseModel):
+    """Everything but the slug, which is the store's stable handle."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    order_prefix: str | None = Field(default=None, min_length=1, max_length=8)
+    template: str | None = Field(default=None, max_length=40)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    theme: dict[str, str] | None = None
+    domains: list[str] | None = Field(default=None, max_length=20)
+    is_active: bool | None = None
+
+    _domains = field_validator("domains")(StoreCreate._domains.__func__)  # type: ignore[attr-defined]
+    _prefix = field_validator("order_prefix")(StoreCreate._prefix.__func__)  # type: ignore[attr-defined]
+    _theme = field_validator("theme")(StoreCreate._theme.__func__)  # type: ignore[attr-defined]
+
+
+class MembershipIn(BaseModel):
+    store_id: int
+    role: Literal["owner", "manager", "staff"]
+
+
+class MembershipOut(BaseModel):
+    store_id: int
+    slug: str
+    name: str
+    role: str
+
+
+class MembershipsUpdate(BaseModel):
+    """The user's complete membership list; stores left out are removed."""
+
+    memberships: list[MembershipIn] = Field(max_length=200)
+
+    @model_validator(mode="after")
+    def _unique(self) -> "MembershipsUpdate":
+        ids = [m.store_id for m in self.memberships]
+        if len(ids) != len(set(ids)):
+            raise ValueError("A store is listed twice")
+        return self

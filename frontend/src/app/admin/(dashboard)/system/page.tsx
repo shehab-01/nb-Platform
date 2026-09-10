@@ -42,7 +42,6 @@ import {
   type SystemOverview,
 } from "@/lib/api";
 import { ORDER_STATUS_LABELS, type OrderStatus } from "@/lib/orders";
-import { PIXEL_ID } from "@/lib/tracking";
 import { cn } from "@/lib/utils";
 
 const REFRESH_MS = 10_000;
@@ -368,10 +367,9 @@ export default function SystemPage() {
                 label="Meta tracking"
                 value={
                   <span className="flex flex-wrap gap-1.5 text-sm">
-                    {/* PIXEL_ID is baked into this very bundle at build time,
-                        so it is exactly what visitors' browsers get. */}
-                    <Badge variant={PIXEL_ID ? "default" : "outline"}>
-                      Browser pixel {PIXEL_ID ? `on · ${PIXEL_ID.slice(0, 4)}…` : "off"}
+                    {/* The selected store's pixel, from its Settings. */}
+                    <Badge variant={data.integrations.meta_pixel ? "default" : "outline"}>
+                      Browser pixel {data.integrations.meta_pixel ? "on" : "off"}
                     </Badge>
                     <Badge variant={data.integrations.meta_capi ? "default" : "outline"}>
                       Server CAPI {data.integrations.meta_capi ? "on" : "off"}
@@ -385,10 +383,8 @@ export default function SystemPage() {
                   </span>
                 }
                 detail={
-                  !!PIXEL_ID !== data.integrations.meta_pixel ? (
-                    "API and web build disagree on META_PIXEL_ID — rebuild web after changing .env"
-                  ) : data.integrations.meta_pixel && !data.integrations.meta_capi ? (
-                    "Server-side events start once META_CAPI_ACCESS_TOKEN is set"
+                  data.integrations.meta_pixel && !data.integrations.meta_capi ? (
+                    "Server-side events start once the CAPI access token is set in Settings"
                   ) : data.integrations.meta_capi_failed > 0 ? (
                     <span className="flex flex-wrap items-center gap-2">
                       {data.integrations.meta_capi_failed} server event
@@ -409,7 +405,7 @@ export default function SystemPage() {
                   ) : data.integrations.meta_capi ? (
                     `Browser and server events both sending${
                       data.integrations.meta_test_mode
-                        ? " — to Test Events only: clear META_TEST_EVENT_CODE before going live"
+                        ? " — to Test Events only: clear the test event code in Settings before going live"
                         : ""
                     }${
                       data.integrations.meta_capi_pending
@@ -417,16 +413,14 @@ export default function SystemPage() {
                         : ""
                     }`
                   ) : (
-                    "No pixel configured"
+                    "No pixel configured for this store (Settings → Meta)"
                   )
                 }
                 icon={Globe}
                 tone={
-                  !!PIXEL_ID !== data.integrations.meta_pixel ||
-                  data.integrations.meta_capi_failed > 0 ||
-                  data.integrations.meta_test_mode
+                  data.integrations.meta_capi_failed > 0 || data.integrations.meta_test_mode
                     ? "warning"
-                    : PIXEL_ID
+                    : data.integrations.meta_pixel
                       ? "good"
                       : "neutral"
                 }

@@ -1,0 +1,47 @@
+/* The campaign block above the classic page. Scoped under .nb-campaign, on
+   the dark header colour so the pictures read as one poster. */
+.nb-campaign {
+  background: var(--deep);
+  padding-bottom: 8px;
+}
+.nb-campaign img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.nb-campaign-hero {
+  margin: 0;
+}
+.nb-campaign-strip {
+  padding: 14px 12px 0;
+}
+.nb-campaign-strip img {
+  border-radius: 6px;
+}
+.nb-campaign-cta {
+  display: flex;
+  justify-content: center;
+  padding: 18px 12px;
+}
+.nb-campaign-cta button {
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 26px;
+  background: #fff;
+  color: var(--deep);
+  font: inherit;
+  font-size: 17px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.nb-campaign-showcase {
+  padding: 16px 12px 4px;
+}
+.nb-campaign-offer {
+  display: flex;
+  justify-content: center;
+  padding: 14px 12px 12px;
+}
+.nb-campaign-offer img {
+  width: 200px;
+}

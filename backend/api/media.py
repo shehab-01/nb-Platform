@@ -51,10 +51,16 @@ def media_root() -> Path:
 
 
 def save_product_image(data: bytes) -> str:
-    """Write an image and return its path relative to the media root.
+    return save_image(data, PRODUCT_DIR)
+
+
+def save_image(data: bytes, subdir: str) -> str:
+    """Write an image under `subdir` and return its path relative to the
+    media root.
 
     The name is random, so an upload can never overwrite an existing file or
-    escape the media directory via its own name.
+    escape the media directory via its own name. `subdir` comes from code,
+    never from the request.
     """
     if not data:
         raise UploadError("The file is empty")
@@ -63,11 +69,11 @@ def save_product_image(data: bytes) -> str:
         raise UploadError(f"Image is larger than {limit_mb:.0f} MB")
 
     extension = _extension_for(data)
-    directory = media_root() / PRODUCT_DIR
+    directory = media_root() / subdir
     directory.mkdir(parents=True, exist_ok=True)
     name = f"{secrets.token_hex(16)}{extension}"
     (directory / name).write_bytes(data)
-    return f"{PRODUCT_DIR}/{name}"
+    return f"{subdir}/{name}"
 
 
 def delete_media(relative_path: str | None) -> None:

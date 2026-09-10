@@ -10,6 +10,10 @@ export const PAGE_TITLES: Record<string, string> = {
   "/admin": "Dashboard",
   "/admin/orders/manual": "Manual Order",
   "/admin/products": "Products",
+  "/admin/stores": "Stores",
+  "/admin/stores/new": "New store",
+  "/admin/templates": "Templates",
+  "/admin/settings": "Store settings",
   "/admin/users": "Users & access",
   "/admin/system": "System",
   // Every order list names itself once, in STATUS_PAGES.
@@ -19,6 +23,7 @@ export const PAGE_TITLES: Record<string, string> = {
 };
 
 export function pageTitle(pathname: string): string {
+  if (/^\/admin\/stores\/\d+$/.test(pathname)) return "Edit store";
   return PAGE_TITLES[pathname] ?? "Admin";
 }
 

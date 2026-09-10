@@ -61,27 +61,17 @@ class Settings:
     # overwrites whatever the client sent. Empty = trust the socket address.
     client_ip_header: str = os.getenv("CLIENT_IP_HEADER", "cf-connecting-ip")
 
-    # Meta Conversions API (server-side Purchase events). Disabled when either
-    # value is empty. META_TEST_EVENT_CODE routes events to the Test Events tab.
-    meta_pixel_id: str = os.getenv("META_PIXEL_ID", "")
-    meta_capi_access_token: str = os.getenv("META_CAPI_ACCESS_TOKEN", "")
-    meta_test_event_code: str = os.getenv("META_TEST_EVENT_CODE", "")
+    # Meta Conversions API. Pixel id, token and test code are per store
+    # (store_settings); only the Graph API version is deployment-wide.
     meta_api_version: str = os.getenv("META_API_VERSION", "v21.0")
 
-    # Pathao Courier merchant API. Disabled until client id, secret, username,
-    # password and store id are all set. Defaults point at the sandbox so a
-    # half-configured server can never create real consignments.
+    # Pathao Courier. Credentials, merchant store id, item type and weight are
+    # per store (store_settings). The environment is deployment-wide and
+    # defaults to the sandbox so a half-configured server can never create
+    # real consignments.
     pathao_base_url: str = os.getenv(
         "PATHAO_BASE_URL", "https://courier-api-sandbox.pathao.com"
     ).rstrip("/")
-    pathao_client_id: str = os.getenv("PATHAO_CLIENT_ID", "")
-    pathao_client_secret: str = os.getenv("PATHAO_CLIENT_SECRET", "")
-    pathao_username: str = os.getenv("PATHAO_USERNAME", "")
-    pathao_password: str = os.getenv("PATHAO_PASSWORD", "")
-    pathao_store_id: int = int(os.getenv("PATHAO_STORE_ID", "0") or 0)
-    # Weight of one unit in kg; multiplied by quantity and clamped to Pathao's
-    # 0.5 to 10 kg range. Pathao prices by weight, so keep this honest.
-    pathao_unit_weight_kg: float = float(os.getenv("PATHAO_UNIT_WEIGHT_KG", "1"))
     # Public tracking page Pathao gives customers; the consignment id and
     # phone are appended as query parameters.
     pathao_tracking_url: str = os.getenv(
@@ -93,6 +83,14 @@ class Settings:
     session_secret: str = os.getenv("SESSION_SECRET", "")
     session_max_age: int = int(os.getenv("SESSION_MAX_AGE", str(7 * 24 * 3600)))
     cookie_secure: bool = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+    # Development only. DEV_LOGIN_EMAIL names an account that POST
+    # /api/auth/dev-login signs in without Google — needed because Google
+    # refuses OAuth origins on made-up hostnames such as admin.nb.local. Empty
+    # (the default) disables the endpoint entirely; it must stay empty in
+    # production. DEV_STORE_FALLBACK=1 lets the web app pick a store by
+    # ?__store=<slug> on plain localhost; see api.stores.
+    dev_login_email: str = os.getenv("DEV_LOGIN_EMAIL", "").strip().lower()
+    dev_store_fallback: bool = os.getenv("DEV_STORE_FALLBACK", "") == "1"
     super_admin_emails: frozenset[str] = frozenset(
         email.strip().lower()
         for email in os.getenv("SUPER_ADMIN_EMAILS", "").split(",")

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import monitoring, visits
+from api import monitoring, stores, tenancy, visits
 from api.auth import require_super_admin
 from api.config import settings
 from api.db import engine, get_session
@@ -97,12 +97,25 @@ def _totals(row) -> dict:
     return values
 
 
+def _selected_store_id(request: Request) -> int | None:
+    """The store the admin has selected (X-Admin-Store), when any. The System
+    page is platform-wide, so this only narrows the per-store figures."""
+    raw = request.headers.get(tenancy.ADMIN_STORE_HEADER, "").strip()
+    return int(raw) if raw.isdigit() else None
+
+
 @router.get("/overview")
 async def overview(
     request: Request, session: AsyncSession = Depends(get_session)
 ) -> dict:
-    """Everything the System page shows, in one round trip."""
+    """Everything the System page shows, in one round trip. Traffic and host
+    figures are the whole service; visitors, orders and integration flags are
+    the selected store's."""
     now = datetime.now(timezone.utc)
+    store_id = _selected_store_id(request)
+    integrations = (
+        await stores.load_integrations(session, store_id) if store_id is not None else None
+    )
 
     # -- database ------------------------------------------------------------
     started = time.perf_counter()
@@ -145,11 +158,13 @@ async def overview(
 
     # -- orders, from the audit trail so promoted drafts count once --------
     async def events(kinds: tuple[str, ...], since: datetime, new_status: str | None = None) -> int:
-        conditions = [OrderEvent.event_type.in_(kinds), OrderEvent.created_at >= since]
+        conditions = [*scope_events, OrderEvent.event_type.in_(kinds), OrderEvent.created_at >= since]
         if new_status:
             conditions.append(OrderEvent.new_status == new_status)
         return int(await session.scalar(select(func.count()).select_from(OrderEvent).where(*conditions)) or 0)
 
+    scope_events = [OrderEvent.store_id == store_id] if store_id is not None else []
+    scope_orders = [Order.store_id == store_id] if store_id is not None else []
     flow = {}
     for name, since in (("last_hour", now - timedelta(hours=1)), ("last_24h", now - timedelta(hours=24))):
         flow[name] = {
@@ -161,7 +176,7 @@ async def overview(
     by_status = {
         status: int(count)
         for status, count in await session.execute(
-            select(Order.status, func.count()).group_by(Order.status)
+            select(Order.status, func.count()).where(*scope_orders).group_by(Order.status)
         )
     }
     pending_signins = int(
@@ -199,7 +214,8 @@ async def overview(
             "last_24h": _totals(day),
             "flush_every_seconds": monitoring.FLUSH_EVERY_SECONDS,
         },
-        "visitors": await visits.summary(session),
+        "visitors": await visits.summary(session, store_id),
+        "store_id": store_id,
         "orders": {
             "flow": flow,
             "by_status": by_status,
@@ -245,12 +261,12 @@ async def overview(
             # The browser pixel needs only the ID; server-side CAPI needs the
             # access token as well. Reported apart so "no token yet" doesn't
             # read as "pixel off".
-            "meta_pixel": bool(settings.meta_pixel_id),
-            "meta_capi": meta_capi.enabled(),
-            "meta_test_mode": bool(settings.meta_test_event_code),
+            "meta_pixel": bool(integrations and integrations.meta.pixel_id),
+            "meta_capi": bool(integrations and integrations.meta.enabled),
+            "meta_test_mode": bool(integrations and integrations.meta.test_event_code),
             # Events Meta never accepted, parked for a resend (all workers),
             # and deliveries this worker still has in flight.
-            "meta_capi_failed": await meta_capi.failed_count(session),
+            "meta_capi_failed": await meta_capi.failed_count(session, store_id),
             "meta_capi_pending": meta_capi.pending(),
             "google_login": bool(settings.google_client_id),
             "secure_cookies": settings.cookie_secure,
@@ -260,24 +276,35 @@ async def overview(
 
 
 @router.get("/pathao", response_model=PathaoStatusOut)
-async def pathao_status() -> PathaoStatusOut:
+async def pathao_status(
+    request: Request, session: AsyncSession = Depends(get_session)
+) -> PathaoStatusOut:
     """
-    Is Pathao configured, which environment, and which stores the credentials
-    can see — the check to run once after putting keys in .env, so the store
-    id can be copied from here rather than guessed.
+    Is Pathao configured for the selected store, which environment, and which
+    merchant stores the credentials can see — the check to run once after
+    entering keys in Settings, so the Pathao store id can be copied from here
+    rather than guessed.
     """
+    store_id = _selected_store_id(request)
+    integrations = (
+        await stores.load_integrations(session, store_id) if store_id is not None else None
+    )
+    cfg = integrations.pathao if integrations else stores.PathaoConfig()
     out = PathaoStatusOut(
-        enabled=pathao.enabled(),
+        enabled=cfg.enabled,
         sandbox=pathao.is_sandbox(),
         base_url=settings.pathao_base_url,
-        store_id=settings.pathao_store_id,
-        unit_weight_kg=settings.pathao_unit_weight_kg,
+        store_id=cfg.store_id,
+        unit_weight_kg=cfg.unit_weight_kg,
     )
+    if store_id is None:
+        out.error = "Select a store in the switcher"
+        return out
     if not out.enabled:
-        out.error = "Missing PATHAO_* settings"
+        out.error = "Pathao is not configured in this store's Settings"
         return out
     try:
-        out.stores = await pathao.list_stores()
+        out.stores = await pathao.list_stores(cfg, store_id)
     except pathao.PathaoError as exc:
         out.error = pathao.error_text(exc)
     return out
@@ -305,15 +332,19 @@ async def capi_failed(
 async def capi_resend(
     payload: CapiResendIn | None = None,
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> dict:  # noqa: D401
     """
     Try the parked events again, one attempt each. Delivered rows disappear;
     the rest keep the new error. Meta accepts website events up to seven days
     old, so anything older than that will keep failing and should be deleted.
     """
-    if not meta_capi.enabled():
-        raise HTTPException(status_code=409, detail="Conversions API is not configured")
-    return await meta_capi.resend_failed(session, ids=payload.ids if payload else None)
+    async def meta_for(store_id: int) -> stores.MetaConfig | None:
+        integrations = await stores.load_integrations(session, store_id)
+        return integrations.meta if integrations else None
+
+    return await meta_capi.resend_failed(
+        session, meta_for, ids=payload.ids if payload else None
+    )
 
 
 @router.delete("/capi/failed/{event_id}", status_code=204)

@@ -1,12 +1,21 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { STORE_SCRIPT_ID, resetPublicStoreConfig } from "@/lib/store-public";
 import type { TrackedItem } from "@/lib/tracking";
-
-// PIXEL_ID is read when the module loads, so stub the env before importing.
-vi.stubEnv("NEXT_PUBLIC_META_PIXEL_ID", "424242");
 
 type Tracking = typeof import("@/lib/tracking");
 let tracking: Tracking;
+
+/** The page's store config, as the storefront layout serialises it. */
+function setStoreConfig(pixelId: string) {
+  document.getElementById(STORE_SCRIPT_ID)?.remove();
+  const el = document.createElement("script");
+  el.id = STORE_SCRIPT_ID;
+  el.type = "application/json";
+  el.textContent = JSON.stringify({ slug: "s", currency: "BDT", pixelId, gtmId: "" });
+  document.head.appendChild(el);
+  resetPublicStoreConfig();
+}
 
 const ITEM: TrackedItem = {
   id: "SKU-1",
@@ -31,6 +40,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  setStoreConfig("424242");
   window.history.replaceState({}, "", "/");
   window.fbq = fbq;
   vi.stubGlobal("fetch", fetchMock);
@@ -118,5 +128,17 @@ describe("gating", () => {
     fetchMock.mockImplementationOnce(() => Promise.reject(new Error("offline")));
     expect(() => tracking.trackAddToCart([ITEM])).not.toThrow();
     await Promise.resolve();
+  });
+});
+
+
+describe("runtime pixel id", () => {
+  it("is read from the page, not from the build", () => {
+    expect(tracking.pixelId()).toBe("424242");
+    setStoreConfig("");
+    expect(tracking.pixelId()).toBe("");
+    fbq.mockClear();
+    tracking.trackPageView();
+    expect(fbq).not.toHaveBeenCalled();
   });
 });

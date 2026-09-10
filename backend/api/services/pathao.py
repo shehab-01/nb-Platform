@@ -22,6 +22,7 @@ from api.config import settings
 from api.db import async_session
 from api.models import IntegrationToken, Order
 from api.phone import bd_mobile
+from api.stores import PathaoConfig
 
 log = logging.getLogger("pathao")
 
@@ -33,6 +34,8 @@ EXPIRY_MARGIN = timedelta(hours=1)
 
 DELIVERY_NORMAL = 48
 ITEM_PARCEL = 2
+# Pathao's item_type codes, by the name the store settings use.
+ITEM_TYPES = {"document": 1, "parcel": 2, "fragile": 3}
 MIN_WEIGHT_KG = 0.5
 MAX_WEIGHT_KG = 10.0
 # Pathao's limits (the sandbox enforces a 64-character name despite the docs).
@@ -68,17 +71,12 @@ class Consignment:
     raw: dict[str, Any] = field(default_factory=dict)
 
 
-def enabled() -> bool:
-    return bool(
-        settings.pathao_client_id
-        and settings.pathao_client_secret
-        and settings.pathao_username
-        and settings.pathao_password
-        and settings.pathao_store_id
-    )
+def enabled(cfg: PathaoConfig) -> bool:
+    return cfg.enabled
 
 
 def is_sandbox() -> bool:
+    # The base URL (sandbox vs live) is still a deployment-wide setting.
     return "sandbox" in settings.pathao_base_url
 
 
@@ -94,12 +92,17 @@ def recipient_phone(raw: str) -> str | None:
     return bd_mobile(raw)
 
 
-def item_weight_kg(quantity: int) -> float:
-    weight = settings.pathao_unit_weight_kg * max(quantity, 1)
+def item_weight_kg(cfg: PathaoConfig, quantity: int) -> float:
+    """The store's per-unit weight times the quantity, inside Pathao's range."""
+    weight = cfg.unit_weight_kg * max(quantity, 1)
     return round(min(max(weight, MIN_WEIGHT_KG), MAX_WEIGHT_KG), 2)
 
 
-def build_order_payload(order: Order) -> dict[str, Any]:
+def item_type_code(cfg: PathaoConfig) -> int:
+    return ITEM_TYPES.get(cfg.item_type, ITEM_PARCEL)
+
+
+def build_order_payload(order: Order, cfg: PathaoConfig, order_no: str) -> dict[str, Any]:
     """The create-order body for one of our orders, or PathaoError if the
     customer details can't satisfy Pathao's validation."""
     problems: dict[str, list[str]] = {}
@@ -137,15 +140,15 @@ def build_order_payload(order: Order) -> dict[str, Any]:
     else:
         description = f"{order.product_name} x{order.quantity}"[:200]
     payload: dict[str, Any] = {
-        "store_id": settings.pathao_store_id,
-        "merchant_order_id": f"NB-{order.id}",
+        "store_id": cfg.store_id,
+        "merchant_order_id": order_no,
         "recipient_name": name,
         "recipient_phone": phone,
         "recipient_address": address,
         "delivery_type": DELIVERY_NORMAL,
-        "item_type": ITEM_PARCEL,
+        "item_type": item_type_code(cfg),
         "item_quantity": max(order.quantity, 1),
-        "item_weight": item_weight_kg(order.quantity),
+        "item_weight": item_weight_kg(cfg, order.quantity),
         "item_description": description,
         # Cash on delivery for the full order value.
         "amount_to_collect": int(order.total_amount),
@@ -212,9 +215,10 @@ def _raise_for(status: int, body: Any) -> None:
 # --- Tokens -----------------------------------------------------------------
 
 
-def _token_row_from(body: dict) -> IntegrationToken:
+def _token_row_from(body: dict, store_id: int) -> IntegrationToken:
     expires_in = int(body.get("expires_in") or 0)
     return IntegrationToken(
+        store_id=store_id,
         provider=PROVIDER,
         access_token=str(body["access_token"]),
         refresh_token=body.get("refresh_token"),
@@ -222,13 +226,12 @@ def _token_row_from(body: dict) -> IntegrationToken:
     )
 
 
-async def _issue_token(refresh_token: str | None) -> IntegrationToken:
+async def _issue_token(
+    cfg: PathaoConfig, store_id: int, refresh_token: str | None
+) -> IntegrationToken:
     """Ask Pathao for a token: by refresh token when we have one, else by
     password. A dead refresh token silently falls back to the password."""
-    base = {
-        "client_id": settings.pathao_client_id,
-        "client_secret": settings.pathao_client_secret,
-    }
+    base = {"client_id": cfg.client_id, "client_secret": cfg.client_secret}
     if refresh_token:
         status, body = await asyncio.to_thread(
             _post_sync,
@@ -237,7 +240,7 @@ async def _issue_token(refresh_token: str | None) -> IntegrationToken:
             None,
         )
         if status == 200 and isinstance(body, dict) and body.get("access_token"):
-            return _token_row_from(body)
+            return _token_row_from(body, store_id)
         log.warning("Pathao refresh token rejected (%s); using password grant", status)
 
     status, body = await asyncio.to_thread(
@@ -246,8 +249,8 @@ async def _issue_token(refresh_token: str | None) -> IntegrationToken:
         {
             **base,
             "grant_type": "password",
-            "username": settings.pathao_username,
-            "password": settings.pathao_password,
+            "username": cfg.username,
+            "password": cfg.password,
         },
         None,
     )
@@ -257,23 +260,23 @@ async def _issue_token(refresh_token: str | None) -> IntegrationToken:
             f"Pathao login failed ({status}): {detail or 'no access token returned'}",
             status=status,
         )
-    return _token_row_from(body)
+    return _token_row_from(body, store_id)
 
 
-async def get_access_token(*, force: bool = False) -> str:
-    """A usable bearer token, issued or refreshed as needed.
+async def get_access_token(cfg: PathaoConfig, store_id: int, *, force: bool = False) -> str:
+    """A usable bearer token for this store, issued or refreshed as needed.
 
     Uses its own DB session so the caller's transaction (which may hold row
     locks on orders) is never committed from here.
     """
-    if not enabled():
-        raise PathaoError("Pathao is not configured on the server")
+    if not cfg.enabled:
+        raise PathaoError("Pathao is not configured for this store")
     async with async_session() as session:
-        row = await session.get(IntegrationToken, PROVIDER)
+        row = await session.get(IntegrationToken, (store_id, PROVIDER))
         now = datetime.now(timezone.utc)
         if row and not force and row.expires_at - EXPIRY_MARGIN > now:
             return row.access_token
-        fresh = await _issue_token(row.refresh_token if row else None)
+        fresh = await _issue_token(cfg, store_id, row.refresh_token if row else None)
         if row is None:
             session.add(fresh)
         else:
@@ -281,13 +284,15 @@ async def get_access_token(*, force: bool = False) -> str:
             row.refresh_token = fresh.refresh_token
             row.expires_at = fresh.expires_at
         await session.commit()
-        log.info("Pathao token issued; expires %s", fresh.expires_at.isoformat())
+        log.info("Pathao token issued for store %s; expires %s", store_id, fresh.expires_at.isoformat())
         return fresh.access_token
 
 
-async def _call(method: str, path: str, body: dict | None = None) -> Any:
+async def _call(
+    cfg: PathaoConfig, store_id: int, method: str, path: str, body: dict | None = None
+) -> Any:
     """One authenticated call. A 401 re-issues the token and retries once."""
-    token = await get_access_token()
+    token = await get_access_token(cfg, store_id)
     for attempt in (1, 2):
         if method == "GET":
             status, data = await asyncio.to_thread(_get_sync, path, token)
@@ -296,7 +301,7 @@ async def _call(method: str, path: str, body: dict | None = None) -> Any:
         if 200 <= status < 300:
             return data
         if status == 401 and attempt == 1:
-            token = await get_access_token(force=True)
+            token = await get_access_token(cfg, store_id, force=True)
             continue
         _raise_for(status, data)
     raise PathaoError("Pathao request failed")  # unreachable
@@ -317,28 +322,29 @@ def _consignment_from(data: Any) -> Consignment:
     )
 
 
-async def create_order(order: Order) -> Consignment:
-    """Book one parcel. Raises PathaoError with field errors when our data
-    doesn't pass Pathao's checks, and on any transport or auth failure."""
-    payload = build_order_payload(order)
+async def create_order(order: Order, cfg: PathaoConfig, order_no: str) -> Consignment:
+    """Book one parcel with the order's store's credentials. Raises PathaoError
+    with field errors when our data doesn't pass Pathao's checks, and on any
+    transport or auth failure."""
+    payload = build_order_payload(order, cfg, order_no)
     try:
-        body = await _call("POST", "orders", payload)
+        body = await _call(cfg, order.store_id, "POST", "orders", payload)
     except requests.RequestException as exc:
         raise PathaoError(f"Could not reach Pathao: {exc}") from exc
     return _consignment_from(body.get("data") if isinstance(body, dict) else None)
 
 
-async def order_info(consignment_id: str) -> Consignment:
+async def order_info(cfg: PathaoConfig, store_id: int, consignment_id: str) -> Consignment:
     try:
-        body = await _call("GET", f"orders/{consignment_id}/info")
+        body = await _call(cfg, store_id, "GET", f"orders/{consignment_id}/info")
     except requests.RequestException as exc:
         raise PathaoError(f"Could not reach Pathao: {exc}") from exc
     return _consignment_from(body.get("data") if isinstance(body, dict) else None)
 
 
-async def list_stores() -> list[dict[str, Any]]:
+async def list_stores(cfg: PathaoConfig, store_id: int) -> list[dict[str, Any]]:
     try:
-        body = await _call("GET", "stores")
+        body = await _call(cfg, store_id, "GET", "stores")
     except requests.RequestException as exc:
         raise PathaoError(f"Could not reach Pathao: {exc}") from exc
     data = body.get("data") if isinstance(body, dict) else None
@@ -346,15 +352,19 @@ async def list_stores() -> list[dict[str, Any]]:
     return stores if isinstance(stores, list) else []
 
 
-async def price_plan(city_id: int, zone_id: int, quantity: int = 1) -> dict[str, Any]:
+async def price_plan(
+    cfg: PathaoConfig, store_id: int, city_id: int, zone_id: int, quantity: int = 1
+) -> dict[str, Any]:
     body = await _call(
+        cfg,
+        store_id,
         "POST",
         "merchant/price-plan",
         {
-            "store_id": settings.pathao_store_id,
-            "item_type": ITEM_PARCEL,
+            "store_id": cfg.store_id,
+            "item_type": item_type_code(cfg),
             "delivery_type": DELIVERY_NORMAL,
-            "item_weight": item_weight_kg(quantity),
+            "item_weight": item_weight_kg(cfg, quantity),
             "recipient_city": city_id,
             "recipient_zone": zone_id,
         },

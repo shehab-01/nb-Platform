@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { Storefront } from "@/components/storefront/storefront";
+import { storeHeaders } from "@/lib/store";
 import { fetchActiveProduct } from "@/lib/storefront-api";
 
 /**
@@ -31,7 +32,7 @@ export default async function LegacyLanding() {
   if (process.env.SHOW_LEGACY_LANDING !== "1") notFound();
 
   // Nothing live means nothing this page could sell either.
-  const product = await fetchActiveProduct();
+  const product = await fetchActiveProduct(await storeHeaders());
   if (product === null) notFound();
   return <Storefront product={product} />;
 }

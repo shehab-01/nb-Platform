@@ -3,7 +3,7 @@
 import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
 
-import { GTM_ID, PIXEL_ID, trackPageView } from "@/lib/tracking";
+import { gtmId, pixelId, trackPageView } from "@/lib/tracking";
 
 const FBEVENTS_SRC = "https://connect.facebook.net/en_US/fbevents.js";
 /** Load the SDKs by this point even if the visitor never touches the page. */
@@ -24,7 +24,9 @@ const FIRST_INTERACTION = ["pointerdown", "keydown", "scroll", "touchstart"] as 
  */
 export default function MetaPixel() {
   const pathname = usePathname();
-  const isAdmin = pathname?.startsWith("/admin") ?? false;
+  // Staff screens and the admin's template preview never reach ad platforms.
+  const isAdmin =
+    (pathname?.startsWith("/admin") || pathname?.startsWith("/preview")) ?? false;
   const lastTracked = useRef(pathname);
 
   // PageView on client-side navigations; the initial load is covered by the
@@ -37,17 +39,19 @@ export default function MetaPixel() {
 
   // Deferred SDK loading, once per page load.
   useEffect(() => {
-    if (isAdmin || (!PIXEL_ID && !GTM_ID)) return;
+    const pixel = pixelId();
+    const gtm = gtmId();
+    if (isAdmin || (!pixel && !gtm)) return;
     let done = false;
     const load = () => {
       if (done) return;
       done = true;
       cleanup();
-      if (PIXEL_ID) inject("meta-pixel-sdk", FBEVENTS_SRC);
-      if (GTM_ID) {
+      if (pixel) inject("meta-pixel-sdk", FBEVENTS_SRC);
+      if (gtm) {
         window.dataLayer = window.dataLayer ?? [];
         window.dataLayer.push({ "gtm.start": Date.now(), event: "gtm.js" });
-        inject("gtm", `https://www.googletagmanager.com/gtm.js?id=${GTM_ID}`);
+        inject("gtm", `https://www.googletagmanager.com/gtm.js?id=${gtm}`);
       }
     };
     const timer = setTimeout(load, LOAD_AFTER_MS);

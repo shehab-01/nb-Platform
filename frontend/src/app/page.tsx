@@ -1,40 +1,87 @@
-import Image from "next/image";
+import type { Metadata } from "next";
+import { headers } from "next/headers";
 
-import "@/components/landing/landing.css";
-import { Landing } from "@/components/landing/landing";
+import "@/templates/classic/landing.css";
+import { getStore, getStoreDirectory, storeHeaders, themeVars } from "@/lib/store";
 import { fetchStorefrontListing } from "@/lib/storefront-api";
+import { loadTemplate, resolveTemplateName } from "@/templates";
+import { resolveContent } from "@/templates/catalog";
+import type { StorePublicConfig } from "@/templates/types";
 
 /**
- * The landing page. A server component whose only job is to read the offer —
- * the live product, its description and its sizes — and hand it to the page,
- * so the prices and titles are in the first byte of HTML: no client fetch, no
- * flash of a stale figure, and a crawler sees the real offer.
+ * The storefront root. Resolves the store from the hostname the proxy stamped
+ * on the request, then renders that store's template with its offer — the
+ * live product, its description and its sizes — already in the HTML.
  *
- * With nothing live, or the API unreachable, the page says the shop is
- * closed for the moment. There is deliberately no bundled product to fall
- * back to: selling something nobody put in the catalogue, at a price nobody
- * set, is worse than selling nothing.
+ * With no store on this hostname the page says so (and, in development,
+ * lists the stores that exist). With a store but nothing live, the shop says
+ * it is closed for the moment: there is deliberately no bundled product.
  *
- * The page this replaced is preserved at /legacy, which 404s unless
- * SHOW_LEGACY_LANDING=1.
+ * Which component set renders is `store.template`, looked up in the template
+ * registry (src/templates). Only that template's code is loaded.
  */
-export default async function Home() {
-  const listing = await fetchStorefrontListing();
-  if (listing === null) return <Closed />;
-  return <Landing listing={listing} />;
+
+// Per request: which store depends on the Host header.
+export const dynamic = "force-dynamic";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const store = await getStore();
+  return { title: store?.name ?? "Store not found" };
 }
 
-/** The shop with nothing to sell: the logo and a line, nothing to tap. */
-function Closed() {
+export default async function Home() {
+  const store = await getStore();
+  if (store === null) return <NoStore />;
+  const [template, listing] = await Promise.all([
+    loadTemplate(store.template),
+    fetchStorefrontListing(await storeHeaders()),
+  ]);
+  const publicConfig: StorePublicConfig = {
+    slug: store.slug,
+    name: store.name,
+    currency: store.currency,
+    themeVars: themeVars(store.theme),
+    content: resolveContent(resolveTemplateName(store.template), store.content),
+  };
+  if (listing === null) return <template.Closed store={publicConfig} />;
+  return <template.Storefront store={publicConfig} listing={listing} />;
+}
+
+/** No store answers on this hostname. In development the seeded stores are
+ * listed with links; in production the directory is empty and this is just a
+ * plain "nothing here". */
+async function NoStore() {
+  const h = await headers();
+  const requested = h.get("x-store-host") || h.get("host") || "";
+  const port = (h.get("host") ?? "").split(":")[1];
+  const suffix = port ? `:${port}` : "";
+  const directory = await getStoreDirectory();
   return (
     <main className="nb-landing">
-      <header className="nb-header">
-        <Image src="/logo.png" alt="Nature Bazar" width={150} height={48} priority />
-      </header>
       <div className="nb-stack">
         <section className="nb-card nb-closed">
-          <h1>এই মুহূর্তে কোনো পণ্য বিক্রির জন্য নেই</h1>
-          <p>আমরা শিগগিরই ফিরছি। একটু পরে আবার দেখুন।</p>
+          <h1>No store at {requested || "this address"}</h1>
+          {directory.length > 0 ? (
+            <>
+              <p>Stores on this platform:</p>
+              <ul style={{ textAlign: "left", lineHeight: 1.9 }}>
+                {directory.map((s) => (
+                  <li key={s.slug}>
+                    <strong>{s.name}</strong>
+                    {s.domains.map((d) => (
+                      <span key={d}>
+                        {" "}
+                        · <a href={`http://${d}${suffix}/`}>{d}</a>
+                      </span>
+                    ))}{" "}
+                    · <a href={`/?__store=${s.slug}`}>?__store={s.slug}</a>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p>Nothing here.</p>
+          )}
         </section>
       </div>
     </main>

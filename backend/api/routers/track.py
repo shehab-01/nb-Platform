@@ -15,9 +15,11 @@ match keys (IP, user agent, _fbp/_fbc cookies) are taken from the request.
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Request, Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import visits
+from api import stores, visits
 from api.config import settings
+from api.db import get_session
 from api.ratelimit import RateLimiter
 from api.schemas import TrackEventIn
 from api.services import meta_capi
@@ -34,7 +36,8 @@ def _is_admin_url(url: str | None) -> bool:
     if not url:
         return False
     try:
-        return urlparse(url).path.startswith("/admin")
+        path = urlparse(url).path
+        return path.startswith("/admin") or path.startswith("/preview")
     except ValueError:
         return False
 
@@ -45,8 +48,15 @@ def _is_admin_url(url: str | None) -> bool:
     response_class=Response,
     dependencies=[Depends(track_limiter)],
 )
-async def track_event(payload: TrackEventIn, request: Request) -> Response:
-    """Acknowledge at once; the Conversions API call runs as its own task."""
+async def track_event(
+    payload: TrackEventIn,
+    request: Request,
+    store: stores.StoreConfig = Depends(stores.current_store),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Acknowledge at once; the Conversions API call runs as its own task
+    with the store's pixel and token. The store is the one the hostname
+    resolves to (404 otherwise, like every storefront call)."""
     # Staff traffic never reaches Meta: the browser already skips /admin, and
     # this guards the same line on the server for anything that slips through.
     if _is_admin_url(payload.event_source_url) or _is_admin_url(
@@ -57,9 +67,13 @@ async def track_event(payload: TrackEventIn, request: Request) -> Response:
     # not Meta is configured.
     if payload.event_name == "PageView":
         visits.record(
-            request, source_url=payload.event_source_url, fbp_fallback=payload.fbp
+            request,
+            store_id=store.id,
+            source_url=payload.event_source_url,
+            fbp_fallback=payload.fbp,
         )
-    if not meta_capi.enabled():
+    integrations = await stores.load_integrations(session, store.id)
+    if integrations is None or not integrations.meta.enabled:
         return Response(status_code=204)
 
     ctx = meta_capi.client_context(
@@ -78,5 +92,5 @@ async def track_event(payload: TrackEventIn, request: Request) -> Response:
             else None
         ),
     )
-    meta_capi.dispatch(event)
+    meta_capi.dispatch(event, integrations.meta, store.id)
     return Response(status_code=204)

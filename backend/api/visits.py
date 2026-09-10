@@ -53,24 +53,26 @@ def _path(url: str | None) -> str | None:
         return None
 
 
-async def _insert(visitor: str, path: str | None) -> None:
+async def _insert(store_id: int, visitor: str, path: str | None) -> None:
     try:
         async with async_session() as session:
-            session.add(Visit(visitor=visitor, path=path))
+            session.add(Visit(store_id=store_id, visitor=visitor, path=path))
             await session.commit()
     except Exception as exc:  # noqa: BLE001 — a lost visit is not worth a 500
         log.warning("visit not recorded: %s", exc)
 
 
-def record(request: Request, *, source_url: str | None, fbp_fallback: str | None) -> None:
-    """Note a storefront page view. Returns at once."""
+def record(
+    request: Request, *, store_id: int, source_url: str | None, fbp_fallback: str | None
+) -> None:
+    """Note a storefront page view for this store. Returns at once."""
     fbp = request.cookies.get("_fbp") or fbp_fallback
     visitor = visitor_key(fbp, client_ip(request), request.headers.get("user-agent"))
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-    task = loop.create_task(_insert(visitor, _path(source_url)))
+    task = loop.create_task(_insert(store_id, visitor, _path(source_url)))
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
 
@@ -98,16 +100,21 @@ _WEB_ORDER = (
 )
 
 
-async def summary(session: AsyncSession, now: datetime | None = None) -> dict:
-    """Visitors, page views, web orders and conversion per period."""
+async def summary(
+    session: AsyncSession, store_id: int | None = None, now: datetime | None = None
+) -> dict:
+    """Visitors, page views, web orders and conversion per period, for one
+    store or (store_id None) the whole platform."""
     now = now or datetime.now(timezone.utc)
-    first = await session.scalar(select(func.min(Visit.at)))
+    scope_v = [Visit.store_id == store_id] if store_id is not None else []
+    scope_o = [Order.store_id == store_id] if store_id is not None else []
+    first = await session.scalar(select(func.min(Visit.at)).where(*scope_v))
     periods = []
     for key, label, start in _periods(now):
         page_views, visitors = (
             await session.execute(
                 select(func.count(), func.count(func.distinct(Visit.visitor))).where(
-                    Visit.at >= start
+                    *scope_v, Visit.at >= start
                 )
             )
         ).one()
@@ -118,7 +125,7 @@ async def summary(session: AsyncSession, now: datetime | None = None) -> dict:
         orders = await session.scalar(
             select(func.count())
             .select_from(Order)
-            .where(*_WEB_ORDER, Order.created_at >= orders_since)
+            .where(*scope_o, *_WEB_ORDER, Order.created_at >= orders_since)
         )
         visitors = int(visitors or 0)
         orders = int(orders or 0)

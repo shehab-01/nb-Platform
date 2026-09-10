@@ -20,8 +20,9 @@ import logging
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api import stores
 from api.db import async_session
-from api.models import Order, OrderEvent
+from api.models import Order, OrderEvent, Store
 from api.services import pathao
 
 log = logging.getLogger("pathao_sync")
@@ -45,17 +46,21 @@ def is_settled(status: str | None) -> bool:
 
 
 async def refresh_order(
-    session: AsyncSession, order: Order, actor_id: int | None = None
+    session: AsyncSession,
+    order: Order,
+    cfg: stores.PathaoConfig,
+    actor_id: int | None = None,
 ) -> str | None:
     """Ask Pathao where this parcel is and record the answer on the order,
     with an audit event when it changed. Returns the status. Raises
     PathaoError when Pathao could not be asked."""
-    info = await pathao.order_info(order.pathao_consignment_id)
+    info = await pathao.order_info(cfg, order.store_id, order.pathao_consignment_id)
     status = info.raw.get("order_status_slug") or info.order_status or None
     if status != order.pathao_status:
         order.pathao_status = status
         session.add(
             OrderEvent(
+                store_id=order.store_id,
                 order_id=order.id,
                 actor_id=actor_id,
                 event_type="pathao_status",
@@ -66,44 +71,51 @@ async def refresh_order(
 
 
 async def poll_once() -> int:
-    """One round over every unsettled parcel. Returns how many were asked."""
-    if not pathao.enabled():
-        return 0
+    """One round over every store's unsettled parcels, each store with its
+    own credentials. Returns how many were asked."""
     async with async_session() as session, session.begin():
         locked = await session.scalar(
             select(func.pg_try_advisory_xact_lock(ADVISORY_LOCK_KEY))
         )
         if not locked:
             return 0
-        rows = (
-            await session.scalars(
-                select(Order)
-                .where(
-                    Order.pathao_consignment_id.is_not(None),
-                    or_(
-                        Order.pathao_status.is_(None),
-                        func.lower(Order.pathao_status).not_in(SETTLED),
-                    ),
-                )
-                .order_by(Order.pathao_sent_at.desc().nulls_last())
-                .limit(BATCH_LIMIT)
-            )
-        ).all()
         asked = 0
-        for order in rows:
-            try:
-                await refresh_order(session, order)
-                asked += 1
-            except pathao.PathaoError as exc:
-                # One parcel Pathao will not answer for must not stop the
-                # rest; it is asked again next round.
-                log.warning(
-                    "Pathao sync: %s (NB-%s): %s",
-                    order.pathao_consignment_id,
-                    order.id,
-                    pathao.error_text(exc),
+        store_ids = (
+            await session.scalars(select(Store.id).where(Store.is_active.is_(True)))
+        ).all()
+        for store_id in store_ids:
+            integrations = await stores.load_integrations(session, store_id)
+            if integrations is None or not integrations.pathao.enabled:
+                continue
+            rows = (
+                await session.scalars(
+                    select(Order)
+                    .where(
+                        Order.store_id == store_id,
+                        Order.pathao_consignment_id.is_not(None),
+                        or_(
+                            Order.pathao_status.is_(None),
+                            func.lower(Order.pathao_status).not_in(SETTLED),
+                        ),
+                    )
+                    .order_by(Order.pathao_sent_at.desc().nulls_last())
+                    .limit(BATCH_LIMIT)
                 )
-            await asyncio.sleep(BETWEEN_CALLS_SECONDS)
+            ).all()
+            for order in rows:
+                try:
+                    await refresh_order(session, order, integrations.pathao)
+                    asked += 1
+                except pathao.PathaoError as exc:
+                    # One parcel Pathao will not answer for must not stop the
+                    # rest; it is asked again next round.
+                    log.warning(
+                        "Pathao sync: %s (%s): %s",
+                        order.pathao_consignment_id,
+                        order.order_no,
+                        pathao.error_text(exc),
+                    )
+                await asyncio.sleep(BETWEEN_CALLS_SECONDS)
         return asked
 
 

@@ -1,10 +1,14 @@
+# nbPlatform: the multi-store v2. A distinct project name so its volumes and
+# network never collide with the v1 checkout (../natureBazar) on the same host.
+name: nbplatform
+
 services:
   db:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-nature_bazar}
-      POSTGRES_USER: ${POSTGRES_USER:-nature_bazar}
+      POSTGRES_DB: ${POSTGRES_DB:-nbplatform}
+      POSTGRES_USER: ${POSTGRES_USER:-nbplatform}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -18,28 +22,26 @@ services:
     build: ./backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-nature_bazar}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-nature_bazar}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-nbplatform}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-nbplatform}
       UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
       DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
-      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:8090}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       SESSION_SECRET: ${SESSION_SECRET:-}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
       SUPER_ADMIN_EMAILS: ${SUPER_ADMIN_EMAILS:-}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       # Header carrying the real client IP: cf-connecting-ip behind Cloudflare,
       # x-forwarded-for behind nginx/LiteSpeed. Runtime var.
-      CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-cf-connecting-ip}
-      META_PIXEL_ID: ${META_PIXEL_ID:-}
-      META_CAPI_ACCESS_TOKEN: ${META_CAPI_ACCESS_TOKEN:-}
-      META_TEST_EVENT_CODE: ${META_TEST_EVENT_CODE:-}
+      CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-x-forwarded-for}
+      # Development only (see DEV.md). Both must be empty in production.
+      DEV_LOGIN_EMAIL: ${DEV_LOGIN_EMAIL:-}
+      DEV_STORE_FALLBACK: ${DEV_STORE_FALLBACK:-}
+      DEV_STORE_HOSTS: ${DEV_STORE_HOSTS:-}
+      # Meta and Pathao credentials are per store (Admin → Settings). Only
+      # the Pathao environment stays deployment-wide.
       PATHAO_BASE_URL: ${PATHAO_BASE_URL:-https://courier-api-sandbox.pathao.com}
-      PATHAO_CLIENT_ID: ${PATHAO_CLIENT_ID:-}
-      PATHAO_CLIENT_SECRET: ${PATHAO_CLIENT_SECRET:-}
-      PATHAO_USERNAME: ${PATHAO_USERNAME:-}
-      PATHAO_PASSWORD: ${PATHAO_PASSWORD:-}
-      PATHAO_STORE_ID: ${PATHAO_STORE_ID:-0}
-      PATHAO_UNIT_WEIGHT_KG: ${PATHAO_UNIT_WEIGHT_KG:-1}
       MEDIA_ROOT: /app/media
     volumes:
       # Uploaded product images. A named volume, not a bind or a path inside
@@ -50,24 +52,27 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "127.0.0.1:${API_PORT:-8000}:8000"
+      - "127.0.0.1:${API_PORT:-8001}:8000"
 
   web:
     build:
       context: ./frontend
-      args:
-        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
-        NEXT_PUBLIC_META_PIXEL_ID: ${META_PIXEL_ID:-}
-        NEXT_PUBLIC_GTM_ID: ${GTM_ID:-}
     restart: unless-stopped
     environment:
       # Opens /legacy, the previous landing page, for a look. Runtime var:
       # `docker compose up -d --force-recreate web` after changing.
       SHOW_LEGACY_LANDING: ${SHOW_LEGACY_LANDING:-}
+      # The hostname(s) that serve the admin (comma-separated); every other
+      # hostname is a storefront resolved from the database. Runtime var.
+      ADMIN_HOST: ${ADMIN_HOST:-admin.nb.local}
+      # Optional Google Tag Manager container, platform-wide. Runtime var.
+      GTM_ID: ${GTM_ID:-}
+      # Development only: lets ?__store=<slug> pick a store on localhost.
+      DEV_STORE_FALLBACK: ${DEV_STORE_FALLBACK:-}
     depends_on:
       - api
     ports:
-      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+      - "127.0.0.1:${WEB_PORT:-8090}:3000"
 
 volumes:
   postgres-data:

@@ -13,7 +13,7 @@ from api.auth import (
 )
 from api.config import settings
 from api.db import get_session
-from api.models import User, UserRole, UserStatus
+from api.models import Store, StoreRole, StoreUser, User, UserRole, UserStatus
 from api.ratelimit import logins_limiter
 from api.schemas import UserOut
 
@@ -75,6 +75,67 @@ async def login_with_google(
             user.status = UserStatus.active
         await session.commit()
 
+    set_session_cookie(response, user.id)
+    return user
+
+
+class AuthProviders(BaseModel):
+    """Which sign-in methods this deployment offers; the login page renders
+    a button per enabled one."""
+
+    google: bool
+    # The OAuth client id is public by design (it is in every login page), so
+    # serving it here is what lets it be a runtime setting rather than a value
+    # baked into the web image. Empty when Google sign-in is off.
+    google_client_id: str
+    dev: bool
+
+
+@router.get("/providers", response_model=AuthProviders)
+async def providers() -> AuthProviders:
+    return AuthProviders(
+        google=bool(settings.google_client_id),
+        google_client_id=settings.google_client_id,
+        dev=bool(settings.dev_login_email),
+    )
+
+
+@router.post(
+    "/dev-login", response_model=UserOut, dependencies=[Depends(logins_limiter)]
+)
+async def dev_login(
+    response: Response, session: AsyncSession = Depends(get_session)
+) -> User:
+    """
+    Development only: sign in as the account named by DEV_LOGIN_EMAIL without
+    Google. 404 (not 403) when the variable is unset, so a production server
+    does not even admit the route exists. The account is created as an active
+    super admin if it does not exist yet, which is how a fresh dev database
+    gets its first admin.
+    """
+    if not settings.dev_login_email:
+        raise HTTPException(status_code=404, detail="Not found")
+    email = settings.dev_login_email
+    user = await session.scalar(select(User).where(User.email == email))
+    if user is None:
+        user = User(
+            email=email,
+            name=email.split("@")[0],
+            role=UserRole.super_admin,
+            status=UserStatus.active,
+        )
+        session.add(user)
+        await session.flush()
+    # Approved, and an owner of every store, so the switcher can be exercised
+    # locally even after the super_admin role is taken away in the Users page.
+    member_of = set(
+        (await session.scalars(select(StoreUser.store_id).where(StoreUser.user_id == user.id))).all()
+    )
+    for store_id in await session.scalars(select(Store.id).where(Store.is_active.is_(True))):
+        if store_id not in member_of:
+            session.add(StoreUser(store_id=store_id, user_id=user.id, role=StoreRole.owner.value))
+    await session.commit()
+    await session.refresh(user)
     set_session_cookie(response, user.id)
     return user
 

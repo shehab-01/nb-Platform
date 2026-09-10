@@ -1,5 +1,6 @@
 import enum
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
@@ -9,6 +10,8 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
+    Numeric,
     String,
     Text,
     func,
@@ -72,6 +75,10 @@ class Order(Base):
     __tablename__ = "orders"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # The store this order was placed with; every list and lookup filters on
+    # it first. Order numbers are "<store prefix>-<id>" with one global id
+    # sequence, so a number is unique across the platform.
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
     customer_name: Mapped[str] = mapped_column(String(120))
     phone: Mapped[str] = mapped_column(String(32))
     address: Mapped[str] = mapped_column(Text)
@@ -123,6 +130,7 @@ class Order(Base):
         ForeignKey("users.id", ondelete="SET NULL")
     )
 
+    store: Mapped["Store"] = relationship(lazy="joined")
     assignee: Mapped["User | None"] = relationship(
         lazy="joined", foreign_keys=[assigned_to]
     )
@@ -135,6 +143,14 @@ class Order(Base):
     items: Mapped[list["OrderItem"]] = relationship(
         lazy="selectin", order_by="OrderItem.id", cascade="all, delete-orphan"
     )
+
+    @property
+    def order_no(self) -> str:
+        """"<prefix>-<id>", the number customers, stickers and Meta see."""
+        prefix = "NB"
+        if "store" not in sa_inspect(self).unloaded and self.store is not None:
+            prefix = self.store.order_prefix
+        return f"{prefix}-{self.id}"
 
     @property
     def assigned_to_name(self) -> str | None:
@@ -169,8 +185,10 @@ class Order(Base):
         return self.handler.nickname if self.handler else None
 
     __table_args__ = (
-        # The admin list query: WHERE status IN (...) ORDER BY created_at DESC
-        Index("ix_orders_status_created_at", "status", "created_at"),
+        # The admin list query: WHERE store_id = ? AND status IN (...) ORDER BY created_at
+        Index("ix_orders_store_status_created_at", "store_id", "status", "created_at"),
+        Index("ix_orders_store_phone_key", "store_id", "phone_key"),
+        Index("ix_orders_store_created_at", "store_id", "created_at"),
     )
 
 
@@ -238,6 +256,8 @@ class OrderEvent(Base):
     __tablename__ = "order_events"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # Copied from the order, so per-store dashboards aggregate without a join.
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
     order_id: Mapped[int] = mapped_column(
         ForeignKey("orders.id", ondelete="CASCADE"), index=True
     )
@@ -254,6 +274,8 @@ class OrderEvent(Base):
 
     __table_args__ = (
         Index("ix_order_events_actor_type", "actor_id", "event_type"),
+        Index("ix_order_events_store_actor_type", "store_id", "actor_id", "event_type"),
+        Index("ix_order_events_store_created_at", "store_id", "created_at"),
     )
 
 
@@ -289,6 +311,9 @@ class IntegrationToken(Base):
 
     __tablename__ = "integration_tokens"
 
+    store_id: Mapped[int] = mapped_column(
+        ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True
+    )
     provider: Mapped[str] = mapped_column(String(40), primary_key=True)
     access_token: Mapped[str] = mapped_column(Text)
     refresh_token: Mapped[str | None] = mapped_column(Text)
@@ -309,6 +334,10 @@ class MetaCapiFailedEvent(Base):
     __tablename__ = "meta_capi_failed_events"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # Whose pixel and token the resend must use.
+    store_id: Mapped[int] = mapped_column(
+        ForeignKey("stores.id", ondelete="RESTRICT"), index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -333,6 +362,10 @@ class Product(Base):
     __tablename__ = "products"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # The catalogue is per store; every read filters on this first.
+    store_id: Mapped[int] = mapped_column(
+        ForeignKey("stores.id", ondelete="RESTRICT"), index=True
+    )
     title: Mapped[str] = mapped_column(String(255))
     # Shown under the fold on the landing page. Plain text for now; the rich
     # text editor will store HTML here later.
@@ -354,15 +387,16 @@ class Product(Base):
     )
 
     __table_args__ = (
-        # "Only one may be active" enforced by the database rather than by
-        # application code, so a concurrent activate cannot leave two winners.
-        # A partial index constrains only the rows where is_active is true.
+        # "Only one may be active per store" enforced by the database rather
+        # than by application code, so a concurrent activate cannot leave two
+        # winners. A partial index constrains only rows where is_active is true.
         Index(
-            "uq_products_single_active",
-            "is_active",
+            "uq_products_single_active_per_store",
+            "store_id",
             unique=True,
             postgresql_where=text("is_active"),
         ),
+        Index("ix_products_store_id_created_at", "store_id", "created_at"),
     )
 
 
@@ -461,8 +495,119 @@ class Visit(Base):
     __tablename__ = "visits"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
     at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
     visitor: Mapped[str] = mapped_column(String(32))
     path: Mapped[str | None] = mapped_column(String(255))
+
+    __table_args__ = (Index("ix_visits_store_at", "store_id", "at"),)
+
+
+class Store(Base):
+    """
+    One tenant of the platform: a shop with its own domain(s), template,
+    theme and (later) its own catalogue, orders, staff and integration
+    secrets. Every tenant-scoped table carries a store_id pointing here.
+    """
+
+    __tablename__ = "stores"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    slug: Mapped[str] = mapped_column(String(40), unique=True)
+    name: Mapped[str] = mapped_column(String(120))
+    # "NB" in "NB-1042". Unique across stores so a number names one order.
+    order_prefix: Mapped[str] = mapped_column(String(8), unique=True)
+    template: Mapped[str] = mapped_column(String(40), default="classic")
+    currency: Mapped[str] = mapped_column(String(3), default="BDT")
+    theme: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # Per-store overrides of the template's pictures/copy, by field key
+    # (see api.routers.store_content). Absent = template default.
+    content: Mapped[dict] = mapped_column(JSONB, default=dict)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    domains: Mapped[list["StoreDomain"]] = relationship(
+        lazy="selectin",
+        order_by="[StoreDomain.is_primary.desc(), StoreDomain.id]",
+        cascade="all, delete-orphan",
+    )
+
+
+class StoreDomain(Base):
+    """A hostname that resolves to a store. Stored normalised (lowercase, no
+    port); see api.stores.normalise_host."""
+
+    __tablename__ = "store_domains"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(
+        ForeignKey("stores.id", ondelete="CASCADE"), index=True
+    )
+    host: Mapped[str] = mapped_column(String(253), unique=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class StoreRole(str, enum.Enum):
+    """What a member may do inside one store. See api.tenancy for the
+    permission set behind each."""
+
+    owner = "owner"
+    manager = "manager"
+    staff = "staff"
+
+
+class StoreUser(Base):
+    """A platform user's access to one store. Super admins have no rows: they
+    see every store. A user with no rows is signed in but sees only the
+    waiting page."""
+
+    __tablename__ = "store_users"
+
+    store_id: Mapped[int] = mapped_column(
+        ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+    role: Mapped[str] = mapped_column(String(20))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class StoreSettings(Base):
+    """
+    Per-store integration configuration. Secrets are Fernet ciphertext in the
+    *_enc columns (api.crypto); the API returns only whether they are set and
+    their last characters. One row per store, created on first save.
+    """
+
+    __tablename__ = "store_settings"
+
+    store_id: Mapped[int] = mapped_column(
+        ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True
+    )
+    meta_pixel_id: Mapped[str] = mapped_column(String(40), default="")
+    meta_capi_token_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
+    meta_test_event_code: Mapped[str] = mapped_column(String(40), default="")
+    pathao_client_id: Mapped[str] = mapped_column(String(120), default="")
+    pathao_client_secret_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
+    pathao_email: Mapped[str] = mapped_column(String(255), default="")
+    pathao_password_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
+    pathao_store_id: Mapped[int | None] = mapped_column(Integer)
+    pathao_item_type: Mapped[str] = mapped_column(String(20), default="parcel")
+    pathao_parcel_weight_kg: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=Decimal("1"))
+    fraudbd_api_key_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

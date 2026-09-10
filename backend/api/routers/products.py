@@ -17,8 +17,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import catalogue, media
-from api.auth import get_current_user, require_super_admin
+from api import catalogue, media, stores, tenancy
 from api.db import get_session
 from api.models import Product, ProductVariant
 from api.schemas import (
@@ -30,21 +29,25 @@ from api.schemas import (
     StorefrontVariantOut,
 )
 
+# Every route here works inside the store named by X-Admin-Store (see
+# api.tenancy): reads need any store role, writes need owner or manager.
 router = APIRouter(
     prefix="/products",
     tags=["Products"],
-    dependencies=[Depends(get_current_user)],
+    dependencies=[Depends(tenancy.require("catalogue.read"))],
 )
 # Every write. Applied route by route rather than on the router so the one
 # read stays open to staff.
-SUPER_ADMIN = [Depends(require_super_admin)]
+WRITE = [Depends(tenancy.require("catalogue.write"))]
 
 public_router = APIRouter(prefix="/storefront", tags=["Storefront"])
 
 
-async def _get_or_404(session: AsyncSession, product_id: int) -> Product:
+async def _get_or_404(session: AsyncSession, product_id: int, store_id: int) -> Product:
+    """The product, if it belongs to this store. Another store's id is a 404,
+    not a 403: nothing about it is disclosed."""
     product = await session.get(Product, product_id)
-    if product is None:
+    if product is None or product.store_id != store_id:
         raise HTTPException(status_code=404, detail="Product not found")
     return product
 
@@ -56,18 +59,20 @@ def _variant_or_404(product: Product, variant_id: int) -> ProductVariant:
     raise HTTPException(status_code=404, detail="Variant not found")
 
 
-async def _reload(session: AsyncSession, product_id: int) -> Product:
+async def _reload(session: AsyncSession, product_id: int, store_id: int) -> Product:
     """The product as the database now has it. The variants list is loaded
     with the product, so after a write it is re-read rather than trusted."""
     session.expire_all()
-    return await _get_or_404(session, product_id)
+    return await _get_or_404(session, product_id, store_id)
 
 
-async def _all(session: AsyncSession) -> list[Product]:
+async def _all(session: AsyncSession, store_id: int) -> list[Product]:
     rows = await session.execute(
         # Active first, then newest, so the product that is actually selling
         # is always the one at the top of the page.
-        select(Product).order_by(Product.is_active.desc(), Product.created_at.desc())
+        select(Product)
+        .where(Product.store_id == store_id)
+        .order_by(Product.is_active.desc(), Product.created_at.desc())
     )
     return list(rows.scalars())
 
@@ -78,8 +83,9 @@ async def _all(session: AsyncSession) -> list[Product]:
 @router.get("", response_model=list[ProductOut])
 async def list_products(
     session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.admin_store),
 ) -> list[Product]:
-    return await _all(session)
+    return await _all(session, ctx.store.id)
 
 
 async def _apply_variants(
@@ -143,19 +149,23 @@ async def _apply_variants(
     return [row.id for row in rows], gone
 
 
-async def _saved(session: AsyncSession, product_id: int, ids: list[int]) -> ProductSaveOut:
-    product = await _reload(session, product_id)
+async def _saved(
+    session: AsyncSession, product_id: int, store_id: int, ids: list[int]
+) -> ProductSaveOut:
+    product = await _reload(session, product_id, store_id)
     return ProductSaveOut(product=ProductOut.model_validate(product), variant_ids=ids)
 
 
 @router.post(
-    "", response_model=ProductSaveOut, status_code=201, dependencies=SUPER_ADMIN
+    "", response_model=ProductSaveOut, status_code=201, dependencies=WRITE
 )
 async def create_product(
     payload: ProductSave,
     session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.admin_store),
 ) -> ProductSaveOut:
     product = Product(
+        store_id=ctx.store.id,
         title=payload.title,
         description=payload.description,
         is_active=False,
@@ -168,19 +178,20 @@ async def create_product(
     await session.flush()
     ids, _ = await _apply_variants(session, product, payload)
     await session.commit()
-    return await _saved(session, product.id, ids)
+    return await _saved(session, product.id, ctx.store.id, ids)
 
 
-@router.put("/{product_id}", response_model=ProductSaveOut, dependencies=SUPER_ADMIN)
+@router.put("/{product_id}", response_model=ProductSaveOut, dependencies=WRITE)
 async def save_product(
     product_id: int,
     payload: ProductSave,
     session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.admin_store),
 ) -> ProductSaveOut:
     """Replace the product with what the editor holds. Versions left out of
     the payload are deleted, past orders keeping the name and price they
     recorded."""
-    product = await _get_or_404(session, product_id)
+    product = await _get_or_404(session, product_id, ctx.store.id)
     product.title = payload.title
     product.description = payload.description
     ids, gone = await _apply_variants(session, product, payload)
@@ -189,15 +200,16 @@ async def save_product(
     # still points at.
     for path in gone:
         media.delete_media(path)
-    return await _saved(session, product_id, ids)
+    return await _saved(session, product_id, ctx.store.id, ids)
 
 
 @router.post(
-    "/{product_id}/activate", response_model=list[ProductOut], dependencies=SUPER_ADMIN
+    "/{product_id}/activate", response_model=list[ProductOut], dependencies=WRITE
 )
 async def activate_product(
     product_id: int,
     session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.admin_store),
 ) -> list[Product]:
     """Make this the product the storefront sells.
 
@@ -205,29 +217,30 @@ async def activate_product(
     before the new one is set: the partial unique index means two active rows
     can never both commit, so doing it in one order avoids tripping it.
     """
-    product = await _get_or_404(session, product_id)
+    product = await _get_or_404(session, product_id, ctx.store.id)
     if not product.variants:
         raise HTTPException(
             status_code=400,
             detail="Add at least one version before making this product live",
         )
     if not product.is_active:
-        current = await catalogue.active_product(session)
+        current = await catalogue.active_product(session, ctx.store.id)
         if current is not None:
             current.is_active = False
             await session.flush()
         product.is_active = True
         await session.commit()
     session.expire_all()
-    return await _all(session)
+    return await _all(session, ctx.store.id)
 
 
-@router.delete("/{product_id}", status_code=204, dependencies=SUPER_ADMIN)
+@router.delete("/{product_id}", status_code=204, dependencies=WRITE)
 async def delete_product(
     product_id: int,
     session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.admin_store),
 ) -> None:
-    product = await _get_or_404(session, product_id)
+    product = await _get_or_404(session, product_id, ctx.store.id)
     if product.is_active:
         raise HTTPException(
             status_code=400,
@@ -243,15 +256,16 @@ async def delete_product(
 @router.post(
     "/{product_id}/variants/{variant_id}/image",
     response_model=ProductOut,
-    dependencies=SUPER_ADMIN,
+    dependencies=WRITE,
 )
 async def upload_variant_image(
     product_id: int,
     variant_id: int,
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.admin_store),
 ) -> Product:
-    product = await _get_or_404(session, product_id)
+    product = await _get_or_404(session, product_id, ctx.store.id)
     variant = _variant_or_404(product, variant_id)
     data = await file.read()
     try:
@@ -265,7 +279,7 @@ async def upload_variant_image(
     # Only after the new path is safely committed, so a failed commit never
     # leaves the row pointing at a file that is already gone.
     media.delete_media(previous)
-    return await _reload(session, product_id)
+    return await _reload(session, product_id, ctx.store.id)
 
 
 # --- Public ------------------------------------------------------------------
@@ -274,10 +288,11 @@ async def upload_variant_image(
 @public_router.get("/product", response_model=StorefrontProductOut)
 async def storefront_product(
     session: AsyncSession = Depends(get_session),
+    store: stores.StoreConfig = Depends(stores.current_store),
 ) -> StorefrontProductOut:
-    """What the old storefront sells: the live product's default variant.
-    404 when nothing is live — there is nothing to sell."""
-    product = await catalogue.active_product(session)
+    """What the old storefront sells: the store's live product's default
+    variant. 404 when nothing is live — there is nothing to sell."""
+    product = await catalogue.active_product(session, store.id)
     if product is None or not product.variants:
         raise HTTPException(status_code=404, detail="Nothing is on sale")
     variant = product.variants[0]
@@ -293,11 +308,12 @@ async def storefront_product(
 @public_router.get("/listing", response_model=StorefrontListingOut)
 async def storefront_listing(
     session: AsyncSession = Depends(get_session),
+    store: stores.StoreConfig = Depends(stores.current_store),
 ) -> StorefrontListingOut:
-    """The landing page's offer: the live product with its variants, the
-    default first. 404 when nothing is live: the page then says the shop is
-    closed rather than inventing something to sell."""
-    product = await catalogue.active_product(session)
+    """The landing page's offer: the store's live product with its variants,
+    the default first. 404 when nothing is live: the page then says the shop
+    is closed rather than inventing something to sell."""
+    product = await catalogue.active_product(session, store.id)
     if product is None or not product.variants:
         raise HTTPException(status_code=404, detail="Nothing is on sale")
     return StorefrontListingOut(

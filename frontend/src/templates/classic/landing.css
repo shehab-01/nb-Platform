@@ -87,6 +87,13 @@
   border-radius: 12px;
 }
 
+.nb-summary h2 {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--nb-price);
+}
 .nb-summary div {
   display: flex;
   gap: 12px;

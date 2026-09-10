@@ -1,5 +1,6 @@
 "use client";
 
+import { uuid } from "@/lib/uuid";
 import { RefObject, useCallback, useEffect, useRef } from "react";
 
 import { saveOrderDraft } from "@/lib/storefront-api";
@@ -23,13 +24,13 @@ function draftKey(): string {
   try {
     const existing = sessionStorage.getItem(DRAFT_KEY_STORAGE);
     if (existing) return existing;
-    const key = crypto.randomUUID();
+    const key = uuid();
     sessionStorage.setItem(DRAFT_KEY_STORAGE, key);
     return key;
   } catch {
     // Private mode or storage blocked: a per-mount key still de-duplicates
     // this visit's own autosaves.
-    return crypto.randomUUID();
+    return uuid();
   }
 }
 

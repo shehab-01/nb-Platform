@@ -1,6 +1,6 @@
-# Nature Bazar
+# nbPlatform
 
-Fresh Docker starter with a Next.js frontend, FastAPI backend, and PostgreSQL database.
+Multi-store platform (v2 of Nature Bazar): one Next.js app serving every storefront and the admin, one FastAPI backend, one PostgreSQL. **Start with `DEV.md` for local development and `docs/DESIGN-V2.md` for the design.** The notes below are inherited from v1 and describe the production shape; ports are now 8090 (web) and 8001 (API).
 
 ## Start on the server
 

@@ -12,6 +12,8 @@ venv/
 
 # environment variables
 .env
+.env.*
+!.env.example
 
 # -----------------
 # Next.js / Node

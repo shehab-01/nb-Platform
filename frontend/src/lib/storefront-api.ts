@@ -6,6 +6,11 @@
 import { request } from "@/lib/http";
 import type { StorefrontListing, StorefrontProduct } from "@/lib/products";
 
+/** Headers naming the store a server-side call is for (lib/store.storeHeaders).
+ * Passed in rather than read here: this module is also bundled into the
+ * browser, where next/headers does not exist. */
+export type StoreHeaders = Record<string, string>;
+
 export async function createOrder(input: {
   customerName: string;
   phone: string;
@@ -81,10 +86,13 @@ export async function saveOrderDraft(input: {
  * because selling something nobody put in the catalogue is worse than
  * selling nothing.
  */
-export async function fetchActiveProduct(): Promise<StorefrontProduct | null> {
+export async function fetchActiveProduct(
+  store: StoreHeaders = {},
+): Promise<StorefrontProduct | null> {
   const base = process.env.API_URL ?? "http://api:8000";
   try {
     const res = await fetch(`${base}/api/storefront/product`, {
+      headers: store,
       // Always current: a super admin who edits the product expects to see it
       // on the next reload, not a minute later.
       cache: "no-store",
@@ -132,10 +140,14 @@ type ListingJson = {
  * Null when nothing is live or the API is down; the page then says the shop
  * is closed for the moment rather than selling from a constant.
  */
-export async function fetchStorefrontListing(): Promise<StorefrontListing | null> {
+export async function fetchStorefrontListing(
+  store: StoreHeaders = {},
+): Promise<StorefrontListing | null> {
   const base = process.env.API_URL ?? "http://api:8000";
   try {
     const res = await fetch(`${base}/api/storefront/listing`, {
+      // Which store's catalogue (once the catalogue is per store).
+      headers: store,
       cache: "no-store",
     });
     if (!res.ok) return null;

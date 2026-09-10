@@ -9,10 +9,17 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from api import stores, visits
 from api.config import settings
-from api import visits
+from api.db import get_session
 from api.routers import track
 from api.services import meta_capi
+from api.stores import Integrations, MetaConfig, PathaoConfig, StoreConfig
+
+STORE = StoreConfig(id=7, slug="s", name="S", template="classic", currency="BDT")
+CONFIGURED = Integrations(
+    store_id=7, order_prefix="S", meta=MetaConfig("123", "tok"), pathao=PathaoConfig()
+)
 
 UID = str(uuid.uuid4())
 PUBLIC_IP = "8.8.8.8"
@@ -20,23 +27,43 @@ PUBLIC_IP = "8.8.8.8"
 
 @pytest.fixture
 def client(monkeypatch):
-    """A tiny app with only the track router, CAPI 'enabled', and dispatch
-    captured instead of hitting Meta."""
-    monkeypatch.setattr(settings, "meta_pixel_id", "123")
-    monkeypatch.setattr(settings, "meta_capi_access_token", "tok")
+    """A tiny app with only the track router, one store resolved for every
+    request with CAPI configured, and dispatch captured instead of hitting
+    Meta."""
     monkeypatch.setattr(settings, "client_ip_header", "cf-connecting-ip")
+    state = {"integrations": CONFIGURED}
+
+    async def fake_load(session, store_id):
+        assert store_id == STORE.id
+        return state["integrations"]
+
+    monkeypatch.setattr(stores, "load_integrations", fake_load)
     sent: list[dict] = []
-    monkeypatch.setattr(meta_capi, "dispatch", lambda event: sent.append(event))
+
+    def capture(event, meta, store_id):
+        assert meta is CONFIGURED.meta and store_id == STORE.id
+        sent.append(event)
+
+    monkeypatch.setattr(meta_capi, "dispatch", capture)
     # Visits are written from a task of their own; capture the call instead.
     visited: list[dict] = []
     monkeypatch.setattr(
         visits, "record", lambda request, **kw: visited.append({"request": request, **kw})
     )
+    async def fake_session():
+        yield None
+
+    async def fake_store():
+        return STORE
+
     app = FastAPI()
+    app.dependency_overrides[get_session] = fake_session
+    app.dependency_overrides[stores.current_store] = fake_store
     app.include_router(track.router, prefix="/api")
     test_client = TestClient(app)
     test_client.sent = sent  # type: ignore[attr-defined]
     test_client.visited = visited  # type: ignore[attr-defined]
+    test_client.state = state  # type: ignore[attr-defined]
     return test_client
 
 
@@ -197,8 +224,10 @@ def test_admin_referer_is_ignored(client):
     assert client.sent == []
 
 
-def test_nothing_is_sent_when_capi_is_not_configured(client, monkeypatch):
-    monkeypatch.setattr(settings, "meta_capi_access_token", "")
+def test_nothing_is_sent_when_capi_is_not_configured(client):
+    client.state["integrations"] = Integrations(
+        store_id=7, order_prefix="S", meta=MetaConfig(), pathao=PathaoConfig()
+    )
     res = post(client, {"event_name": "PageView", "event_id": UID})
     assert res.status_code == 204
     assert client.sent == []
@@ -243,8 +272,10 @@ def test_admin_page_views_are_not_visits(client):
     assert client.visited == []
 
 
-def test_visits_are_recorded_even_without_meta(client, monkeypatch):
-    monkeypatch.setattr(settings, "meta_capi_access_token", "")
+def test_visits_are_recorded_even_without_meta(client):
+    client.state["integrations"] = Integrations(
+        store_id=7, order_prefix="S", meta=MetaConfig(), pathao=PathaoConfig()
+    )
     post(client, {"event_name": "PageView", "event_id": UID})
     assert client.sent == []
     assert len(client.visited) == 1
@@ -260,3 +291,21 @@ def test_visitor_key_prefers_the_cookie_and_never_stores_it():
     assert fallback != by_cookie
     assert visits.visitor_key(None, "8.8.8.8", "UA/1.0") == fallback
     assert visits.visitor_key(None, "8.8.8.9", "UA/1.0") != fallback
+
+
+# --- per-store configuration ---------------------------------------------------
+
+
+def test_store_without_capi_records_the_visit_but_sends_nothing(client):
+    client.state["integrations"] = Integrations(
+        store_id=7, order_prefix="S", meta=MetaConfig(), pathao=PathaoConfig()
+    )
+    res = post(client, {"event_name": "PageView", "event_id": UID})
+    assert res.status_code == 204
+    assert client.sent == []
+    assert client.visited and client.visited[0]["store_id"] == STORE.id
+
+
+def test_visit_is_recorded_for_the_resolved_store(client):
+    post(client, {"event_name": "PageView", "event_id": UID})
+    assert client.visited[-1]["store_id"] == STORE.id

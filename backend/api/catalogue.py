@@ -52,18 +52,20 @@ def sellable(product: Product, variant: ProductVariant) -> Sellable:
     )
 
 
-async def active_product(session: AsyncSession) -> Product | None:
-    """The active product row, variants included, or None when nothing is."""
+async def active_product(session: AsyncSession, store_id: int) -> Product | None:
+    """The store's active product row, variants included, or None."""
     result = await session.execute(
-        select(Product).where(Product.is_active.is_(True)).limit(1)
+        select(Product)
+        .where(Product.store_id == store_id, Product.is_active.is_(True))
+        .limit(1)
     )
     return result.scalar_one_or_none()
 
 
-async def active(session: AsyncSession) -> Sellable | None:
-    """What to sell when nothing more specific was asked for: the live
+async def active(session: AsyncSession, store_id: int) -> Sellable | None:
+    """What to sell when nothing more specific was asked for: the store's live
     product's default variant, or None when nothing is live."""
-    product = await active_product(session)
+    product = await active_product(session, store_id)
     if product is not None and product.variants:
         # Ordered default-first by the relationship.
         return sellable(product, product.variants[0])
@@ -71,22 +73,22 @@ async def active(session: AsyncSession) -> Sellable | None:
 
 
 async def for_order(
-    session: AsyncSession, variant_id: int | None
+    session: AsyncSession, store_id: int, variant_id: int | None
 ) -> Sellable | None:
     """What to price an order against: the variant the customer picked, or the
-    default when the form did not say (the old storefront never does).
+    store's default when the form did not say (the old storefront never does).
 
-    None when an id was sent and matches nothing — a stale page after a
-    variant was deleted, or a made-up id — or when nothing was sent and
-    nothing is live. Either way the caller refuses the order rather than
-    quietly selling something else.
+    None when an id was sent and matches nothing in this store — a stale page
+    after a variant was deleted, a made-up id, or another store's variant —
+    or when nothing was sent and nothing is live. Either way the caller
+    refuses the order rather than quietly selling something else.
     """
     if variant_id is None:
-        return await active(session)
+        return await active(session, store_id)
     variant = await session.get(ProductVariant, variant_id)
     if variant is None:
         return None
     product = await session.get(Product, variant.product_id)
-    if product is None:
+    if product is None or product.store_id != store_id:
         return None
     return sellable(product, variant)

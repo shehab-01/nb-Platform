@@ -7,7 +7,8 @@ import type {
   OrderTag,
 } from "@/lib/orders";
 import type { Product, Variant } from "@/lib/products";
-import type { TeamMember, UserRole, UserStatus } from "@/lib/team";
+import type { StoreAccess } from "@/lib/admin-store";
+import type { Membership, StoreRole, TeamMember, UserRole, UserStatus } from "@/lib/team";
 
 // Same-origin "/api/*" is proxied by Next.js to the FastAPI service
 // (see next.config.ts), so no CORS and only one exposed port.
@@ -304,7 +305,7 @@ async function pathaoBatched(
       for (const id of batches.slice(index).flat()) {
         merged.failed.push({
           orderId: id,
-          orderNo: `NB-${id}`,
+          orderNo: `#${id}`,
           error: `Not completed — ${reason}. Check Pathao before retrying.`,
         });
       }
@@ -480,7 +481,14 @@ type ApiUser = {
   orders_confirmed?: number;
   orders_shipped?: number;
   pinned?: boolean;
+  memberships?: ApiMembership[];
 };
+
+type ApiMembership = { store_id: number; slug: string; name: string; role: StoreRole };
+
+function mapMembership(m: ApiMembership): Membership {
+  return { storeId: m.store_id, slug: m.slug, name: m.name, role: m.role };
+}
 
 function mapAuthUser(user: ApiUser): AuthUser {
   return {
@@ -502,7 +510,132 @@ function mapTeamMember(user: ApiUser): TeamMember {
     ordersConfirmed: user.orders_confirmed ?? 0,
     ordersShipped: user.orders_shipped ?? 0,
     pinned: user.pinned ?? false,
+    memberships: (user.memberships ?? []).map(mapMembership),
   };
+}
+
+/** Replace a user's store memberships (super admin). */
+export async function setUserMemberships(
+  userId: number,
+  memberships: { storeId: number; role: StoreRole }[]
+): Promise<TeamMember> {
+  const user = await request<ApiUser>(`/api/users/${userId}/memberships`, {
+    method: "PUT",
+    body: JSON.stringify({
+      memberships: memberships.map((m) => ({ store_id: m.storeId, role: m.role })),
+    }),
+  });
+  return mapTeamMember(user);
+}
+
+// ---- Stores ----
+
+/** The stores the signed-in user may open: what the switcher lists. */
+export async function getMyStores(): Promise<StoreAccess[]> {
+  const rows = await request<
+    { store_id: number; slug: string; name: string; role: string }[]
+  >("/api/me/stores");
+  return rows.map((r) => ({ storeId: r.store_id, slug: r.slug, name: r.name, role: r.role }));
+}
+
+export type Store = {
+  id: number;
+  slug: string;
+  name: string;
+  template: string;
+  currency: string;
+  /** "NB" in "NB-1042"; unique across stores. */
+  orderPrefix: string;
+  theme: Record<string, string>;
+  isActive: boolean;
+  domains: string[];
+  primaryDomain: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type ApiStore = {
+  id: number;
+  slug: string;
+  name: string;
+  template: string;
+  currency: string;
+  order_prefix: string;
+  theme: Record<string, string>;
+  is_active: boolean;
+  domains: string[];
+  primary_domain: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function mapStore(s: ApiStore): Store {
+  return {
+    id: s.id,
+    slug: s.slug,
+    name: s.name,
+    template: s.template,
+    currency: s.currency,
+    orderPrefix: s.order_prefix,
+    theme: s.theme ?? {},
+    isActive: s.is_active,
+    domains: s.domains,
+    primaryDomain: s.primary_domain,
+    createdAt: s.created_at,
+    updatedAt: s.updated_at,
+  };
+}
+
+export type StoreInput = {
+  slug?: string;
+  name: string;
+  template: string;
+  currency: string;
+  orderPrefix: string;
+  theme: Record<string, string>;
+  domains: string[];
+  isActive: boolean;
+};
+
+function storeBody(input: StoreInput) {
+  return {
+    ...(input.slug !== undefined ? { slug: input.slug } : {}),
+    name: input.name,
+    template: input.template,
+    currency: input.currency,
+    order_prefix: input.orderPrefix,
+    theme: input.theme,
+    domains: input.domains,
+    is_active: input.isActive,
+  };
+}
+
+export async function listStores(): Promise<Store[]> {
+  return (await request<ApiStore[]>("/api/stores")).map(mapStore);
+}
+
+export async function listTemplates(): Promise<string[]> {
+  return request<string[]>("/api/stores/templates");
+}
+
+export async function createStore(input: StoreInput): Promise<Store> {
+  return mapStore(
+    await request<ApiStore>("/api/stores", {
+      method: "POST",
+      body: JSON.stringify(storeBody(input)),
+    })
+  );
+}
+
+export async function updateStore(id: number, input: StoreInput): Promise<Store> {
+  const { slug: _slug, ...rest } = storeBody(input);
+  void _slug;
+  return mapStore(
+    await request<ApiStore>(`/api/stores/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(rest),
+    })
+  );
 }
 
 /** Current session's user, or null when not signed in. */
@@ -518,6 +651,32 @@ export async function loginWithGoogle(credential: string): Promise<AuthUser> {
     method: "POST",
     body: JSON.stringify({ credential }),
   });
+  return mapAuthUser(user);
+}
+
+export type AuthProviders = {
+  google: boolean;
+  /** The Google OAuth client id, a runtime value from the API. "" when off. */
+  googleClientId: string;
+  dev: boolean;
+};
+
+/** Which sign-in buttons to show, and the Google client id to use. `dev` is
+ * only ever true on a dev server. Null while unknown (API unreachable). */
+export async function getAuthProviders(): Promise<AuthProviders | null> {
+  try {
+    const p = await request<{ google: boolean; google_client_id: string; dev: boolean }>(
+      "/api/auth/providers"
+    );
+    return { google: p.google, googleClientId: p.google_client_id, dev: p.dev };
+  } catch {
+    return null;
+  }
+}
+
+/** Development only: sign in as the server's DEV_LOGIN_EMAIL account. */
+export async function devLogin(): Promise<AuthUser> {
+  const user = await request<ApiUser>("/api/auth/dev-login", { method: "POST" });
   return mapAuthUser(user);
 }
 
@@ -883,4 +1042,129 @@ export async function lookupOrdersByPhone(
     orders: (data.orders ?? []).map(mapOrder),
     incomplete: (data.incomplete ?? []).map(mapOrder),
   };
+}
+
+// ---- Store settings (integrations; secrets never come back) ----
+
+export type StoreSettings = {
+  metaPixelId: string;
+  metaTestEventCode: string;
+  metaCapiTokenSet: boolean;
+  metaCapiTokenHint: string | null;
+  pathaoClientId: string;
+  pathaoClientSecretSet: boolean;
+  pathaoClientSecretHint: string | null;
+  pathaoEmail: string;
+  pathaoPasswordSet: boolean;
+  pathaoStoreId: number | null;
+  pathaoItemType: "document" | "parcel" | "fragile";
+  pathaoParcelWeightKg: string;
+  fraudbdApiKeySet: boolean;
+  fraudbdApiKeyHint: string | null;
+  encryptionAvailable: boolean;
+};
+
+type ApiStoreSettings = {
+  meta_pixel_id: string;
+  meta_test_event_code: string;
+  meta_capi_token_set: boolean;
+  meta_capi_token_hint: string | null;
+  pathao_client_id: string;
+  pathao_client_secret_set: boolean;
+  pathao_client_secret_hint: string | null;
+  pathao_email: string;
+  pathao_password_set: boolean;
+  pathao_store_id: number | null;
+  pathao_item_type: "document" | "parcel" | "fragile";
+  pathao_parcel_weight_kg: string | number;
+  fraudbd_api_key_set: boolean;
+  fraudbd_api_key_hint: string | null;
+  encryption_available: boolean;
+};
+
+function mapSettings(s: ApiStoreSettings): StoreSettings {
+  return {
+    metaPixelId: s.meta_pixel_id,
+    metaTestEventCode: s.meta_test_event_code,
+    metaCapiTokenSet: s.meta_capi_token_set,
+    metaCapiTokenHint: s.meta_capi_token_hint,
+    pathaoClientId: s.pathao_client_id,
+    pathaoClientSecretSet: s.pathao_client_secret_set,
+    pathaoClientSecretHint: s.pathao_client_secret_hint,
+    pathaoEmail: s.pathao_email,
+    pathaoPasswordSet: s.pathao_password_set,
+    pathaoStoreId: s.pathao_store_id,
+    pathaoItemType: s.pathao_item_type,
+    pathaoParcelWeightKg: String(s.pathao_parcel_weight_kg),
+    fraudbdApiKeySet: s.fraudbd_api_key_set,
+    fraudbdApiKeyHint: s.fraudbd_api_key_hint,
+    encryptionAvailable: s.encryption_available,
+  };
+}
+
+/** Secret fields: undefined keeps the stored value, "" clears it, text sets it. */
+export type StoreSettingsInput = {
+  metaPixelId: string;
+  metaCapiToken?: string;
+  metaTestEventCode: string;
+  pathaoClientId: string;
+  pathaoClientSecret?: string;
+  pathaoEmail: string;
+  pathaoPassword?: string;
+  pathaoStoreId: number | null;
+  pathaoItemType: "document" | "parcel" | "fragile";
+  pathaoParcelWeightKg: string;
+  fraudbdApiKey?: string;
+};
+
+export async function getStoreSettings(storeId: number): Promise<StoreSettings> {
+  return mapSettings(await request<ApiStoreSettings>(`/api/stores/${storeId}/settings`));
+}
+
+export async function saveStoreSettings(
+  storeId: number,
+  input: StoreSettingsInput
+): Promise<StoreSettings> {
+  return mapSettings(
+    await request<ApiStoreSettings>(`/api/stores/${storeId}/settings`, {
+      method: "PUT",
+      body: JSON.stringify({
+        meta_pixel_id: input.metaPixelId,
+        meta_capi_token: input.metaCapiToken ?? null,
+        meta_test_event_code: input.metaTestEventCode,
+        pathao_client_id: input.pathaoClientId,
+        pathao_client_secret: input.pathaoClientSecret ?? null,
+        pathao_email: input.pathaoEmail,
+        pathao_password: input.pathaoPassword ?? null,
+        pathao_store_id: input.pathaoStoreId,
+        pathao_item_type: input.pathaoItemType,
+        pathao_parcel_weight_kg: input.pathaoParcelWeightKg,
+        fraudbd_api_key: input.fraudbdApiKey ?? null,
+      }),
+    })
+  );
+}
+
+// ---- Store content (the template's pictures, per store) ----
+
+export type StoreContent = { template: string; content: Record<string, string> };
+
+export async function getStoreContent(storeId: number): Promise<StoreContent> {
+  return request<StoreContent>(`/api/stores/${storeId}/content`);
+}
+
+/** Replace the template's default picture for `key` with a file. */
+export async function uploadStoreImage(
+  storeId: number,
+  key: string,
+  file: File
+): Promise<StoreContent> {
+  const body = new FormData();
+  body.append("file", file);
+  return requestForm<StoreContent>(`/api/stores/${storeId}/content/${key}`, body, "PUT");
+}
+
+/** Back to the template's default picture for `key`. */
+export async function resetStoreImage(storeId: number, key: string): Promise<StoreContent> {
+  return request<StoreContent>(`/api/stores/${storeId}/content/${key}`, { method: "DELETE" });
 }

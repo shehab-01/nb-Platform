@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import "./landing.css";
 import { OrderSuccess } from "@/components/storefront/order-success";
@@ -16,7 +16,6 @@ import { cleanPhoneInput, toBdMobile } from "@/lib/phone";
 import {
   productImage,
   trackedItem,
-  type StorefrontListing,
   type StorefrontVariant,
 } from "@/lib/products";
 import { createOrder } from "@/lib/storefront-api";
@@ -28,6 +27,8 @@ import {
   trackViewItem,
 } from "@/lib/tracking";
 import { useOrderDraft } from "@/lib/use-order-draft";
+import { rawImage } from "@/templates/raw-image";
+import type { StorefrontProps } from "@/templates/types";
 
 /** "1,650" — Latin digits with a thousands comma, as the design prices things. */
 function taka(amount: number): string {
@@ -45,8 +46,24 @@ function taka(amount: number): string {
  * with the order so the API prices that row — the browser never says what
  * anything costs.
  */
-export function Landing({ listing }: { listing: StorefrontListing }) {
+export function Storefront({
+  listing,
+  store,
+  beforeProduct,
+  hidePicker = false,
+  hideTopCta = false,
+}: StorefrontProps & {
+  /** Rendered full-width between the logo bar and the product card; how the
+   * campaign template adds its banners on top of this page. */
+  beforeProduct?: ReactNode;
+  /** Replace the size picker with a heading over the order summary (the
+   * default variant is sold). The campaign template does this. */
+  hidePicker?: boolean;
+  /** Drop the red "order" button between the product card and the summary. */
+  hideTopCta?: boolean;
+}) {
   const { variants } = listing;
+  const storeName = store.name;
   // The selected size, as a position in the list. Ids are null on the
   // fallback and skus are not unique, so the index is the one key that is.
   const [index, setIndex] = useState(() =>
@@ -187,17 +204,21 @@ export function Landing({ listing }: { listing: StorefrontListing }) {
   }
 
   return (
-    <main className="nb-landing">
-      {/* Kept from the old page: the logo bar, pinned to the top. */}
+    <main className="nb-landing" style={store.themeVars}>
+      {/* The logo bar, pinned to the top. The logo is the store's own
+          (content.logo) or the template default. */}
       <header className="nb-header">
         <Image
-          src="/logo.png"
-          alt="Nature Bazar"
+          src={store.content.logo}
+          alt={storeName}
           width={150}
           height={48}
           priority
+          unoptimized={rawImage(store.content.logo)}
         />
       </header>
+
+      {beforeProduct}
 
       <div className="nb-stack">
       {/* One card from the title to the description. The title, the picture
@@ -222,32 +243,39 @@ export function Landing({ listing }: { listing: StorefrontListing }) {
             priority
           />
         </div>
-        <button
-          type="button"
-          className="nb-cta-top"
-          onClick={() => {
-            trackAddToCart(items);
-            scrollToOrder();
-          }}
-        >
-          অর্ডার করতে চাই
-        </button>
+        {hideTopCta ? null : (
+          <button
+            type="button"
+            className="nb-cta-top"
+            onClick={() => {
+              trackAddToCart(items);
+              scrollToOrder();
+            }}
+          >
+            অর্ডার করতে চাই
+          </button>
+        )}
 
-        <div className="nb-block" aria-labelledby="nb-pick">
-        <h2 id="nb-pick">কত প্যাকেট নিতে চান সিলেক্ট করুন</h2>
-        {variants.map((v, i) => (
-          <SizeOption
-            key={i}
-            variant={v}
-            selected={i === index}
-            onSelect={() => setIndex(i)}
-          />
-        ))}
-        </div>
+        {hidePicker ? null : (
+          <div className="nb-block" aria-labelledby="nb-pick">
+            <h2 id="nb-pick">কত প্যাকেট নিতে চান সিলেক্ট করুন</h2>
+            {variants.map((v, i) => (
+              <SizeOption
+                key={i}
+                variant={v}
+                selected={i === index}
+                onSelect={() => setIndex(i)}
+              />
+            ))}
+          </div>
+        )}
 
         {/* What the form below will order, so the figure on the confirm
             button never comes as a surprise. */}
-        <div className="nb-block nb-summary" aria-label="অর্ডার সারাংশ">
+        <div className="nb-block nb-summary" aria-labelledby="nb-summary-title">
+          <h2 id="nb-summary-title" hidden={!hidePicker}>
+            আপনার অর্ডার ডিটেইলস
+          </h2>
           <div>
             <span>
               {variant.title}
@@ -382,7 +410,13 @@ export function Landing({ listing }: { listing: StorefrontListing }) {
       </div>
 
       <footer className="nb-footer">
-        <Image src="/logo.png" alt="Nature Bazar" width={120} height={40} />
+        <Image
+          src={store.content.logo}
+          alt={storeName}
+          width={120}
+          height={40}
+          unoptimized={rawImage(store.content.logo)}
+        />
         <p>© 2026 naturebazar. All rights reserved.</p>
         <p>
           <a href="/privacy-policy">Privacy policy</a>

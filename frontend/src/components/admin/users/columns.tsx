@@ -15,19 +15,27 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ROLE_LABELS, type TeamMember,
-  type UserRole, type UserStatus } from "@/lib/team";
+import {
+  ROLE_LABELS,
+  STATUS_LABELS,
+  STORE_ROLE_LABELS,
+  type TeamMember,
+  type UserRole,
+  type UserStatus,
+} from "@/lib/team";
 
 export function getTeamColumns({
   currentUserId,
   onStatusChange,
   onRoleChange,
   onEditNickname,
+  onEditMemberships,
 }: {
   currentUserId: number;
   onStatusChange: (id: number, status: UserStatus) => void;
   onRoleChange: (id: number, role: UserRole) => void;
   onEditNickname: (member: TeamMember) => void;
+  onEditMemberships: (member: TeamMember) => void;
 }): ColumnDef<TeamMember>[] {
   return [
     {
@@ -89,6 +97,31 @@ export function getTeamColumns({
       ),
     },
     {
+      id: "stores",
+      meta: { label: "Stores" },
+      header: "Stores",
+      enableSorting: false,
+      cell: ({ row }) => {
+        const m = row.original.memberships;
+        if (row.original.role === "super_admin" && m.length === 0) {
+          return <span className="text-xs text-muted-foreground">All stores</span>;
+        }
+        if (m.length === 0) {
+          return <span className="text-xs text-muted-foreground">None</span>;
+        }
+        return (
+          <div className="flex flex-wrap gap-1">
+            {m.map((x) => (
+              <Badge key={x.storeId} variant="outline" title={STORE_ROLE_LABELS[x.role]}>
+                {x.name}
+                <span className="ml-1 text-muted-foreground">{STORE_ROLE_LABELS[x.role].toLowerCase()}</span>
+              </Badge>
+            ))}
+          </div>
+        );
+      },
+    },
+    {
       accessorKey: "status",
       meta: { label: "Status" },
       header: "Status",
@@ -98,7 +131,7 @@ export function getTeamColumns({
             row.original.status === "active" ? "secondary" : "destructive"
           }
         >
-          {row.original.status === "active" ? "Active" : "Suspended"}
+          {STATUS_LABELS[row.original.status]}
         </Badge>
       ),
     },
@@ -175,13 +208,16 @@ export function getTeamColumns({
               <DropdownMenuItem onClick={() => onEditNickname(row.original)}>
                 {row.original.nickname ? "Change nickname" : "Set nickname"}
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onEditMemberships(row.original)}>
+                Assign stores
+              </DropdownMenuItem>
               {canChangeRole && <DropdownMenuSeparator />}
               {canChangeRole &&
                 (member.role === "super_admin" ? (
                   <DropdownMenuItem
                     onClick={() => onRoleChange(member.id, "staff")}
                   >
-                    Make order staff
+                    Remove super admin
                   </DropdownMenuItem>
                 ) : (
                   <DropdownMenuItem
@@ -197,7 +233,7 @@ export function getTeamColumns({
                     className="text-destructive"
                     onClick={() => onStatusChange(row.original.id, "suspended")}
                   >
-                    Suspend access
+                    Disable access
                   </DropdownMenuItem>
                 ) : (
                   <DropdownMenuItem

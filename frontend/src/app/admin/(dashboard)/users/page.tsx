@@ -5,20 +5,31 @@ import * as React from "react";
 import { useAuth } from "@/components/admin/auth-context";
 import { DataTable } from "@/components/admin/data-table/data-table";
 import { getTeamColumns } from "@/components/admin/users/columns";
+import { MembershipsDialog } from "@/components/admin/users/memberships-dialog";
 import { NicknameDialog } from "@/components/admin/users/nickname-dialog";
 import { PendingRequests } from "@/components/admin/users/pending-requests";
-import { deleteUser, listUsers, updateUser } from "@/lib/api";
-import type { TeamMember, UserRole, UserStatus } from "@/lib/team";
+import {
+  deleteUser,
+  listStores,
+  listUsers,
+  setUserMemberships,
+  updateUser,
+  type Store,
+} from "@/lib/api";
+import type { StoreRole, TeamMember, UserRole, UserStatus } from "@/lib/team";
 
 export default function UsersPage() {
   const { user: currentUser } = useAuth();
   const [users, setUsers] = React.useState<TeamMember[]>([]);
+  const [stores, setStores] = React.useState<Store[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
   const refresh = React.useCallback(async () => {
     try {
-      setUsers(await listUsers());
+      const [people, shops] = await Promise.all([listUsers(), listStores()]);
+      setUsers(people);
+      setStores(shops);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load users");
@@ -73,8 +84,8 @@ export default function UsersPage() {
       const name = member?.nickname || member?.name || "this member";
       const question =
         role === "super_admin"
-          ? `Make ${name} a super admin? They will be able to manage products, users and every order.`
-          : `Make ${name} order staff? They will lose access to products and user management.`;
+          ? `Make ${name} a super admin? They will see every store and manage stores and users.`
+          : `Remove super admin from ${name}? They will only see the stores assigned to them.`;
       if (!window.confirm(question)) return;
       try {
         await updateUser(id, { role });
@@ -87,6 +98,15 @@ export default function UsersPage() {
   );
 
   const [nicknameFor, setNicknameFor] = React.useState<TeamMember | null>(null);
+  const [membershipsFor, setMembershipsFor] = React.useState<TeamMember | null>(null);
+
+  const handleMemberships = React.useCallback(
+    async (id: number, memberships: { storeId: number; role: StoreRole }[]) => {
+      await setUserMemberships(id, memberships);
+      await refresh();
+    },
+    [refresh]
+  );
 
   const handleNickname = React.useCallback(
     async (id: number, nickname: string) => {
@@ -107,6 +127,7 @@ export default function UsersPage() {
         onStatusChange: handleStatusChange,
         onRoleChange: handleRoleChange,
         onEditNickname: setNicknameFor,
+        onEditMemberships: setMembershipsFor,
       }),
     [currentUser.id, handleStatusChange, handleRoleChange]
   );
@@ -117,8 +138,9 @@ export default function UsersPage() {
   return (
     <div className="flex flex-col gap-6">
       <p className="text-sm text-muted-foreground">
-        Approve sign-in requests and keep track of what each staff member has
-        done.
+        Approve sign-in requests, assign people to stores, and keep track of
+        what each member has done. Approving someone does not open any store
+        for them until they are assigned one.
       </p>
 
       {error && (
@@ -154,6 +176,12 @@ export default function UsersPage() {
         member={nicknameFor}
         onOpenChange={(open) => !open && setNicknameFor(null)}
         onSave={handleNickname}
+      />
+      <MembershipsDialog
+        member={membershipsFor}
+        stores={stores}
+        onOpenChange={(open) => !open && setMembershipsFor(null)}
+        onSave={handleMemberships}
       />
     </div>
   );

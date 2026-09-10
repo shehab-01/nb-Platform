@@ -7,15 +7,18 @@ import {
   ChevronRight,
   ChevronsUpDown,
   Activity,
+  Check,
   LayoutDashboard,
-  Leaf,
+  LayoutTemplate,
   LogOut,
   Package,
+  Settings,
   ShoppingCart,
+  Store,
   Users,
 } from "lucide-react";
 
-import { useAuth } from "@/components/admin/auth-context";
+import { useAuth, type Permission } from "@/components/admin/auth-context";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Collapsible,
@@ -47,16 +50,27 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import { PAGE_STATUSES, countForPage } from "@/lib/orders";
-import { ROLE_LABELS } from "@/lib/team";
+import { ROLE_LABELS, STORE_ROLE_LABELS, type StoreRole } from "@/lib/team";
 import { useOrderCounts } from "@/lib/use-order-counts";
 import { cn } from "@/lib/utils";
 
-const navItems = [
-  { title: "Dashboard", url: "/admin", icon: LayoutDashboard },
+type NavItem = {
+  title: string;
+  url: string;
+  icon: typeof LayoutDashboard;
+  /** Needed in the current store to see this item. */
+  permission?: Permission;
+  children?: { title: string; url: string }[];
+};
+
+/** Everything about the store being worked in. */
+const storeNav: NavItem[] = [
+  { title: "Dashboard", url: "/admin", icon: LayoutDashboard, permission: "orders" },
   {
     title: "Web Orders",
     url: "/admin/orders",
     icon: ShoppingCart,
+    permission: "orders",
     children: [
       { title: "Manual Order", url: "/admin/orders/manual" },
       { title: "Web Order List", url: "/admin/orders" },
@@ -70,38 +84,78 @@ const navItems = [
       { title: "History", url: "/admin/orders/history" },
     ],
   },
-  { title: "Products", url: "/admin/products", icon: Package, superAdminOnly: true },
-  { title: "Users", url: "/admin/users", icon: Users, superAdminOnly: true },
-  { title: "System", url: "/admin/system", icon: Activity, superAdminOnly: true },
+  { title: "Products", url: "/admin/products", icon: Package, permission: "catalogue.read" },
+  { title: "Settings", url: "/admin/settings", icon: Settings, permission: "settings" },
 ];
+
+/** The platform: stores and people. Super admin only; no store role reaches it. */
+const platformNav: NavItem[] = [
+  { title: "Stores", url: "/admin/stores", icon: Store },
+  { title: "Templates", url: "/admin/templates", icon: LayoutTemplate },
+  { title: "Users", url: "/admin/users", icon: Users },
+  { title: "System", url: "/admin/system", icon: Activity },
+];
+
+function roleLabel(role: string): string {
+  return role === "super_admin"
+    ? ROLE_LABELS.super_admin
+    : STORE_ROLE_LABELS[role as StoreRole] ?? role;
+}
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname();
-  const { user, logout } = useAuth();
+  const { user, isSuperAdmin, stores, store, can, selectStore, logout } = useAuth();
   const counts = useOrderCounts();
 
-  const items = navItems.filter(
-    (item) => !item.superAdminOnly || user.role === "super_admin"
-  );
+  const items = store
+    ? storeNav.filter((item) => !item.permission || can(item.permission))
+    : [];
 
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild>
-              <Link href="/admin">
-                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                  <Leaf className="size-4" />
-                </div>
-                <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-semibold">Nature Bazar</span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    Admin
-                  </span>
-                </div>
-              </Link>
-            </SidebarMenuButton>
+            {/* The store switcher. One store: a label. Several: a menu of
+                exactly the stores this person may open; picking one reloads
+                the admin with X-Admin-Store set to it. */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild disabled={stores.length < 2}>
+                <SidebarMenuButton size="lg">
+                  <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                    <Store className="size-4" />
+                  </div>
+                  <div className="grid flex-1 text-left text-sm leading-tight">
+                    <span className="truncate font-semibold">
+                      {store?.name ?? "No store yet"}
+                    </span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {store ? roleLabel(store.role) : "Create one under Stores"}
+                    </span>
+                  </div>
+                  {stores.length > 1 && <ChevronsUpDown className="ml-auto size-4" />}
+                </SidebarMenuButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                side="bottom"
+                align="start"
+                className="w-(--radix-dropdown-menu-trigger-width) min-w-56"
+              >
+                <DropdownMenuLabel className="font-normal text-muted-foreground">
+                  Switch store
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {stores.map((s) => (
+                  <DropdownMenuItem key={s.storeId} onClick={() => selectStore(s.storeId)}>
+                    <span className="truncate">{s.name}</span>
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {roleLabel(s.role)}
+                    </span>
+                    {s.storeId === store?.storeId && <Check className="size-4" />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
@@ -196,6 +250,29 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+        {isSuperAdmin && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Platform</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {platformNav.map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={pathname === item.url}
+                      tooltip={item.title}
+                    >
+                      <Link href={item.url}>
+                        <item.icon />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
       <SidebarFooter>
         <SidebarMenu>
@@ -226,7 +303,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 className="w-(--radix-dropdown-menu-trigger-width) min-w-56"
               >
                 <DropdownMenuLabel className="font-normal text-muted-foreground">
-                  {ROLE_LABELS[user.role]}
+                  {isSuperAdmin ? ROLE_LABELS.super_admin : "Member"}
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => logout()}>

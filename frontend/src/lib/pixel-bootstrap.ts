@@ -17,7 +17,7 @@ export function pixelBootstrap(pixelId: string): string {
   if (!pixelId) return "";
   const id = JSON.stringify(pixelId);
   return `(function(w,d,l){
-if(l.pathname.indexOf('/admin')===0)return;
+if(l.pathname.indexOf('/admin')===0||l.pathname.indexOf('/preview')===0)return;
 if(!w.fbq){var n=w.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!w._fbq)w._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];}
 function read(k){var parts=d.cookie.split(';');for(var i=0;i<parts.length;i++){var p=parts[i].replace(/^\\s+/,'');var eq=p.indexOf('=');if(p.slice(0,eq)===k)return decodeURIComponent(p.slice(eq+1));}return null;}
 function write(k,v){var s=k+'='+encodeURIComponent(v)+'; path=/; SameSite=Lax; max-age=7776000';var h=l.hostname;if(h.indexOf('.')>-1&&!/^\\d+\\.\\d+\\.\\d+\\.\\d+$/.test(h))s+='; domain='+h;d.cookie=s;}

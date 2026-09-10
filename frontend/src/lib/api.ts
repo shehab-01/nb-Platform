@@ -1033,16 +1033,17 @@ export type ManualOrderInput = {
   customerName: string;
   phone: string;
   address: string;
-  items: { variantId: number; quantity: number }[];
+  items: { variantId: number; quantity: number; unitPriceOverride?: number }[];
   comment?: string;
   /** true drops it straight into Confirmed; false leaves it on Web Order List. */
   approved: boolean;
 };
 
 /**
- * Create an order on the customer's behalf. Only variant ids and quantities go
- * up — the API prices the cart from the catalogue, so a tampered browser can
- * never set its own total.
+ * Create an order on the customer's behalf. Prices come from the catalogue
+ * unless a line carries a staff-typed unitPriceOverride (a discount agreed on
+ * the phone) — the API validates and bounds it, so a tampered browser still
+ * can't set its own total.
  */
 export async function createManualOrder(
   input: ManualOrderInput
@@ -1057,6 +1058,7 @@ export async function createManualOrder(
         items: input.items.map((i) => ({
           variant_id: i.variantId,
           quantity: i.quantity,
+          unit_price_override: i.unitPriceOverride ?? null,
         })),
         comment: input.comment ?? "",
         approved: input.approved,

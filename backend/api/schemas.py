@@ -512,12 +512,14 @@ class StorefrontListingOut(BaseModel):
 
 
 class ManualOrderItem(BaseModel):
-    """One line of a manually taken order. Only which variant and how many —
-    the name and price are read from the catalogue server-side, never sent by
-    the browser."""
+    """One line of a manually taken order. The name always comes from the
+    catalogue server-side. The price does too, unless staff have overridden
+    it for this line (a discount worked out on the phone) — bounded so a
+    tampered browser cannot push it out of a sane range."""
 
     variant_id: int
     quantity: int = Field(default=1, ge=1, le=99)
+    unit_price_override: int | None = Field(default=None, ge=0, le=1_000_000)
 
 
 class ManualOrderCreate(BaseModel):

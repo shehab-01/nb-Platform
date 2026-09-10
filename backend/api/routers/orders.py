@@ -57,15 +57,21 @@ from api.schemas import (
 router = APIRouter(prefix="/orders", tags=["Orders"])
 
 
-def _line(sold: catalogue.Sellable, quantity: int) -> OrderItem:
+def _line(
+    sold: catalogue.Sellable, quantity: int, unit_price_override: int | None = None
+) -> OrderItem:
     """One order line, priced from the catalogue. The storefront sells one
     variant per order, but it is written as an item like any other so the
-    admin never has to render two shapes of order."""
+    admin never has to render two shapes of order.
+
+    unit_price_override lets staff taking a manual order re-price a line
+    (a discount agreed on the phone); it is never honoured for storefront
+    orders, which never pass it."""
     return OrderItem(
         product_id=sold.product_id,
         variant_id=sold.variant_id,
         product_name=sold.title,
-        unit_price=sold.unit_price,
+        unit_price=unit_price_override if unit_price_override is not None else sold.unit_price,
         quantity=quantity,
     )
 
@@ -996,8 +1002,10 @@ async def create_manual_order(
     either in Confirmed (approved) or on the Web Order List (manual), which is
     what the toggle at the top of the page picks.
 
-    Prices come from the catalogue, never from the request: the browser sends
-    variant ids and quantities only.
+    Prices come from the catalogue by default. Staff may override the unit
+    price of an individual line — a discount agreed on the phone — which is
+    validated and bounded, never trusted blindly; the total is still always
+    the server's sum of the line prices, not a number the browser sends.
 
     No Meta Purchase event is sent for these, on purpose: they are typed in by
     staff from a call or a chat, not placed on the site, so there is no ad
@@ -1023,7 +1031,10 @@ async def create_manual_order(
             detail=f"Unknown product id(s): {', '.join(str(m) for m in missing)}",
         )
 
-    items = [_line(on_sale[line.variant_id], line.quantity) for line in payload.items]
+    items = [
+        _line(on_sale[line.variant_id], line.quantity, line.unit_price_override)
+        for line in payload.items
+    ]
     total = sum(item.unit_price * item.quantity for item in items)
     units = sum(item.quantity for item in items)
 

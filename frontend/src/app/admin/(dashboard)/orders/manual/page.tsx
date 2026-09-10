@@ -38,7 +38,9 @@ import { cn } from "@/lib/utils";
 // A version with its full name attached: what staff pick from and what the
 // order line will record.
 type Sellable = Variant & { title: string };
-type CartLine = { variant: Sellable; quantity: number };
+// priceOverride is unset until staff edit a line's price; until then the
+// catalogue price applies, live, same as before this field existed.
+type CartLine = { variant: Sellable; quantity: number; priceOverride?: number };
 
 const NO_LOOKUP: PhoneLookup = { orders: [], incomplete: [] };
 
@@ -171,6 +173,18 @@ export default function ManualOrderPage() {
   const removeLine = (variantId: number) =>
     setCart((lines) => lines.filter((line) => line.variant.id !== variantId));
 
+  const setLinePrice = (variantId: number, price: number) => {
+    if (price < 0) return;
+    setCart((lines) =>
+      lines.map((line) =>
+        line.variant.id === variantId ? { ...line, priceOverride: price } : line
+      )
+    );
+  };
+
+  const linePrice = (line: CartLine) =>
+    line.priceOverride ?? line.variant.unitPrice;
+
   // Anything typed or added counts as work in progress. Not while saving: the
   // form clears itself on success, and prompting mid-submit would be absurd.
   const dirty =
@@ -190,10 +204,7 @@ export default function ManualOrderPage() {
     else setAskAdmin(true);
   };
 
-  const total = cart.reduce(
-    (sum, line) => sum + line.variant.unitPrice * line.quantity,
-    0
-  );
+  const total = cart.reduce((sum, line) => sum + linePrice(line) * line.quantity, 0);
 
   const filtered = products.filter((product) => {
     const q = productSearch.trim().toLowerCase();
@@ -225,6 +236,7 @@ export default function ManualOrderPage() {
         items: cart.map((line) => ({
           variantId: line.variant.id,
           quantity: line.quantity,
+          unitPriceOverride: line.priceOverride,
         })),
       });
       notifyOrdersChanged();
@@ -489,8 +501,28 @@ export default function ManualOrderPage() {
                             >
                               <Plus className="size-3" />
                             </Button>
-                            <span className="ml-auto text-sm font-semibold tabular-nums">
-                              ৳ {line.variant.unitPrice * line.quantity}
+                            <span className="ml-auto flex items-center gap-1 text-sm">
+                              <span className="text-muted-foreground">৳</span>
+                              <Input
+                                className={cn(
+                                  "h-7 w-16 text-right tabular-nums",
+                                  line.priceOverride !== undefined &&
+                                    line.priceOverride !== line.variant.unitPrice &&
+                                    "border-amber-400 text-amber-700 dark:text-amber-400"
+                                )}
+                                inputMode="numeric"
+                                aria-label="Unit price"
+                                value={linePrice(line)}
+                                onChange={(e) =>
+                                  setLinePrice(
+                                    line.variant.id,
+                                    Number(e.target.value.replace(/\D/g, "")) || 0
+                                  )
+                                }
+                              />
+                            </span>
+                            <span className="w-20 shrink-0 text-right text-sm font-semibold tabular-nums">
+                              ৳ {linePrice(line) * line.quantity}
                             </span>
                           </div>
                         </li>

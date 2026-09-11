@@ -36,11 +36,8 @@ export default function StoreSettingsPage() {
   if (error) return <p className="text-sm text-destructive">{error}</p>;
   if (!settings || !content) return <p className="text-sm text-muted-foreground">Loading…</p>;
   return (
-    <div className="flex max-w-2xl flex-col gap-10">
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Pictures</h2>
-        <ContentForm key={store.storeId} storeId={store.storeId} initial={content} />
-      </section>
+    <div className="flex max-w-2xl flex-col gap-6">
+      <ContentForm key={store.storeId} storeId={store.storeId} initial={content} />
       <SettingsForm
         key={store.storeId}
         storeId={store.storeId}

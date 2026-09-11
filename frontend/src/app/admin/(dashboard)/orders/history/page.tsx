@@ -16,6 +16,7 @@ export default function HistoryOrdersPage() {
       initialStatuses={["history"]}
       storageKey="orders-history"
       showFulfilment
+      bulkActions="history"
     />
   );
 }

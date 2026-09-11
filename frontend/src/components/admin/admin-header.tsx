@@ -60,7 +60,7 @@ export function AdminHeader() {
   const pathname = usePathname();
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+    <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b bg-card px-4">
       <SidebarTrigger className="-ml-1" />
       <Separator orientation="vertical" className="mr-1 h-4" />
       <h1 className="shrink-0 text-sm font-semibold text-foreground">

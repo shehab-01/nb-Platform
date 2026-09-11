@@ -21,7 +21,7 @@ import {
   type Store,
   type StoreInput,
 } from "@/lib/api";
-import { templateInfo } from "@/templates/catalog";
+import { resolveContent, templateInfo } from "@/templates/catalog";
 
 /** "Nature Bazar" -> "NB", "Store One" -> "SO", "Honey" -> "HONEY". */
 export function suggestPrefix(name: string): string {
@@ -108,6 +108,16 @@ export function StoreForm({
       for (const url of Object.values(previewUrls)) URL.revokeObjectURL(url);
     };
   }, [previewUrls]);
+  // Picture per slot for the preview panel: a pending pick, else the store's
+  // own upload (unless reset back to default), else the template default.
+  const previewContent = React.useMemo(() => {
+    const overrides: Record<string, string> = {};
+    for (const [key, url] of Object.entries(existingPictures)) {
+      if (!resets.has(key)) overrides[key] = url;
+    }
+    Object.assign(overrides, previewUrls);
+    return resolveContent(d.template, overrides);
+  }, [d.template, existingPictures, resets, previewUrls]);
 
   const creating = store === null;
   const slots = templateInfo(d.template).content;
@@ -317,12 +327,7 @@ export function StoreForm({
           </p>
         )}
       </form>
-      <TemplatePreview
-        template={d.template}
-        name={d.name}
-        storeSlug={store?.slug}
-        content={previewUrls}
-      />
+      <TemplatePreview template={d.template} content={previewContent} />
     </div>
   );
 }

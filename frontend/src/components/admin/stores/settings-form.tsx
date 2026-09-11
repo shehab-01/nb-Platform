@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import { SecretInput } from "@/components/admin/stores/secret-input";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import { testPathao, type PathaoTest, type StoreSettings, type StoreSettingsInput } from "@/lib/api";
 
 type ItemType = StoreSettings["pathaoItemType"];
@@ -31,6 +33,18 @@ type Draft = {
   bdcourierApiKey?: string;
 };
 
+function draftFrom(settings: StoreSettings): Draft {
+  return {
+    metaPixelId: settings.metaPixelId,
+    metaTestEventCode: settings.metaTestEventCode,
+    pathaoClientId: settings.pathaoClientId,
+    pathaoEmail: settings.pathaoEmail,
+    pathaoStoreId: settings.pathaoStoreId != null ? String(settings.pathaoStoreId) : "",
+    pathaoItemType: settings.pathaoItemType,
+    pathaoParcelWeightKg: settings.pathaoParcelWeightKg,
+  };
+}
+
 /** The store's integrations: Meta, Pathao, BDCourier. Secrets are write-only. */
 export function SettingsForm({
   storeId,
@@ -42,15 +56,7 @@ export function SettingsForm({
   onSave: (input: StoreSettingsInput) => Promise<StoreSettings>;
 }) {
   const [current, setCurrent] = React.useState(settings);
-  const [d, setD] = React.useState<Draft>(() => ({
-    metaPixelId: settings.metaPixelId,
-    metaTestEventCode: settings.metaTestEventCode,
-    pathaoClientId: settings.pathaoClientId,
-    pathaoEmail: settings.pathaoEmail,
-    pathaoStoreId: settings.pathaoStoreId != null ? String(settings.pathaoStoreId) : "",
-    pathaoItemType: settings.pathaoItemType,
-    pathaoParcelWeightKg: settings.pathaoParcelWeightKg,
-  }));
+  const [d, setD] = React.useState<Draft>(() => draftFrom(settings));
   const [busy, setBusy] = React.useState(false);
   const [status, setStatus] = React.useState<{ ok: boolean; text: string } | null>(null);
   const [testing, setTesting] = React.useState(false);
@@ -60,6 +66,12 @@ export function SettingsForm({
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => {
     setD((prev) => ({ ...prev, [key]: value }));
     setDirty(true);
+  };
+
+  const discard = () => {
+    setD(draftFrom(current));
+    setDirty(false);
+    setStatus(null);
   };
 
   const runTest = async () => {
@@ -121,9 +133,23 @@ export function SettingsForm({
     }
   };
 
+  const metaStatus: SectionStatus = current.metaPixelId || current.metaCapiTokenSet
+    ? { label: "Connected", tone: "good" }
+    : { label: "Not set", tone: "neutral" };
+  const pathaoStatus: SectionStatus = test
+    ? test.error
+      ? { label: "Connection failed", tone: "warning" }
+      : { label: "Connected", tone: "good" }
+    : current.pathaoClientId && current.pathaoEmail
+      ? { label: "Not verified", tone: "warning" }
+      : { label: "Not set", tone: "neutral" };
+  const bdcourierStatus: SectionStatus = current.bdcourierApiKeySet
+    ? { label: "Connected", tone: "good" }
+    : { label: "Not set", tone: "neutral" };
+
   return (
-    <form onSubmit={submit} className="flex max-w-2xl flex-col gap-8">
-      <Section title="Meta">
+    <form onSubmit={submit} className="flex flex-col gap-6">
+      <Section title="Meta" note="Pixel and conversions API" status={metaStatus}>
         <Field label="Pixel ID" htmlFor="pixel">
           <Input id="pixel" maxLength={40} value={d.metaPixelId} onChange={(e) => set("metaPixelId", e.target.value)} />
         </Field>
@@ -135,7 +161,7 @@ export function SettingsForm({
         </Field>
       </Section>
 
-      <Section title="Pathao">
+      <Section title="Pathao" note="Courier credentials" status={pathaoStatus}>
         <Field label="Client ID" htmlFor="p-client">
           <Input id="p-client" maxLength={120} value={d.pathaoClientId} onChange={(e) => set("pathaoClientId", e.target.value)} />
         </Field>
@@ -212,7 +238,7 @@ export function SettingsForm({
         </Field>
       </Section>
 
-      <Section title="BDCourier">
+      <Section title="BDCourier" note="Delivery ratio lookup" status={bdcourierStatus}>
         <Field label="API key" htmlFor="fraud">
           <SecretInput id="fraud" isSet={current.bdcourierApiKeySet} hint={current.bdcourierApiKeyHint} value={d.bdcourierApiKey} onChange={(v) => set("bdcourierApiKey", v)} />
         </Field>
@@ -221,29 +247,63 @@ export function SettingsForm({
       {!current.encryptionAvailable && (
         <p className="text-sm text-destructive">APP_ENCRYPTION_KEY is not set on the server: secrets cannot be saved.</p>
       )}
-      {status && (
-        <p className={`text-sm ${status.ok ? "text-muted-foreground" : "text-destructive"}`}>{status.text}</p>
-      )}
 
-      <div>
-        <Button type="submit" disabled={busy || !valid}>Save</Button>
+      <div className="sticky bottom-0 flex flex-wrap items-center gap-3 border-t bg-background/95 py-4 backdrop-blur-sm">
+        <Button type="submit" disabled={busy || !valid}>
+          {busy ? "Saving…" : "Save settings"}
+        </Button>
+        <Button type="button" variant="ghost" disabled={busy || !dirty} onClick={discard}>
+          Discard
+        </Button>
+        <p
+          className={cn(
+            "ml-auto text-xs",
+            status ? (status.ok ? "text-muted-foreground" : "text-destructive") : "text-muted-foreground"
+          )}
+        >
+          {status ? status.text : dirty ? "Unsaved changes" : "All changes saved"}
+        </p>
       </div>
     </form>
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+type SectionStatus = { label: string; tone: "good" | "warning" | "neutral" };
+
+const TONE_CLASS: Record<SectionStatus["tone"], string> = {
+  good: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
+  warning: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
+  neutral: "bg-muted text-muted-foreground",
+};
+
+function Section({
+  title,
+  note,
+  status,
+  children,
+}: {
+  title: string;
+  note?: string;
+  status?: SectionStatus;
+  children: React.ReactNode;
+}) {
   return (
-    <section className="flex flex-col gap-3">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{title}</h2>
-      <div className="grid gap-3">{children}</div>
+    <section className="overflow-hidden rounded-xl border bg-card shadow-xs">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-5 py-3.5">
+        <div className="flex items-baseline gap-2.5">
+          <h2 className="text-sm font-semibold">{title}</h2>
+          {note && <p className="text-xs text-muted-foreground">{note}</p>}
+        </div>
+        {status && <Badge className={cn("border-transparent", TONE_CLASS[status.tone])}>{status.label}</Badge>}
+      </div>
+      <div className="flex flex-col px-5">{children}</div>
     </section>
   );
 }
 
 function Field({ label, htmlFor, children }: { label: string; htmlFor?: string; children: React.ReactNode }) {
   return (
-    <div className="grid items-center gap-1.5 sm:grid-cols-[160px_1fr] sm:gap-4">
+    <div className="grid items-center gap-1.5 border-b border-border/70 py-3.5 last:border-b-0 sm:grid-cols-[160px_1fr] sm:gap-4">
       <Label htmlFor={htmlFor} className="text-sm">{label}</Label>
       <div>{children}</div>
     </div>

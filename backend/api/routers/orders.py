@@ -1,3 +1,4 @@
+import asyncio
 import math
 import re
 from datetime import date, datetime, time, timedelta, timezone
@@ -22,7 +23,7 @@ from api.models import (
     User,
     UserRole,
 )
-from api.phone import phone_digits, phone_key
+from api.phone import bd_mobile, phone_digits, phone_key
 from api.ratelimit import client_ip, drafts_limiter, orders_limiter
 from api import catalogue, stores, tenancy
 from api.services import bdcourier, meta_capi, pathao, pathao_sync
@@ -300,6 +301,11 @@ async def save_order_draft(
 
     name = payload.customer_name.strip()
     address = payload.address.strip()
+    # Only worth a courier lookup once the number is a real BD mobile, and
+    # only on the tick where it just became one (or changed) — otherwise
+    # every autosave keystroke in name/address would re-fire it.
+    mobile = bd_mobile(phone)
+    previous_mobile = bd_mobile(order.phone) if order is not None else None
 
     if order is None:
         # A new lead is written against what is on sale, so the Incomplete
@@ -343,6 +349,11 @@ async def save_order_draft(
             order.customer_name = name
         if address:
             order.address = address
+
+    if mobile is not None and mobile != previous_mobile:
+        integrations = await stores.load_integrations(session, store.id)
+        if integrations is not None:
+            bdcourier.check_order_later(order.id, store.id, phone, integrations.bdcourier_api_key)
 
     await session.commit()
     return OrderDraftOut(saved=True)
@@ -516,7 +527,7 @@ async def create_order(
 @router.get("", response_model=OrderListOut)
 async def list_orders(
     page: int = Query(1, ge=1),
-    page_size: int = Query(25, ge=1, le=100),
+    page_size: int = Query(25, ge=1, le=1000),
     status: list[OrderStatus] | None = Query(None),
     date_from: date | None = None,
     date_to: date | None = None,
@@ -967,11 +978,15 @@ async def fraud_check_phone(
 @router.post("/{order_id}/fraud-check", response_model=OrderOut)
 async def fraud_check_order(
     order_id: int,
+    force: bool = Query(True),
     session: AsyncSession = Depends(get_session),
     ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
 ) -> Order:
-    """Ask BDCourier again for this order's phone (the refresh button on the
-    modal) and pin the new answer to the order."""
+    """Ask BDCourier again for this order's phone and pin the new answer to
+    the order. The modal's "Check again" button forces a fresh lookup;
+    its silent auto-retry on open (when the order has no result yet, or the
+    last one errored) passes force=False so a cache hit within the last 24h
+    is reused instead of spending another API call."""
     integrations = await stores.load_integrations(session, ctx.store.id)
     if integrations is None or not integrations.bdcourier_api_key:
         raise HTTPException(status_code=503, detail="BDCourier is not configured for this store")
@@ -979,7 +994,7 @@ async def fraud_check_order(
     if order is None or order.store_id != ctx.store.id:
         raise HTTPException(status_code=404, detail="Order not found")
     row = await bdcourier.check(
-        session, ctx.store.id, order.phone, integrations.bdcourier_api_key, force=True
+        session, ctx.store.id, order.phone, integrations.bdcourier_api_key, force=force
     )
     order.fraud_check_id = row.id
     await session.commit()
@@ -1035,7 +1050,11 @@ async def create_manual_order(
         _line(on_sale[line.variant_id], line.quantity, line.unit_price_override)
         for line in payload.items
     ]
-    total = sum(item.unit_price * item.quantity for item in items)
+    total = (
+        payload.total_override
+        if payload.total_override is not None
+        else sum(item.unit_price * item.quantity for item in items)
+    )
     units = sum(item.quantity for item in items)
 
     status = (
@@ -1260,7 +1279,11 @@ async def bulk_update(
 
 # Only orders that have been confirmed by phone, or already handed to
 # shipping, may be booked with the courier.
-PATHAO_SENDABLE = {OrderStatus.confirmed.value, OrderStatus.shipped.value}
+PATHAO_SENDABLE = {
+    OrderStatus.confirmed.value,
+    OrderStatus.shipped.value,
+    OrderStatus.history.value,
+}
 
 
 @router.post("/pathao/send", response_model=PathaoSendOut)
@@ -1302,7 +1325,7 @@ async def send_to_pathao(
             await session.rollback()
             continue
         if order.status not in PATHAO_SENDABLE:
-            fail(order_id, "Only confirmed or shipping orders can be sent")
+            fail(order_id, "Only confirmed, shipping or history orders can be sent")
             await session.rollback()
             continue
         if _held_by_someone_else(order, user):
@@ -1314,6 +1337,7 @@ async def send_to_pathao(
         except pathao.PathaoError as exc:
             fail(order_id, pathao.error_text(exc))
             await session.rollback()
+            await asyncio.sleep(pathao_sync.BETWEEN_CALLS_SECONDS)
             continue
         order.pathao_consignment_id = consignment.consignment_id
         order.pathao_status = consignment.order_status or None
@@ -1331,6 +1355,7 @@ async def send_to_pathao(
         )
         await session.commit()
         sent_ids.append(order.id)
+        await asyncio.sleep(pathao_sync.BETWEEN_CALLS_SECONDS)
 
     return PathaoSendOut(orders=await _load_orders(session, sent_ids), failed=failed)
 
@@ -1371,8 +1396,10 @@ async def refresh_pathao(
                     error=pathao.error_text(exc),
                 )
             )
+            await asyncio.sleep(pathao_sync.BETWEEN_CALLS_SECONDS)
             continue
         refreshed_ids.append(order.id)
+        await asyncio.sleep(pathao_sync.BETWEEN_CALLS_SECONDS)
     await session.commit()
     return PathaoSendOut(orders=await _load_orders(session, refreshed_ids), failed=failed)
 

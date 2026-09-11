@@ -1041,6 +1041,8 @@ export type ManualOrderInput = {
   comment?: string;
   /** true drops it straight into Confirmed; false leaves it on Web Order List. */
   approved: boolean;
+  /** A total staff negotiated on the phone, overriding the catalogue sum. */
+  totalOverride?: number;
 };
 
 /**
@@ -1066,6 +1068,7 @@ export async function createManualOrder(
         })),
         comment: input.comment ?? "",
         approved: input.approved,
+        total_override: input.totalOverride ?? null,
       }),
     })
   );
@@ -1275,8 +1278,14 @@ export async function getFraudCheck(phone: string): Promise<FraudCheck | null> {
 }
 
 /** Ask BDCourier again for an order's phone and pin the answer to the order. */
-export async function recheckOrderFraud(orderId: number): Promise<Order> {
+export async function recheckOrderFraud(
+  orderId: number,
+  force = true
+): Promise<Order> {
   return mapOrder(
-    await request<ApiOrder>(`/api/orders/${orderId}/fraud-check`, { method: "POST" })
+    await request<ApiOrder>(
+      `/api/orders/${orderId}/fraud-check?force=${force}`,
+      { method: "POST" }
+    )
   );
 }

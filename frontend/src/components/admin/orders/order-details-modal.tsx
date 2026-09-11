@@ -92,6 +92,26 @@ export function OrderDetailsModal({
     }
   }, [order?.id, open]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A silent retry when the courier history is missing or last errored — an
+  // outage or a store that only just got its BDCourier key configured. Not
+  // forced, so a fresh-enough cached answer is reused rather than spending
+  // another API call; a real result (even "0 parcels") is left alone.
+  React.useEffect(() => {
+    if (!open || !order) return;
+    if (order.fraud && !order.fraud.error) return;
+    let cancelled = false;
+    recheckOrderFraud(order.id, false)
+      .then((updated) => {
+        if (!cancelled) onOrderUpdated(updated);
+      })
+      .catch(() => {
+        // Still nothing to show; the card just stays hidden.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, order?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!order) return null;
 
   const claim = activeClaim(order);

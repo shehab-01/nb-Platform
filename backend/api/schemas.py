@@ -548,6 +548,11 @@ class ManualOrderCreate(BaseModel):
     # "approved" drops the order straight into Confirmed; "manual" leaves it on
     # the Web Order List for someone to call through.
     approved: bool = True
+    # A total staff negotiated on the phone, overriding the catalogue sum.
+    # Line items still carry their catalogue prices; only the order's summary
+    # total changes. None (the default) means "use the catalogue total" —
+    # this is never sent for web orders, only ones staff typed in.
+    total_override: int | None = Field(default=None, ge=0, le=10_000_000)
 
     @field_validator("phone")
     @classmethod

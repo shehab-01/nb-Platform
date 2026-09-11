@@ -1,73 +1,61 @@
 "use client";
 
-import * as React from "react";
-
-import { PREVIEW_MESSAGE } from "@/app/preview/preview-client";
+import { cn } from "@/lib/utils";
 import { templateInfo } from "@/templates/catalog";
 
 /**
- * The template rendered for real, in a phone-sized frame beside the store
- * form. Sample data until the store exists; the store's live catalogue after.
- * The name is debounced so typing does not reload the frame per keystroke.
+ * A flat mock of the template's content slots beside the store form: the
+ * logo in a dark header, each remaining picture in its own labelled box, an
+ * order button at the bottom. Not the rendered storefront — just the
+ * pictures the store can replace, so a pick shows up here immediately
+ * through `content` without waiting on a real page load.
  */
 export function TemplatePreview({
   template,
-  name,
-  storeSlug,
+  /** Picture URL per content key: pending pick, existing upload, or the
+      template default — see `resolveContent`. */
   content,
 }: {
   template: string;
-  name: string;
-  storeSlug?: string;
-  /** Pictures picked but not uploaded yet, as object URLs by content key. */
-  content?: Record<string, string>;
+  content: Record<string, string>;
 }) {
-  const frame = React.useRef<HTMLIFrameElement>(null);
-  const [debouncedName, setDebouncedName] = React.useState(name);
-
-  // Push the picked pictures into the frame: whenever they change, and again
-  // when a freshly loaded frame says it is ready.
-  const post = React.useCallback(() => {
-    frame.current?.contentWindow?.postMessage(
-      { type: PREVIEW_MESSAGE, content: content ?? {} },
-      window.location.origin,
-    );
-  }, [content]);
-  React.useEffect(post, [post]);
-  React.useEffect(() => {
-    const onReady = (event: MessageEvent) => {
-      if (event.origin === window.location.origin && event.data?.type === `${PREVIEW_MESSAGE}-ready`) post();
-    };
-    window.addEventListener("message", onReady);
-    return () => window.removeEventListener("message", onReady);
-  }, [post]);
-  React.useEffect(() => {
-    const t = setTimeout(() => setDebouncedName(name), 400);
-    return () => clearTimeout(t);
-  }, [name]);
-
-  const params = new URLSearchParams({ template, name: debouncedName });
-  if (storeSlug) params.set("store", storeSlug);
-  const src = `/preview?${params.toString()}`;
   const info = templateInfo(template);
+  const [logo, ...sections] = info.content;
 
   return (
     <aside className="flex flex-col gap-2 lg:sticky lg:top-20">
       <div className="flex items-baseline justify-between">
         <p className="text-sm font-medium">{info.name}</p>
-        <p className="text-xs text-muted-foreground">
-          {storeSlug ? "Live data" : "Sample data"}
-        </p>
+        <p className="text-xs text-muted-foreground">Preview</p>
       </div>
-      <div className="mx-auto w-full max-w-[390px] overflow-hidden rounded-[2rem] border-8 border-foreground/90 bg-background shadow-xl">
-        <iframe
-          ref={frame}
-          key={src}
-          src={src}
-          title={`${info.name} preview`}
-          className="block h-[760px] w-full bg-white"
-          sandbox="allow-same-origin allow-scripts"
-        />
+      <div className="overflow-hidden rounded-xl border bg-background">
+        {logo && (
+          <div className="flex items-center justify-center bg-[#123324] p-6">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={content[logo.key]} alt={logo.label} className="h-11 max-w-[150px] object-contain" />
+          </div>
+        )}
+        {sections.map((slot, i) => (
+          <div key={slot.key} className={cn("p-4", i % 2 ? "bg-muted/30" : "bg-background", (logo || i > 0) && "border-t")}>
+            <div className="mb-2 flex items-baseline justify-between gap-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {slot.label}
+              </p>
+              <p className="shrink-0 font-mono text-[10px] text-muted-foreground/70">{slot.size}</p>
+            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={content[slot.key]}
+              alt={slot.label}
+              className="h-24 w-full rounded-lg border border-dashed object-cover"
+            />
+          </div>
+        ))}
+        <div className="flex justify-center bg-[#123324] p-5">
+          <span className="rounded-lg bg-background px-8 py-2.5 text-sm font-bold text-[#123324]">
+            অর্ডার করুন
+          </span>
+        </div>
       </div>
       <p className="text-xs text-muted-foreground">{info.description}</p>
     </aside>

@@ -69,6 +69,10 @@ export default function ManualOrderPage() {
   const [fraudLoading, setFraudLoading] = React.useState(false);
   const [searched, setSearched] = React.useState(false);
 
+  // null follows the catalogue total; staff can type a different Due amount
+  // to override it (a total negotiated on the phone).
+  const [totalOverride, setTotalOverride] = React.useState<number | null>(null);
+
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [done, setDone] = React.useState<string | null>(null);
@@ -193,7 +197,8 @@ export default function ManualOrderPage() {
       name.trim().length > 0 ||
       address.trim().length > 0 ||
       comment.trim().length > 0 ||
-      cart.length > 0);
+      cart.length > 0 ||
+      totalOverride !== null);
   const guard = useUnsavedChanges(dirty);
 
   const handleAddProduct = () => {
@@ -204,7 +209,12 @@ export default function ManualOrderPage() {
     else setAskAdmin(true);
   };
 
-  const total = cart.reduce((sum, line) => sum + linePrice(line) * line.quantity, 0);
+  const catalogueTotal = cart.reduce(
+    (sum, line) => sum + linePrice(line) * line.quantity,
+    0
+  );
+  const total = totalOverride ?? catalogueTotal;
+  const overridden = totalOverride !== null && totalOverride !== catalogueTotal;
 
   const filtered = products.filter((product) => {
     const q = productSearch.trim().toLowerCase();
@@ -238,6 +248,7 @@ export default function ManualOrderPage() {
           quantity: line.quantity,
           unitPriceOverride: line.priceOverride,
         })),
+        totalOverride: overridden ? total : undefined,
       });
       notifyOrdersChanged();
       setDone(
@@ -252,6 +263,7 @@ export default function ManualOrderPage() {
       setAddress("");
       setComment("");
       setCart([]);
+      setTotalOverride(null);
       setPrevious(NO_LOOKUP);
       setSearched(false);
     } catch (err) {
@@ -540,7 +552,7 @@ export default function ManualOrderPage() {
           <dl className="flex flex-col gap-2 text-sm">
             <div className="flex justify-between">
               <dt className="text-muted-foreground">Items total</dt>
-              <dd className="tabular-nums">৳ {total}</dd>
+              <dd className="tabular-nums">৳ {catalogueTotal}</dd>
             </div>
             <div className="flex justify-between">
               <dt className="text-muted-foreground">Delivery</dt>
@@ -549,8 +561,35 @@ export default function ManualOrderPage() {
           </dl>
           <div className="flex items-baseline justify-between rounded-lg bg-muted px-3 py-2.5">
             <span className="text-sm font-semibold">Due amount</span>
-            <span className="text-lg font-bold tabular-nums">৳ {total}</span>
+            <span className="flex items-center gap-1 text-lg font-bold tabular-nums">
+              ৳
+              <Input
+                className={cn(
+                  "h-8 w-24 border-0 bg-transparent px-1 text-right text-lg font-bold tabular-nums shadow-none focus-visible:ring-1",
+                  overridden && "text-amber-700 dark:text-amber-400"
+                )}
+                inputMode="numeric"
+                aria-label="Due amount"
+                value={total}
+                onChange={(e) => {
+                  const value = Number(e.target.value.replace(/\D/g, ""));
+                  setTotalOverride(e.target.value === "" ? null : value);
+                }}
+              />
+            </span>
           </div>
+          {overridden && (
+            <p className="text-right text-xs text-muted-foreground">
+              Adjusted from the catalogue total of ৳{catalogueTotal} —{" "}
+              <button
+                type="button"
+                className="underline underline-offset-2 hover:text-foreground"
+                onClick={() => setTotalOverride(null)}
+              >
+                Reset
+              </button>
+            </p>
+          )}
           <Button onClick={submit} disabled={!valid || saving}>
             {saving && <Loader2 className="size-4 animate-spin" />}
             {approved ? "Create Approved Order" : "Create Manual Order"}

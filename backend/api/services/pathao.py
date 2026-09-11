@@ -373,6 +373,10 @@ async def price_plan(
     return data if isinstance(data, dict) else {}
 
 
+def is_rate_limited(exc: PathaoError) -> bool:
+    return exc.status == 429
+
+
 def error_text(exc: PathaoError) -> str:
     """One line for staff: the message plus any per-field complaints."""
     if not exc.field_errors:

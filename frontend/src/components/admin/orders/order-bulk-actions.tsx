@@ -28,8 +28,10 @@ import type { StickerSize } from "@/lib/stickers";
 import { cn } from "@/lib/utils";
 
 /** Which bulk actions a list offers: the Confirm list hands orders to
- * shipping; the Ship list books them with the courier and prints stickers. */
-export type BulkMode = "confirm" | "ship";
+ * shipping; the Ship list books them with the courier and prints stickers;
+ * the History list offers the same courier/print actions without Send to
+ * History — an archived order has nowhere further to be archived to. */
+export type BulkMode = "confirm" | "ship" | "history";
 
 export type BulkHandlers = {
   sendToShipping: (orders: Order[]) => Promise<void>;
@@ -171,7 +173,7 @@ export function OrderBulkActions({
           </div>
         )}
 
-        {mode === "ship" && (
+        {(mode === "ship" || mode === "history") && (
           <>
             <div className="mt-4 flex flex-col gap-2 border-t pt-4">
               <SectionTitle icon={Send}>Courier services</SectionTitle>
@@ -220,17 +222,19 @@ export function OrderBulkActions({
                 }
               />
             </div>
-            <div className="mt-4 flex flex-col gap-2 border-t pt-4">
-              <SectionTitle icon={Archive}>Archive</SectionTitle>
-              <ActionButton
-                icon={Archive}
-                label="Send to History"
-                hint={`${rows.length} order${rows.length === 1 ? "" : "s"}`}
-                busy={busy === "history"}
-                disabled={busy !== null}
-                onClick={() => run("history", () => handlers.sendToHistory(rows))}
-              />
-            </div>
+            {mode === "ship" && (
+              <div className="mt-4 flex flex-col gap-2 border-t pt-4">
+                <SectionTitle icon={Archive}>Archive</SectionTitle>
+                <ActionButton
+                  icon={Archive}
+                  label="Send to History"
+                  hint={`${rows.length} order${rows.length === 1 ? "" : "s"}`}
+                  busy={busy === "history"}
+                  disabled={busy !== null}
+                  onClick={() => run("history", () => handlers.sendToHistory(rows))}
+                />
+              </div>
+            )}
           </>
         )}
       </div>

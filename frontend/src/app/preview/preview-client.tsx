@@ -2,11 +2,10 @@
 
 import * as React from "react";
 
+import { PREVIEW_MESSAGE } from "@/lib/preview-protocol";
 import type { StorefrontListing } from "@/lib/products";
 import { loadTemplate } from "@/templates";
 import type { StorePublicConfig, TemplateModule } from "@/templates/types";
-
-export const PREVIEW_MESSAGE = "nb-preview-content";
 
 /**
  * The template, rendered live. The parent page (the store form) may post

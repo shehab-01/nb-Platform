@@ -10,8 +10,10 @@ export type ContentField = {
   label: string;
   /** Path under /public: what shows until the store uploads its own. */
   defaultUrl: string;
-  /** Guidance for the upload, e.g. "1146×672, JPG". */
+  /** Guidance for the upload, e.g. "1146×672 · JPG". */
   size: string;
+  /** One line on where this picture shows up, for the upload row. */
+  hint: string;
 };
 
 export type TemplateInfo = {
@@ -29,7 +31,8 @@ const LOGO: ContentField = {
   key: "logo",
   label: "Logo",
   defaultUrl: "/logo.png",
-  size: "about 300×96, transparent PNG",
+  size: "300×96 · PNG",
+  hint: "Transparent background, sits on the dark header",
 };
 
 export const TEMPLATE_CATALOG: Record<string, TemplateInfo> = {
@@ -60,11 +63,41 @@ export const TEMPLATE_CATALOG: Record<string, TemplateInfo> = {
     ],
     content: [
       LOGO,
-      { key: "banner", label: "Hero banner", defaultUrl: "/campaign.jpg", size: "1146×672, JPG" },
-      { key: "how_it_works", label: "How to participate", defaultUrl: "/how-it-works.jpeg", size: "812×232, JPG" },
-      { key: "prizes", label: "Prizes", defaultUrl: "/prizes.jpg", size: "877×877, JPG" },
-      { key: "products", label: "Product showcase", defaultUrl: "/products.jpg", size: "1120×450, JPG" },
-      { key: "offer_price", label: "Offer price badge", defaultUrl: "/offer-price.png", size: "180×120, PNG" },
+      {
+        key: "banner",
+        label: "Hero banner",
+        defaultUrl: "/campaign.jpg",
+        size: "1146×672 · JPG",
+        hint: "First thing shoppers see at the top of the page",
+      },
+      {
+        key: "how_it_works",
+        label: "How to participate",
+        defaultUrl: "/how-it-works.jpeg",
+        size: "812×232 · JPG",
+        hint: "Four-step strip explaining the campaign",
+      },
+      {
+        key: "prizes",
+        label: "Prizes",
+        defaultUrl: "/prizes.jpg",
+        size: "877×877 · JPG",
+        hint: "Square prize board",
+      },
+      {
+        key: "products",
+        label: "Product showcase",
+        defaultUrl: "/products.jpg",
+        size: "1120×450 · JPG",
+        hint: "Wide product row below the prizes",
+      },
+      {
+        key: "offer_price",
+        label: "Offer price badge",
+        defaultUrl: "/offer-price.png",
+        size: "180×120 · PNG",
+        hint: "Small badge shown beside the price",
+      },
     ],
   },
 };

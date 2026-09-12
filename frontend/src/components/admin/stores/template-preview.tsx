@@ -1,63 +1,102 @@
 "use client";
 
+import * as React from "react";
+
+import { PREVIEW_MESSAGE } from "@/lib/preview-protocol";
 import { cn } from "@/lib/utils";
 import { templateInfo } from "@/templates/catalog";
 
 /**
- * A flat mock of the template's content slots beside the store form: the
- * logo in a dark header, each remaining picture in its own labelled box, an
- * order button at the bottom. Not the rendered storefront — just the
- * pictures the store can replace, so a pick shows up here immediately
- * through `content` without waiting on a real page load.
+ * The template itself, rendered live beside the store form.
+ *
+ * Not a mock: the frame loads /preview, which renders the very components a
+ * customer gets after the store is created, with a sample catalogue (or the
+ * store's real one when `storeSlug` is given). Pictures are posted in rather
+ * than put in the URL, so picking one swaps it in place — including the
+ * blob: URL of a file that has not been uploaded yet — without reloading the
+ * frame and losing the scroll position. Only the template can change the URL.
  */
 export function TemplatePreview({
   template,
+  /** An existing store's slug: shows its own catalogue and pictures. */
+  storeSlug,
   /** Picture URL per content key: pending pick, existing upload, or the
       template default — see `resolveContent`. */
   content,
+  className,
 }: {
   template: string;
+  storeSlug?: string;
   content: Record<string, string>;
+  className?: string;
 }) {
   const info = templateInfo(template);
-  const [logo, ...sections] = info.content;
+  const frameRef = React.useRef<HTMLIFrameElement>(null);
+  const [loading, setLoading] = React.useState(true);
+  // The store name only reaches the template as image alt text, so it is
+  // deliberately not in the URL: typing it would reload the frame per key.
+  const src = `/preview?template=${encodeURIComponent(template)}${
+    storeSlug ? `&store=${encodeURIComponent(storeSlug)}` : ""
+  }`;
+
+  const post = React.useCallback(() => {
+    frameRef.current?.contentWindow?.postMessage(
+      { type: PREVIEW_MESSAGE, content },
+      window.location.origin,
+    );
+  }, [content]);
+
+  // Two ways in, because either side may be ready first: the frame says hello
+  // when it mounts, and every later pick posts straight away.
+  React.useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if ((event.data as { type?: string })?.type === `${PREVIEW_MESSAGE}-ready`) {
+        setLoading(false);
+        post();
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [post]);
+
+  React.useEffect(post, [post]);
 
   return (
-    <aside className="flex flex-col gap-2 lg:sticky lg:top-20">
-      <div className="flex items-baseline justify-between">
-        <p className="text-sm font-medium">{info.name}</p>
-        <p className="text-xs text-muted-foreground">Preview</p>
+    <aside
+      className={cn(
+        "flex flex-col overflow-hidden rounded-xl border bg-card xl:sticky xl:top-20",
+        className,
+      )}
+    >
+      <div className="flex items-center justify-between gap-3 border-b bg-muted/40 px-4 py-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold">{info.name}</p>
+          <p className="truncate font-mono text-[11px] text-muted-foreground">{info.id}</p>
+        </div>
+        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+          <span className="size-1.5 rounded-full bg-emerald-500" />
+          Live preview
+        </span>
       </div>
-      <div className="overflow-hidden rounded-xl border bg-background">
-        {logo && (
-          <div className="flex items-center justify-center bg-[#123324] p-6">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={content[logo.key]} alt={logo.label} className="h-11 max-w-[150px] object-contain" />
+      <div className="relative min-h-[520px] flex-1 bg-[#eef1ea]">
+        <iframe
+          ref={frameRef}
+          key={src}
+          src={src}
+          title={`${info.name} preview`}
+          className="size-full border-0"
+          onLoad={() => setLoading(false)}
+        />
+        {loading && (
+          <div className="absolute inset-0 grid place-items-center bg-card text-xs text-muted-foreground">
+            Loading preview…
           </div>
         )}
-        {sections.map((slot, i) => (
-          <div key={slot.key} className={cn("p-4", i % 2 ? "bg-muted/30" : "bg-background", (logo || i > 0) && "border-t")}>
-            <div className="mb-2 flex items-baseline justify-between gap-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                {slot.label}
-              </p>
-              <p className="shrink-0 font-mono text-[10px] text-muted-foreground/70">{slot.size}</p>
-            </div>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={content[slot.key]}
-              alt={slot.label}
-              className="h-24 w-full rounded-lg border border-dashed object-cover"
-            />
-          </div>
-        ))}
-        <div className="flex justify-center bg-[#123324] p-5">
-          <span className="rounded-lg bg-background px-8 py-2.5 text-sm font-bold text-[#123324]">
-            অর্ডার করুন
-          </span>
-        </div>
       </div>
-      <p className="text-xs text-muted-foreground">{info.description}</p>
+      <p className="border-t px-4 py-3 text-xs leading-relaxed text-pretty text-muted-foreground">
+        {info.description}
+      </p>
     </aside>
   );
 }

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { Separator } from "@/components/ui/separator";
+import { StoreDomainBadge } from "@/components/admin/store-domain-badge";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { HEADER_LINKS, pageTitle, type HeaderLink } from "@/lib/admin-nav";
 import { cn } from "@/lib/utils";
@@ -62,10 +62,10 @@ export function AdminHeader() {
   return (
     <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b bg-card px-4">
       <SidebarTrigger className="-ml-1" />
-      <Separator orientation="vertical" className="mr-1 h-4" />
       <h1 className="shrink-0 text-sm font-semibold text-foreground">
         {pageTitle(pathname)}
       </h1>
+      <StoreDomainBadge />
       <nav className="ml-auto flex items-center gap-1 overflow-x-auto">
         {HEADER_LINKS.map((link) => (
           <HeaderItem

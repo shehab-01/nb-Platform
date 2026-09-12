@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from typing import Generic, TypeVar
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
@@ -96,16 +97,19 @@ def _config(store: Store, host: str | None) -> StoreConfig:
     )
 
 
-class _Cache:
-    """host-or-slug -> (expires_at, config-or-None). Negative results are
+T = TypeVar("T")
+
+
+class _Cache(Generic[T]):
+    """host-or-slug -> (expires_at, value-or-None). Negative results are
     cached too, so an unknown hostname being hammered costs one query per TTL,
     not one per request."""
 
     def __init__(self, ttl: float) -> None:
         self.ttl = ttl
-        self._entries: dict[str, tuple[float, StoreConfig | None]] = {}
+        self._entries: dict[str, tuple[float, T | None]] = {}
 
-    def get(self, key: str) -> tuple[bool, StoreConfig | None]:
+    def get(self, key: str) -> tuple[bool, T | None]:
         entry = self._entries.get(key)
         if entry is None:
             return False, None
@@ -115,7 +119,7 @@ class _Cache:
             return False, None
         return True, value
 
-    def put(self, key: str, value: StoreConfig | None) -> None:
+    def put(self, key: str, value: T | None) -> None:
         # Bound the table: a scan of random hostnames must not grow memory.
         if len(self._entries) >= 10_000:
             self._entries.clear()
@@ -125,9 +129,12 @@ class _Cache:
         self._entries.clear()
 
 
-_by_host = _Cache(CACHE_TTL_SECONDS)
-_by_slug = _Cache(CACHE_TTL_SECONDS)
-_by_id = _Cache(CACHE_TTL_SECONDS)
+_by_host: _Cache[StoreConfig] = _Cache(CACHE_TTL_SECONDS)
+_by_slug: _Cache[StoreConfig] = _Cache(CACHE_TTL_SECONDS)
+_by_id: _Cache[StoreConfig] = _Cache(CACHE_TTL_SECONDS)
+# Draft stores included, so /api/store-check can tell a store's own domain
+# "you found me, I am just not published yet". Nothing else reads it.
+_by_host_any: _Cache[tuple[StoreConfig, bool]] = _Cache(CACHE_TTL_SECONDS)
 
 
 def invalidate() -> None:
@@ -135,6 +142,7 @@ def invalidate() -> None:
     store or domain is edited so the change shows up at once here; other
     workers catch up within the TTL."""
     _by_host.clear()
+    _by_host_any.clear()
     _by_slug.clear()
     _by_id.clear()
     _integrations.clear()
@@ -169,6 +177,31 @@ async def resolve_host(session: AsyncSession, raw_host: str | None) -> StoreConf
     config = _config(store, host) if store is not None else None
     _by_host.put(host, config)
     return config
+
+
+async def resolve_host_any(
+    session: AsyncSession, raw_host: str | None
+) -> tuple[StoreConfig, bool] | None:
+    """Like `resolve_host`, but a store that is not active resolves too, with
+    its `is_active` alongside. Only the domain check reads this: every
+    storefront path keeps using `resolve_host`, where a draft store is nobody
+    and a wrong hostname learns nothing.
+    """
+    host = normalise_host(raw_host)
+    if host is None:
+        return None
+    hit, cached = _by_host_any.get(host)
+    if hit:
+        return cached
+    store = await session.scalar(
+        select(Store)
+        .join(StoreDomain, StoreDomain.store_id == Store.id)
+        .where(StoreDomain.host == host)
+        .limit(1)
+    )
+    value = (_config(store, host), store.is_active) if store is not None else None
+    _by_host_any.put(host, value)
+    return value
 
 
 async def resolve_slug(session: AsyncSession, slug: str | None) -> StoreConfig | None:

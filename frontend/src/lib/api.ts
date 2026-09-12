@@ -672,6 +672,78 @@ export async function listStores(): Promise<Store[]> {
   return (await request<ApiStore[]>("/api/stores")).map(mapStore);
 }
 
+/** What a live probe of one of a store's domains found. */
+export type DomainStatus =
+  | "ok"
+  | "not_published"
+  | "wrong_store"
+  | "unreachable"
+  | "tls_error"
+  | "http_error";
+
+export type DomainHealth = {
+  host: string;
+  isPrimary: boolean;
+  /** The hostname is in store_domains (always true for a store's own rows). */
+  resolved: boolean;
+  resolvedStoreId: number | null;
+  status: DomainStatus;
+  /** One line for the tooltip. */
+  detail: string;
+  httpStatus: number | null;
+  /** The store the hostname actually answered for, when it named one. */
+  reachedStoreSlug: string | null;
+};
+
+/**
+ * Whether a store's domains really serve it. Deliberately separate from
+ * `Store.isActive`, which is only what our own row says: a store can be
+ * Active with its DNS still pointing at the old host.
+ */
+export type StoreHealth = {
+  storeId: number;
+  isActive: boolean;
+  domains: DomainHealth[];
+};
+
+type ApiDomainHealth = {
+  host: string;
+  is_primary: boolean;
+  resolved: boolean;
+  resolved_store_id: number | null;
+  status: DomainStatus;
+  detail: string;
+  http_status: number | null;
+  reached_store_slug: string | null;
+};
+
+/** Probes the store's domains server-side; slow by nature, so callers fetch
+ *  it after the list is on screen rather than before. */
+export async function getStoreHealth(
+  storeId: number,
+  refresh = false
+): Promise<StoreHealth> {
+  const res = await request<{
+    store_id: number;
+    is_active: boolean;
+    domains: ApiDomainHealth[];
+  }>(`/api/stores/${storeId}/health${refresh ? "?refresh=true" : ""}`);
+  return {
+    storeId: res.store_id,
+    isActive: res.is_active,
+    domains: res.domains.map((d) => ({
+      host: d.host,
+      isPrimary: d.is_primary,
+      resolved: d.resolved,
+      resolvedStoreId: d.resolved_store_id,
+      status: d.status,
+      detail: d.detail,
+      httpStatus: d.http_status,
+      reachedStoreSlug: d.reached_store_slug,
+    })),
+  };
+}
+
 export async function listTemplates(): Promise<string[]> {
   return request<string[]>("/api/stores/templates");
 }

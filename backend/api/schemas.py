@@ -675,6 +675,52 @@ class StoreConfigOut(BaseModel):
     order_prefix: str = "NB"
 
 
+class StoreCheckStore(BaseModel):
+    """The store a hostname resolved to, as /api/store-check reports it."""
+
+    id: int
+    slug: str
+    name: str
+    #: False for a store that exists but is not serving customers yet.
+    active: bool
+
+
+class StoreCheckOut(BaseModel):
+    """The answer the admin's domain check reads. `platform` proves the reply
+    came from this platform rather than whatever else the DNS points at;
+    `store` is null when the hostname is mapped to no store here."""
+
+    platform: str
+    store: StoreCheckStore | None = None
+
+
+class DomainHealthOut(BaseModel):
+    """One of a store's hostnames, and what a live probe of it found."""
+
+    host: str
+    is_primary: bool
+    #: The hostname is in store_domains (always true for a store's own rows).
+    resolved: bool
+    resolved_store_id: int | None = None
+    #: ok | not_published | wrong_store | unreachable | tls_error | http_error
+    status: str
+    #: One line for the admin's tooltip.
+    detail: str
+    http_status: int | None = None
+    #: The store the hostname actually answered for, when it named one.
+    reached_store_slug: str | None = None
+
+
+class StoreHealthOut(BaseModel):
+    """Whether a store's domains serve it — deliberately alongside
+    `is_active`, never instead of it: the two disagree often enough that the
+    admin shows both."""
+
+    store_id: int
+    is_active: bool
+    domains: list[DomainHealthOut]
+
+
 class StoreDirectoryEntry(BaseModel):
     slug: str
     name: str

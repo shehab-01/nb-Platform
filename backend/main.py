@@ -15,6 +15,8 @@ from api.routers.products import public_router as storefront_router
 from api.routers.products import router as products_router
 from api.services import meta_capi, pathao_sync
 from api.routers.stores import admin_router as stores_admin_router
+from api.routers.stores import check_router as store_check_router
+from api.routers.stores import health_router as store_health_router
 from api.routers.store_content import router as store_content_router
 from api.routers.store_settings import router as store_settings_router
 from api.routers.stores import me_router
@@ -64,6 +66,8 @@ app.include_router(storefront_router, prefix="/api")
 app.include_router(track_router, prefix="/api")
 app.include_router(stores_router, prefix="/api")
 app.include_router(stores_admin_router, prefix="/api")
+app.include_router(store_health_router, prefix="/api")
+app.include_router(store_check_router, prefix="/api")
 app.include_router(me_router, prefix="/api")
 app.include_router(store_settings_router, prefix="/api")
 app.include_router(store_content_router, prefix="/api")

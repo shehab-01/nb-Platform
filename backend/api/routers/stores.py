@@ -1,11 +1,13 @@
 """Stores: the public read a storefront needs, the signed-in user's own store
-list, and the platform admin's CRUD.
+list, the platform admin's CRUD, and whether a store's domains actually serve.
 
-Three routers, three gates. `router` (/storefront) is public. `me_router`
-(/me) needs a signed-in, approved user. `admin_router` (/stores) is super
-admin only: creating and editing stores is the platform's business, no store
-role reaches it."""
-from fastapi import APIRouter, Depends, HTTPException
+Five routers, five gates. `router` (/storefront) and `check_router`
+(/store-check) are public. `me_router` (/me) needs a signed-in, approved user.
+`admin_router` (/stores) is super admin only: creating and editing stores is
+the platform's business, no store role reaches it. `health_router` (/stores)
+is the one read a store's own staff share with a super admin, so it carries
+its own membership gate instead."""
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,19 +17,28 @@ from api.config import settings
 from api.db import get_session
 from api.models import Store, StoreDomain, User
 from api.schemas import (
+    DomainHealthOut,
     StoreAccessOut,
+    StoreCheckOut,
+    StoreCheckStore,
     StoreConfigOut,
     StoreCreate,
     StoreDirectoryEntry,
+    StoreHealthOut,
     StoreOut,
     StoreUpdate,
 )
+from api.services import domain_health
 
 router = APIRouter(prefix="/storefront", tags=["Storefront"])
+# No prefix: the domain check has to sit at the same path on every storefront
+# hostname, which is what api.services.domain_health fetches.
+check_router = APIRouter(tags=["Storefront"])
 me_router = APIRouter(prefix="/me", tags=["Me"])
 admin_router = APIRouter(
     prefix="/stores", tags=["Stores"], dependencies=[Depends(require_super_admin)]
 )
+health_router = APIRouter(prefix="/stores", tags=["Stores"])
 
 # The templates the web app knows. Mirrored here so a store can never be
 # saved pointing at a component set that does not exist. Keep in step with
@@ -58,6 +69,33 @@ async def storefront_config(
             store_id=store.id, order_prefix=store.order_prefix, meta=stores.MetaConfig(), pathao=stores.PathaoConfig()
         )).meta.pixel_id,
         order_prefix=store.order_prefix,
+    )
+
+
+@check_router.get("/store-check", response_model=StoreCheckOut)
+async def store_check(
+    request: Request, session: AsyncSession = Depends(get_session)
+) -> StoreCheckOut:
+    """Which store, if any, this hostname reaches — and that it reaches *us*.
+
+    The admin's domain check fetches this over the public internet on each of
+    a store's own domains, so it has to answer two questions a bare 200 never
+    could: is this platform serving here at all (`platform`), and which store
+    did the hostname resolve to (`store`). Draft stores answer as well, with
+    `active: false`: the domain is fine, there is simply nothing to sell yet.
+
+    Public, and deliberately thin: a hostname's own slug and name are already
+    on every page it serves, and an unmapped hostname learns only `null`.
+    """
+    found = await stores.resolve_host_any(session, stores.requested_host(request))
+    if found is None:
+        return StoreCheckOut(platform=domain_health.PLATFORM, store=None)
+    store, is_active = found
+    return StoreCheckOut(
+        platform=domain_health.PLATFORM,
+        store=StoreCheckStore(
+            id=store.id, slug=store.slug, name=store.name, active=is_active
+        ),
     )
 
 
@@ -248,3 +286,61 @@ async def update_store(
     await session.commit()
     stores.invalidate()
     return _out(await _reload(session, store_id))
+
+
+# --- domain health -----------------------------------------------------------
+#
+# On its own router because it is the one store read a super admin and the
+# store's own staff share: `admin_router` would refuse a store owner, and
+# `admin_store` (X-Admin-Store) names the store in a header, while this one
+# has it in the path — the Stores list asks about stores it is not "in".
+
+
+async def _health_store(
+    store_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Store:
+    """The store to check: 404 unknown, 403 for a user with no claim on it."""
+    store = await _get_or_404(session, store_id)
+    if not tenancy.is_super_admin(user):
+        if await tenancy.membership_role(session, user.id, store_id) is None:
+            raise HTTPException(status_code=403, detail="Not a member of this store")
+    return store
+
+
+@health_router.get("/{store_id}/health", response_model=StoreHealthOut)
+async def store_health(
+    refresh: bool = False,
+    store: Store = Depends(_health_store),
+) -> StoreHealthOut:
+    """Whether this store's domains really serve it, right now.
+
+    Separate from `is_active`, which is only what our own row says: a domain
+    can point at the old host, at another store, or have an expired
+    certificate while the store is perfectly Active here. Answers are cached
+    for a minute (`?refresh=true` to force one), and only the store's own
+    hostnames are ever fetched.
+    """
+    # Store.domains is ordered primary first by the relationship itself.
+    domains = [(d.host, bool(d.is_primary)) for d in store.domains]
+    results = await domain_health.check(
+        store.id, store.is_active, domains, refresh=refresh
+    )
+    return StoreHealthOut(
+        store_id=store.id,
+        is_active=store.is_active,
+        domains=[
+            DomainHealthOut(
+                host=r.host,
+                is_primary=r.is_primary,
+                resolved=r.resolved,
+                resolved_store_id=r.resolved_store_id,
+                status=r.status,
+                detail=r.detail,
+                http_status=r.http_status,
+                reached_store_slug=r.reached_store_slug,
+            )
+            for r in results
+        ],
+    )

@@ -35,6 +35,46 @@ const LOGO: ContentField = {
   hint: "Transparent background, sits on the dark header",
 };
 
+/** The pictures both campaign templates show, in page order. */
+const CAMPAIGN_PICTURES: ContentField[] = [
+  LOGO,
+  {
+    key: "banner",
+    label: "Hero banner",
+    defaultUrl: "/campaign.jpg",
+    size: "1146×672 · JPG",
+    hint: "First thing shoppers see at the top of the page",
+  },
+  {
+    key: "how_it_works",
+    label: "How to participate",
+    defaultUrl: "/how-it-works.jpeg",
+    size: "812×232 · JPG",
+    hint: "Four-step strip explaining the campaign",
+  },
+  {
+    key: "prizes",
+    label: "Prizes",
+    defaultUrl: "/prizes.jpg",
+    size: "877×877 · JPG",
+    hint: "Square prize board",
+  },
+  {
+    key: "products",
+    label: "Product showcase",
+    defaultUrl: "/products.jpg",
+    size: "1120×450 · JPG",
+    hint: "Wide product row below the prizes",
+  },
+  {
+    key: "offer_price",
+    label: "Offer price badge",
+    defaultUrl: "/offer-price.png",
+    size: "180×120 · PNG",
+    hint: "Small badge shown beside the price",
+  },
+];
+
 export const TEMPLATE_CATALOG: Record<string, TemplateInfo> = {
   classic: {
     id: "classic",
@@ -61,46 +101,23 @@ export const TEMPLATE_CATALOG: Record<string, TemplateInfo> = {
       "Banner, prizes and offer pictures",
       "Each picture replaceable per store",
     ],
-    content: [
-      LOGO,
-      {
-        key: "banner",
-        label: "Hero banner",
-        defaultUrl: "/campaign.jpg",
-        size: "1146×672 · JPG",
-        hint: "First thing shoppers see at the top of the page",
-      },
-      {
-        key: "how_it_works",
-        label: "How to participate",
-        defaultUrl: "/how-it-works.jpeg",
-        size: "812×232 · JPG",
-        hint: "Four-step strip explaining the campaign",
-      },
-      {
-        key: "prizes",
-        label: "Prizes",
-        defaultUrl: "/prizes.jpg",
-        size: "877×877 · JPG",
-        hint: "Square prize board",
-      },
-      {
-        key: "products",
-        label: "Product showcase",
-        defaultUrl: "/products.jpg",
-        size: "1120×450 · JPG",
-        hint: "Wide product row below the prizes",
-      },
-      {
-        key: "offer_price",
-        label: "Offer price badge",
-        defaultUrl: "/offer-price.png",
-        size: "180×120 · PNG",
-        hint: "Small badge shown beside the price",
-      },
+    content: CAMPAIGN_PICTURES,
+  },
+  campaign2: {
+    id: "campaign2",
+    name: "Bazar Campaign Gold",
+    description:
+      "The same campaign on a deep green ground with gold: banner and pitch first, a pulsing order button, sections that fade in as you scroll, and the order form as a cream receipt card.",
+    preview: "/templates/campaign2.png",
+    highlights: [
+      "Dark green and gold, built to impress on a phone",
+      "Pulsing order button, scroll-in sections",
+      "Same six pictures as Bazar Campaign",
     ],
+    content: CAMPAIGN_PICTURES,
   },
 };
+
 
 /**
  * Every content key the template declares, mapped to the store's own picture

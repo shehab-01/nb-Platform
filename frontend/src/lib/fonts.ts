@@ -1,4 +1,4 @@
-import { Hind_Siliguri, Manrope, Noto_Sans_Bengali } from "next/font/google";
+import { Barlow_Condensed, Hind_Siliguri, Manrope, Noto_Sans_Bengali } from "next/font/google";
 
 /**
  * Manrope, self-hosted by next/font: the files are fetched at build time and
@@ -27,6 +27,19 @@ export const bengali = Noto_Sans_Bengali({
   subsets: ["bengali"],
   display: "swap",
   variable: "--font-bengali",
+  preload: false,
+});
+
+/**
+ * Barlow Condensed is the Bazar Campaign Gold template's accent face: the
+ * small uppercase campaign label and the big total. Latin only, three
+ * weights, and not preloaded — only that template asks for it.
+ */
+export const barlow = Barlow_Condensed({
+  weight: ["500", "600", "700"],
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-barlow",
   preload: false,
 });
 

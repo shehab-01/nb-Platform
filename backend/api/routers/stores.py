@@ -44,7 +44,7 @@ health_router = APIRouter(prefix="/stores", tags=["Stores"])
 # The templates the web app knows. Mirrored here so a store can never be
 # saved pointing at a component set that does not exist. Keep in step with
 # frontend/src/templates/index.ts.
-TEMPLATES = ("classic", "campaign")
+TEMPLATES = ("classic", "campaign", "campaign2")
 
 
 # --- public ------------------------------------------------------------------

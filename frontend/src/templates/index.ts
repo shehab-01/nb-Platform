@@ -12,6 +12,7 @@ export const DEFAULT_TEMPLATE = "classic";
 const registry: Record<string, () => Promise<TemplateModule>> = {
   classic: () => import("@/templates/classic"),
   campaign: () => import("@/templates/campaign"),
+  campaign2: () => import("@/templates/campaign2"),
 };
 
 export function templateNames(): string[] {

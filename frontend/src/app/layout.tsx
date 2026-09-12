@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 import MetaPixel from "@/components/MetaPixel";
-import { bengali, hindSiliguri, manrope } from "@/lib/fonts";
+import { barlow, bengali, hindSiliguri, manrope } from "@/lib/fonts";
 import { pixelBootstrap } from "@/lib/pixel-bootstrap";
 import { getStore } from "@/lib/store";
 import { STORE_SCRIPT_ID } from "@/lib/store-public";
@@ -35,7 +35,7 @@ export default async function RootLayout({
     : null;
   return (
     // The root layout wraps the admin too, so one class serves both.
-    <html lang="en" className={`${manrope.variable} ${bengali.variable} ${hindSiliguri.variable}`}>
+    <html lang="en" className={`${manrope.variable} ${bengali.variable} ${hindSiliguri.variable} ${barlow.variable}`}>
       <head>
         {/* The store's public config for the browser (lib/store-public):
             what tracking.ts reads the pixel id from. JSON in a script tag is

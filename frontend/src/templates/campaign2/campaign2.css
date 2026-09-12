@@ -1,0 +1,283 @@
+/* Bazar Campaign Gold. Two parts: the campaign block above the card (.c2),
+   and a skin over the classic page (.nb-c2 …) so the order card, form,
+   buttons and footer sit on the dark ground. Scoped under .nb-c2 so nothing
+   here can reach the classic or campaign templates. */
+
+.nb-c2 .nb-landing {
+  --c2-gold: #d9a537;
+  --c2-gold-2: #c99120;
+  --c2-gold-3: #e7b948;
+  --c2-cream: #f7f1e3;
+  --c2-ink: #14301f;
+  --c2-mute: #6e6455;
+  color: var(--c2-cream);
+  box-shadow: none;
+}
+
+/* --- Motion ------------------------------------------------------------- */
+
+@keyframes c2-pulse {
+  0%, 100% { box-shadow: 0 10px 24px rgba(217, 165, 55, 0.28), 0 0 0 0 rgba(217, 165, 55, 0.45); }
+  50% { box-shadow: 0 10px 24px rgba(217, 165, 55, 0.28), 0 0 0 10px rgba(217, 165, 55, 0); }
+}
+@keyframes c2-shine {
+  0% { transform: translateX(-120%) skewX(-18deg); }
+  60%, 100% { transform: translateX(260%) skewX(-18deg); }
+}
+@keyframes c2-reveal {
+  from { opacity: 0; transform: translateY(22px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* A gold button with a light sweep across it: the two order buttons and the
+   confirm button share it. */
+.c2-cta,
+.nb-c2 .nb-confirm,
+.nb-c2 .nb-cta-bottom {
+  position: relative;
+  overflow: hidden;
+  border: 0;
+  background: linear-gradient(135deg, var(--c2-gold-3), var(--c2-gold-2));
+  color: #05200f;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(217, 165, 55, 0.28);
+  transition: transform 0.18s ease;
+}
+.c2-cta::after,
+.nb-c2 .nb-confirm::after,
+.nb-c2 .nb-cta-bottom::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 42%;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
+  animation: c2-shine 3.4s ease-in-out infinite;
+  pointer-events: none;
+}
+.c2-cta:hover,
+.nb-c2 .nb-confirm:hover,
+.nb-c2 .nb-cta-bottom:hover {
+  transform: translateY(-2px);
+}
+.c2-cta:active,
+.nb-c2 .nb-confirm:active,
+.nb-c2 .nb-cta-bottom:active {
+  transform: translateY(1px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .c2-cta,
+  .c2-cta::after,
+  .nb-c2 .nb-confirm::after,
+  .nb-c2 .nb-cta-bottom::after,
+  [data-c2-reveal] {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/* --- Header ------------------------------------------------------------- */
+
+.nb-c2 .nb-header {
+  background: rgba(5, 32, 15, 0.92);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(217, 165, 55, 0.25);
+  box-shadow: none;
+}
+
+/* --- Campaign block ----------------------------------------------------- */
+
+.c2 img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.c2-hero {
+  position: relative;
+}
+.c2-hero::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 90px;
+  background: linear-gradient(to top, #0a3b22 15%, rgba(10, 59, 34, 0));
+  pointer-events: none;
+}
+.c2-intro {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 4px 20px 26px;
+  text-align: center;
+}
+.c2-kicker {
+  font-family: var(--font-barlow, "Barlow Condensed"), sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--c2-gold);
+}
+.c2-intro h1 {
+  margin: 0;
+  font-size: 27px;
+  line-height: 1.35;
+  font-weight: 700;
+  color: #fff;
+  text-wrap: pretty;
+}
+.c2-intro p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.7;
+  color: rgba(247, 241, 227, 0.72);
+}
+.c2-cta {
+  width: 100%;
+  max-width: 240px;
+  margin-top: 4px;
+  padding: 16px 18px;
+  border-radius: 999px;
+  font-size: 16px;
+  animation: c2-pulse 2.6s ease-in-out infinite;
+}
+.c2-section {
+  padding: 18px 16px 8px;
+}
+.c2-section h2 {
+  margin: 0 0 14px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--c2-cream);
+}
+.c2-frame {
+  overflow: hidden;
+  border-radius: 20px;
+  background: #05200f;
+  box-shadow: 0 12px 30px rgba(5, 32, 15, 0.12);
+}
+.c2-frame-light {
+  background: #fff;
+  border: 1px solid rgba(217, 165, 55, 0.35);
+}
+.c2-offer {
+  padding-bottom: 22px;
+}
+.c2-offer .c2-frame {
+  display: flex;
+  justify-content: center;
+  padding: 18px;
+}
+.c2-offer img {
+  width: 200px;
+}
+[data-c2-reveal] {
+  opacity: 0;
+}
+[data-c2-reveal="in"] {
+  animation: c2-reveal 0.75s cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+}
+
+/* --- The order card, as a cream receipt --------------------------------- */
+
+.nb-c2 .nb-stack {
+  padding: 0 16px 10px;
+}
+.nb-c2 .nb-card {
+  padding: 20px;
+  background: var(--c2-cream);
+  border: 1px solid rgba(217, 165, 55, 0.3);
+  border-radius: 24px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+  color: #3a4a3f;
+}
+.nb-c2 .nb-block {
+  margin-top: 0;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid rgba(20, 48, 31, 0.08);
+  border-radius: 14px;
+}
+.nb-c2 .nb-block + .nb-block,
+.nb-c2 .nb-block + section {
+  margin-top: 14px;
+}
+.nb-c2 .nb-card h2 {
+  color: var(--c2-ink);
+}
+.nb-c2 .nb-order-table thead th {
+  font-family: var(--font-barlow, "Barlow Condensed"), sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #8a7c5c;
+}
+.nb-c2 .nb-order-table td,
+.nb-c2 .nb-order-table tbody th {
+  border-bottom-color: rgba(20, 48, 31, 0.1);
+}
+.nb-c2 .nb-order-total td {
+  font-family: var(--font-barlow, "Barlow Condensed"), sans-serif;
+  font-size: 26px;
+  color: #0a3b22;
+}
+.nb-c2 .nb-field input,
+.nb-c2 .nb-field textarea {
+  padding: 13px 14px;
+  border: 1px solid rgba(20, 48, 31, 0.18);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--c2-ink);
+}
+.nb-c2 .nb-field input:focus,
+.nb-c2 .nb-field textarea:focus {
+  outline: none;
+  border-color: var(--c2-gold);
+  box-shadow: 0 0 0 3px rgba(217, 165, 55, 0.2);
+}
+.nb-c2 .nb-confirm {
+  margin-top: 6px;
+  padding: 18px;
+  border-radius: 14px;
+  font-size: 17px;
+}
+.nb-c2 .nb-confirm:disabled {
+  background: #d9cdb4;
+  box-shadow: none;
+}
+.nb-c2 .nb-confirm-note {
+  color: var(--c2-mute);
+  font-size: 13px;
+}
+.nb-c2 .nb-cta-bottom {
+  margin: 6px 0 4px;
+  padding: 17px;
+  border-radius: 999px;
+  font-size: 17px;
+}
+
+/* --- Footer ------------------------------------------------------------- */
+
+.nb-c2 .nb-footer {
+  margin: 10px 0 0;
+  padding: 26px 20px 34px;
+  background: #05200f;
+  border: 0;
+  border-top: 1px solid rgba(217, 165, 55, 0.2);
+  border-radius: 0;
+  box-shadow: none;
+  color: rgba(247, 241, 227, 0.6);
+  font-size: 13px;
+}
+.nb-c2 .nb-footer a {
+  color: var(--c2-gold);
+  text-decoration: none;
+}

@@ -142,10 +142,19 @@
   font-weight: 500;
   color: var(--nb-muted);
 }
+/* Money hugs the right edge; the column is only as wide as its widest
+   line, so the product name gets the rest. */
 .nb-order-table td:last-child,
 .nb-order-table th:last-child {
-  width: 38%;
-  padding-left: 12px;
+  width: 1%;
+  max-width: 45%;
+  padding-left: 16px;
+  text-align: right;
+  white-space: nowrap;
+}
+.nb-order-table tr:nth-child(3) td:last-child {
+  /* The free-delivery line is the one value long enough to wrap. */
+  white-space: normal;
 }
 .nb-order-table tr:last-child th,
 .nb-order-table tr:last-child td {

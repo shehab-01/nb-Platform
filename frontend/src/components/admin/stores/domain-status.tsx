@@ -47,17 +47,27 @@ export function DomainStatusPill({
   health,
   loading,
   error,
+  /** Just the coloured dot, for the top bar where the address is the label
+   *  and the words would only crowd it. The tooltip still spells it out. */
+  dotOnly = false,
 }: {
   /** The probe for the domain this row shows, or undefined before it lands. */
   health: DomainHealth | undefined;
   loading: boolean;
   error?: string;
+  dotOnly?: boolean;
 }) {
   if (loading) {
     return (
-      <span className={cn(PILL, "border-transparent bg-muted text-muted-foreground")}>
+      <span
+        className={cn(
+          PILL,
+          "border-transparent bg-muted text-muted-foreground",
+          dotOnly && "px-1.5"
+        )}
+      >
         <Loader2 className="size-3 animate-spin" />
-        Checking…
+        {!dotOnly && "Checking…"}
       </span>
     );
   }
@@ -65,11 +75,20 @@ export function DomainStatusPill({
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className={cn(PILL, "border-transparent bg-muted text-muted-foreground")}>
-            Check failed
+          <span
+            className={cn(
+              PILL,
+              "border-transparent bg-muted text-muted-foreground",
+              dotOnly && "px-1.5"
+            )}
+          >
+            {dotOnly ? <span className="size-1.5 rounded-full bg-muted-foreground" /> : "Check failed"}
           </span>
         </TooltipTrigger>
-        <TooltipContent>{error}</TooltipContent>
+        <TooltipContent className="max-w-72">
+          <p className="font-medium">Check failed</p>
+          <p className="text-pretty">{error}</p>
+        </TooltipContent>
       </Tooltip>
     );
   }
@@ -88,7 +107,7 @@ export function DomainStatusPill({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className={cn(PILL, look.className)}>
+        <span className={cn(PILL, look.className, dotOnly && "px-1.5")}>
           <span
             className={cn(
               "size-1.5 rounded-full",
@@ -99,11 +118,14 @@ export function DomainStatusPill({
                   : "bg-destructive"
             )}
           />
-          {label}
+          {!dotOnly && label}
         </span>
       </TooltipTrigger>
       <TooltipContent className="max-w-72">
-        <p className="font-medium">{health.host}</p>
+        {/* The dot alone says nothing without this, so the verdict leads. */}
+        <p className="font-medium">
+          {label} · {health.host}
+        </p>
         <p className="text-pretty">{health.detail}</p>
       </TooltipContent>
     </Tooltip>

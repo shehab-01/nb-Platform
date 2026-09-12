@@ -529,6 +529,7 @@ async def list_orders(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=1000),
     status: list[OrderStatus] | None = Query(None),
+    source: list[OrderSource] | None = Query(None),
     date_from: date | None = None,
     date_to: date | None = None,
     q: str | None = Query(None, max_length=100),
@@ -539,6 +540,10 @@ async def list_orders(
     filters = [Order.store_id == ctx.store.id]
     if status:
         filters.append(Order.status.in_(status))
+    # How the order arrived — website, a recovered incomplete form, or typed
+    # in by staff. The lists let staff ask "how did today's orders come in?"
+    if source:
+        filters.append(Order.source.in_([s.value for s in source]))
     if date_from:
         filters.append(Order.created_at >= _day_start(date_from))
     if date_to:

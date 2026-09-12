@@ -51,17 +51,21 @@ export function StoreDomainBadge() {
   if (storeId === null || (!loading && !error && !domain)) return null;
 
   return (
-    <div className="hidden items-center gap-2 md:flex">
+    <div className="hidden items-center gap-1.5 md:flex">
       {domain && (
         <a
           href={`https://${domain.host}`}
           target="_blank"
           rel="noreferrer noopener"
           title={`Open https://${domain.host}`}
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground no-underline hover:text-foreground"
+          className="group inline-flex items-center gap-1.5 text-sm text-muted-foreground no-underline transition-colors hover:text-foreground"
         >
+          {/* Brackets, not a border: they frame the address without adding
+              another box to a bar that already has several. */}
+          <span className="text-muted-foreground/40 select-none">[</span>
           {domain.host}
-          <ExternalLink className="size-3 opacity-70" />
+          <ExternalLink className="size-3 opacity-0 transition-opacity group-hover:opacity-70" />
+          <span className="text-muted-foreground/40 select-none">]</span>
         </a>
       )}
       <button
@@ -71,7 +75,12 @@ export function StoreDomainBadge() {
         onClick={() => storeId !== null && void check(storeId, true)}
         className="cursor-pointer disabled:cursor-default"
       >
-        <DomainStatusPill health={domain ?? undefined} loading={loading} error={error} />
+        <DomainStatusPill
+          health={domain ?? undefined}
+          loading={loading}
+          error={error}
+          dotOnly
+        />
       </button>
     </div>
   );

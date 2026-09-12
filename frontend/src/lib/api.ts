@@ -139,6 +139,8 @@ export type OrderListParams = {
   page?: number;
   pageSize?: number;
   status?: OrderStatus[];
+  /** How the order arrived: website, a recovered incomplete form, or manual. */
+  source?: OrderSource[];
   dateFrom?: string;
   dateTo?: string;
   q?: string;
@@ -212,6 +214,7 @@ export async function listOrders(
   if (params.page) search.set("page", String(params.page));
   if (params.pageSize) search.set("page_size", String(params.pageSize));
   for (const status of params.status ?? []) search.append("status", status);
+  for (const source of params.source ?? []) search.append("source", source);
   if (params.dateFrom) search.set("date_from", params.dateFrom);
   if (params.dateTo) search.set("date_to", params.dateTo);
   if (params.q) search.set("q", params.q);

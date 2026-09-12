@@ -220,6 +220,9 @@ export function getOrderColumns({
       header: "Source",
       enableSorting: false,
       meta: { label: "Source" },
+      // The Source filter is answered by the API (the lists are server-side),
+      // so the row never needs deciding here — same as the status column.
+      filterFn: () => true,
       cell: ({ row }) => (
         <Badge
           className={cn(

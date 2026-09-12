@@ -34,11 +34,13 @@ import {
 } from "@/lib/api";
 import { printStickers } from "@/lib/stickers";
 import {
+  ORDER_SOURCE_LABELS,
   ORDER_STATUSES,
   ORDER_STATUS_LABELS,
   STATUS_PAGES,
   activeClaim,
   staffLabel,
+  type OrderSource,
   type OrderStatus,
   type Order,
 } from "@/lib/orders";
@@ -72,6 +74,9 @@ function queryToParams(
         scope.includes(status)
       );
       if (picked.length) params.status = picked;
+    } else if (filter.id === "source") {
+      const picked = filter.value as OrderSource[];
+      if (picked.length) params.source = picked;
     } else if (filter.id === "customerName") {
       const q = String(filter.value).trim();
       if (q) params.q = q;
@@ -672,6 +677,16 @@ export function OrdersView({
               label: status.label,
               value: status.value,
             })),
+          },
+          // Every value the column can hold, not only the ones on this page:
+          // the filter is a question ("which of these came in by hand?"), and
+          // an empty answer is an answer.
+          {
+            columnId: "source",
+            title: "Source",
+            options: (Object.keys(ORDER_SOURCE_LABELS) as OrderSource[]).map(
+              (source) => ({ label: ORDER_SOURCE_LABELS[source], value: source })
+            ),
           },
         ]}
         dateFilter={{ columnId: "createdAt", title: "Date" }}

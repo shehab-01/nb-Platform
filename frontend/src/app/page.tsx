@@ -43,6 +43,7 @@ export default async function Home() {
     currency: store.currency,
     themeVars: themeVars(store.theme),
     content: resolveContent(resolveTemplateName(store.template), store.content),
+    contentSrcset: store.content_srcset ?? {},
   };
   if (listing === null) return <template.Closed store={publicConfig} />;
   return <template.Storefront store={publicConfig} listing={listing} />;

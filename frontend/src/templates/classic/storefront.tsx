@@ -5,6 +5,7 @@ import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "reac
 
 import "./landing.css";
 import { OrderSuccess } from "@/components/storefront/order-success";
+import { ProductPicture } from "@/components/storefront/product-picture";
 import { ApiError } from "@/lib/http";
 import {
   onLastOrderChange,
@@ -52,10 +53,15 @@ export function Storefront({
   beforeProduct,
   hidePicker = false,
   hideTopCta = false,
+  productBelowFold = false,
 }: StorefrontProps & {
   /** Rendered full-width between the logo bar and the product card; how the
    * campaign template adds its banners on top of this page. */
   beforeProduct?: ReactNode;
+  /** Something else (a campaign banner) is the first thing on screen, so the
+   * product picture must not be preloaded ahead of it: it loads lazily and
+   * the banner keeps the bandwidth. */
+  productBelowFold?: boolean;
   /** Replace the size picker with a heading over the order summary (the
    * default variant is sold). The campaign template does this. */
   hidePicker?: boolean;
@@ -231,16 +237,16 @@ export function Storefront({
           // drawn for and with room around it, rather than a stretched crop.
           data-placeholder={variant.imageUrl === null || undefined}
         >
-          <Image
+          <ProductPicture
             // Keyed on the selection so switching size fades in the new
             // picture instead of leaving the old one up while it loads.
             key={index}
             src={productImage(variant)}
+            srcSet={variant.imageSrcset}
             alt={variant.title}
-            width={1120}
-            height={1120}
-            sizes="(max-width: 560px) 100vw, 560px"
-            priority
+            width={variant.imageWidth ?? 1120}
+            height={variant.imageHeight ?? 1120}
+            priority={!productBelowFold}
           />
         </div>
         {hideTopCta ? null : (

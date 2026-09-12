@@ -36,6 +36,9 @@ const SAMPLE: StorefrontListing = {
       label: "1 kg",
       subtitle: "",
       imageUrl: null,
+      imageSrcset: null,
+      imageWidth: null,
+      imageHeight: null,
       defaultQuantity: 1,
       unitPrice: 1250,
       sku: "SAMPLE-1KG",
@@ -47,6 +50,9 @@ const SAMPLE: StorefrontListing = {
       label: "500 g",
       subtitle: "",
       imageUrl: null,
+      imageSrcset: null,
+      imageWidth: null,
+      imageHeight: null,
       defaultQuantity: 1,
       unitPrice: 700,
       sku: "SAMPLE-500G",
@@ -70,6 +76,7 @@ export default async function PreviewPage({ searchParams }: { searchParams: Sear
   let listing: StorefrontListing | null = SAMPLE;
   let theme: Record<string, string> = {};
   let content: Record<string, string> = {};
+  let contentSrcset: Record<string, string> = {};
   if (slug) {
     // A real store: its live catalogue and its own pictures, so the preview
     // is exactly what customers see (the template can still be overridden
@@ -79,6 +86,7 @@ export default async function PreviewPage({ searchParams }: { searchParams: Sear
       listing = await fetchStorefrontListing({ "x-store-slug": slug });
       theme = real.theme;
       content = real.content;
+      contentSrcset = real.content_srcset ?? {};
       name = real.name;
     }
   }
@@ -89,6 +97,7 @@ export default async function PreviewPage({ searchParams }: { searchParams: Sear
     currency: "BDT",
     themeVars: themeVars(theme),
     content: resolveContent(templateName, content),
+    contentSrcset,
   };
   // Rendered on the client so the store form can swap pictures live; the
   // order form is inert there (pointer events off).

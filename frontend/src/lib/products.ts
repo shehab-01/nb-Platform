@@ -56,6 +56,12 @@ export type StorefrontVariant = StorefrontProduct & {
   id: number;
   label: string;
   isDefault: boolean;
+  /** The upload's resized WebP copies ("…-w480.webp 480w, …"), or null when
+   * there are none yet; the page then shows imageUrl alone. */
+  imageSrcset: string | null;
+  /** The original's pixel size, so the box is reserved before it loads. */
+  imageWidth: number | null;
+  imageHeight: number | null;
 };
 
 /** The landing page's whole offer: the active product and its sizes. */

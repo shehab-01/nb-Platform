@@ -11,3 +11,5 @@ itsdangerous==2.2.0
 # Required by FastAPI to parse multipart/form-data (product image upload).
 python-multipart==0.0.20
 cryptography==45.0.6
+# Resized WebP variants of uploaded pictures, made once at upload time.
+pillow==12.3.0

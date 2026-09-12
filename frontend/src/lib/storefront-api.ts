@@ -127,6 +127,9 @@ type ListingJson = {
     title: string;
     label: string;
     image_url: string | null;
+    image_srcset: string | null;
+    image_width: number | null;
+    image_height: number | null;
     default_quantity: number;
     unit_price: number;
     sku: string;
@@ -162,6 +165,9 @@ export async function fetchStorefrontListing(
         label: row.label,
         subtitle: "",
         imageUrl: row.image_url,
+        imageSrcset: row.image_srcset ?? null,
+        imageWidth: row.image_width ?? null,
+        imageHeight: row.image_height ?? null,
         defaultQuantity: row.default_quantity,
         unitPrice: row.unit_price,
         sku: row.sku,

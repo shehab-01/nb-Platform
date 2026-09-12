@@ -457,6 +457,18 @@ function VersionRow({
           className="max-w-xs"
           onChange={(e) => onChange({ file: e.target.files?.[0] ?? null })}
         />
+        {row.imageUrl && !preview && (
+          // The upload exactly as sent — what the storefront's resized WebP
+          // copies are made from — for checking them against it.
+          <a
+            href={row.imageUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="text-xs whitespace-nowrap text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          >
+            View original
+          </a>
+        )}
       </div>
     </div>
   );

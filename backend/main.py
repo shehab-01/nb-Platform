@@ -3,10 +3,9 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
-from api import monitoring
+from api import media, monitoring
 from api.config import settings
 from api.db import engine
 from api.routers.auth import router as auth_router
@@ -76,7 +75,7 @@ app.include_router(store_content_router, prefix="/api")
 # directory may not exist on a first boot; StaticFiles refuses to mount a
 # missing directory, hence the mkdir.
 os.makedirs(settings.media_root, exist_ok=True)
-app.mount("/media", StaticFiles(directory=settings.media_root), name="media")
+app.mount("/media", media.MediaFiles(directory=settings.media_root), name="media")
 
 
 @app.get("/")

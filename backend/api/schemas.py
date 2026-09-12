@@ -505,6 +505,13 @@ class StorefrontVariantOut(BaseModel):
     sku: str
     is_default: bool = False
     image_path: str | None = Field(default=None, exclude=True)
+    # The resized WebP copies as a ready srcset ("…-w480.webp 480w, …"), and
+    # the original's pixel size so the page reserves the right box. None for
+    # an upload with no copies yet (backfill pending) or no picture at all;
+    # the page then falls back to image_url alone.
+    image_srcset: str | None = None
+    image_width: int | None = None
+    image_height: int | None = None
 
     @computed_field
     @property
@@ -668,6 +675,9 @@ class StoreConfigOut(BaseModel):
     currency: str
     theme: dict
     content: dict[str, str]
+    # srcset per content key, for keys whose picture is the store's own
+    # upload (template defaults are served by next/image instead).
+    content_srcset: dict[str, str] = {}
     host: str | None
     domains: list[str]
     # Public by nature (it is in the page source); the browser pixel needs it.

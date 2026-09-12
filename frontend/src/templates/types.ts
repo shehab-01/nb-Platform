@@ -20,6 +20,9 @@ export type StorePublicConfig = {
    * resolved for this template (templates/catalog.resolveContent). Every key
    * the template declares is present. */
   content: Record<string, string>;
+  /** srcset per content key for the store's own uploads (their resized WebP
+   * copies); absent for template defaults, which next/image resizes. */
+  contentSrcset: Record<string, string>;
 };
 
 export type StorefrontProps = {

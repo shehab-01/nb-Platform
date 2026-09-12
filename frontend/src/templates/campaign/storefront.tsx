@@ -1,11 +1,9 @@
 "use client";
 
-import Image from "next/image";
-
 import "@/templates/classic/landing.css";
 import "./campaign.css";
 import { Storefront as Classic } from "@/templates/classic/storefront";
-import { rawImage } from "@/templates/raw-image";
+import { ProductPicture } from "@/components/storefront/product-picture";
 import type { StorefrontProps } from "@/templates/types";
 
 /**
@@ -14,6 +12,7 @@ import type { StorefrontProps } from "@/templates/types";
  */
 export function Storefront(props: StorefrontProps) {
   const c = props.store.content;
+  const s = props.store.contentSrcset;
   const scrollToOrder = () => {
     document.getElementById("order")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
@@ -22,13 +21,16 @@ export function Storefront(props: StorefrontProps) {
       {...props}
       hidePicker
       hideTopCta
+      // The banner is what a visitor sees first: it, not the product photo
+      // further down, is the picture worth fetching before everything else.
+      productBelowFold
       beforeProduct={
         <div className="nb-campaign">
           <section className="nb-campaign-hero">
-            <Pic src={c.banner} alt="Campaign" width={1146} height={672} priority />
+            <Pic src={c.banner} srcSet={s.banner} alt="Campaign" width={1146} height={672} priority />
           </section>
           <section className="nb-campaign-strip">
-            <Pic src={c.how_it_works} alt="কীভাবে অংশগ্রহণ করবেন" width={812} height={232} />
+            <Pic src={c.how_it_works} srcSet={s.how_it_works} alt="কীভাবে অংশগ্রহণ করবেন" width={812} height={232} />
           </section>
           <section className="nb-campaign-cta">
             <button type="button" onClick={scrollToOrder}>
@@ -36,13 +38,13 @@ export function Storefront(props: StorefrontProps) {
             </button>
           </section>
           <section className="nb-campaign-strip">
-            <Pic src={c.prizes} alt="পুরস্কার" width={877} height={877} />
+            <Pic src={c.prizes} srcSet={s.prizes} alt="পুরস্কার" width={877} height={877} />
           </section>
           <section className="nb-campaign-showcase">
-            <Pic src={c.products} alt="পণ্য" width={1120} height={450} />
+            <Pic src={c.products} srcSet={s.products} alt="পণ্য" width={1120} height={450} />
           </section>
           <section className="nb-campaign-offer">
-            <Pic src={c.offer_price} alt="অফার প্রাইস" width={180} height={120} />
+            <Pic src={c.offer_price} srcSet={s.offer_price} alt="অফার প্রাইস" width={180} height={120} />
           </section>
         </div>
       }
@@ -52,28 +54,28 @@ export function Storefront(props: StorefrontProps) {
 
 function Pic({
   src,
+  srcSet,
   alt,
   width,
   height,
   priority,
 }: {
   src: string;
+  /** The store's own upload has resized copies; a template default does not. */
+  srcSet?: string;
   alt: string;
   width: number;
   height: number;
   priority?: boolean;
 }) {
-  // Uploaded pictures are served by the API through /media; Next's optimiser
-  // is skipped for them so their exact pixels show.
   return (
-    <Image
+    <ProductPicture
       src={src}
+      srcSet={srcSet}
       alt={alt}
       width={width}
       height={height}
       priority={priority}
-      sizes="(max-width: 560px) 100vw, 560px"
-      unoptimized={rawImage(src)}
     />
   );
 }

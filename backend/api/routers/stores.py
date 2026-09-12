@@ -28,6 +28,7 @@ from api.schemas import (
     StoreOut,
     StoreUpdate,
 )
+from api.media import describe as describe_image
 from api.services import domain_health
 
 router = APIRouter(prefix="/storefront", tags=["Storefront"])
@@ -63,6 +64,7 @@ async def storefront_config(
         currency=store.currency,
         theme=store.theme,
         content=store.content,
+        content_srcset=_content_srcset(store.content),
         host=store.host,
         domains=list(store.domains),
         meta_pixel_id=(await stores.load_integrations(session, store.id) or stores.Integrations(
@@ -97,6 +99,19 @@ async def store_check(
             id=store.id, slug=store.slug, name=store.name, active=is_active
         ),
     )
+
+
+def _content_srcset(content: dict[str, str]) -> dict[str, str]:
+    """srcset for each of the store's own pictures that has resized copies.
+    Template defaults ("/campaign.jpg") are not media and are skipped."""
+    out: dict[str, str] = {}
+    for key, url in content.items():
+        if not url.startswith("/media/"):
+            continue
+        info = describe_image(url.removeprefix("/media/"))
+        if info and info.srcset:
+            out[key] = info.srcset
+    return out
 
 
 @router.get("/directory", response_model=list[StoreDirectoryEntry])

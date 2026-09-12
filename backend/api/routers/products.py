@@ -319,17 +319,22 @@ async def storefront_listing(
     return StorefrontListingOut(
         title=product.title,
         description=product.description,
-        variants=[
-            StorefrontVariantOut(
-                id=variant.id,
-                title=catalogue.variant_title(product.title, variant.label),
-                label=variant.label,
-                default_quantity=variant.default_quantity,
-                unit_price=variant.unit_price,
-                sku=variant.sku,
-                is_default=variant.is_default,
-                image_path=variant.image_path,
-            )
-            for variant in product.variants
-        ],
+        variants=[_storefront_variant(product, variant) for variant in product.variants],
+    )
+
+
+def _storefront_variant(product: Product, variant: ProductVariant) -> StorefrontVariantOut:
+    picture = media.describe(variant.image_path)
+    return StorefrontVariantOut(
+        id=variant.id,
+        title=catalogue.variant_title(product.title, variant.label),
+        label=variant.label,
+        default_quantity=variant.default_quantity,
+        unit_price=variant.unit_price,
+        sku=variant.sku,
+        is_default=variant.is_default,
+        image_path=variant.image_path,
+        image_srcset=picture.srcset if picture else None,
+        image_width=picture.width if picture else None,
+        image_height=picture.height if picture else None,
     )

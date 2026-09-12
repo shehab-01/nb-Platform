@@ -17,6 +17,8 @@ export type StoreConfig = {
   theme: Record<string, string>;
   /** Store's own pictures by content key (URLs); defaults come from the template. */
   content: Record<string, string>;
+  /** srcset of the resized copies, for content keys that are the store's own upload. */
+  content_srcset: Record<string, string>;
   host: string | null;
   domains: string[];
   /** Public by nature (it is in the page source); "" when the store has none. */

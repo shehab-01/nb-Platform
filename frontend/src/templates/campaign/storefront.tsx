@@ -21,6 +21,10 @@ export function Storefront(props: StorefrontProps) {
       {...props}
       hidePicker
       hideTopCta
+      // The banners above have shown the product; the card opens straight
+      // on the order table.
+      hideProductCard
+      orderTable
       // The banner is what a visitor sees first: it, not the product photo
       // further down, is the picture worth fetching before everything else.
       productBelowFold

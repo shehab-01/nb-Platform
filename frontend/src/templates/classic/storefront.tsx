@@ -36,6 +36,11 @@ function taka(amount: number): string {
   return amount.toLocaleString("en-US");
 }
 
+/** "1,490.00৳" — the order table writes prices the way a receipt does. */
+function taka2(amount: number): string {
+  return `${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}৳`;
+}
+
 /**
  * The landing page. Mobile first, and deliberately one straight column of
  * cards: the product, the sizes to pick from, the order
@@ -54,6 +59,8 @@ export function Storefront({
   hidePicker = false,
   hideTopCta = false,
   productBelowFold = false,
+  hideProductCard = false,
+  orderTable = false,
 }: StorefrontProps & {
   /** Rendered full-width between the logo bar and the product card; how the
    * campaign template adds its banners on top of this page. */
@@ -67,6 +74,13 @@ export function Storefront({
   hidePicker?: boolean;
   /** Drop the red "order" button between the product card and the summary. */
   hideTopCta?: boolean;
+  /** No title and photo at the top of the card: the campaign's banners have
+   * already shown the product by the time the visitor gets here. */
+  hideProductCard?: boolean;
+  /** The order summary as a Product / Subtotal table — thumbnail, name,
+   * quantity, price, then subtotal, shipping and total — instead of the
+   * three plain lines. */
+  orderTable?: boolean;
 }) {
   const { variants } = listing;
   const storeName = store.name;
@@ -230,25 +244,29 @@ export function Storefront({
       {/* One card from the title to the description. The title, the picture
           and the button follow whichever size is selected in the picker. */}
       <section className="nb-card nb-product">
-        <h1>{variant.title}</h1>
-        <div
-          className="nb-product-image"
-          // No picture yet: the logo stands in, on the dark ground it was
-          // drawn for and with room around it, rather than a stretched crop.
-          data-placeholder={variant.imageUrl === null || undefined}
-        >
-          <ProductPicture
-            // Keyed on the selection so switching size fades in the new
-            // picture instead of leaving the old one up while it loads.
-            key={index}
-            src={productImage(variant)}
-            srcSet={variant.imageSrcset}
-            alt={variant.title}
-            width={variant.imageWidth ?? 1120}
-            height={variant.imageHeight ?? 1120}
-            priority={!productBelowFold}
-          />
-        </div>
+        {hideProductCard ? null : (
+          <>
+            <h1>{variant.title}</h1>
+            <div
+              className="nb-product-image"
+              // No picture yet: the logo stands in, on the dark ground it was
+              // drawn for and with room around it, rather than a stretched crop.
+              data-placeholder={variant.imageUrl === null || undefined}
+            >
+              <ProductPicture
+                // Keyed on the selection so switching size fades in the new
+                // picture instead of leaving the old one up while it loads.
+                key={index}
+                src={productImage(variant)}
+                srcSet={variant.imageSrcset}
+                alt={variant.title}
+                width={variant.imageWidth ?? 1120}
+                height={variant.imageHeight ?? 1120}
+                priority={!productBelowFold}
+              />
+            </div>
+          </>
+        )}
         {hideTopCta ? null : (
           <button
             type="button"
@@ -278,26 +296,71 @@ export function Storefront({
 
         {/* What the form below will order, so the figure on the confirm
             button never comes as a surprise. */}
-        <div className="nb-block nb-summary" aria-labelledby="nb-summary-title">
-          <h2 id="nb-summary-title" hidden={!hidePicker}>
-            আপনার অর্ডার ডিটেইলস
-          </h2>
-          <div>
-            <span>
-              {variant.title}
-              {quantity > 1 ? ` × ${quantity}` : ""}
-            </span>
-            <span>৳{taka(total)}</span>
+        {orderTable ? (
+          <div className="nb-block nb-order-table" aria-labelledby="nb-summary-title">
+            <h2 id="nb-summary-title">আপনার অর্ডার ডিটেইলস</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Product</th>
+                  <th scope="col">Subtotal</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <div className="nb-order-item">
+                      <Image
+                        className="nb-order-thumb"
+                        data-placeholder={variant.imageUrl === null || undefined}
+                        src={productImage(variant)}
+                        alt=""
+                        width={72}
+                        height={72}
+                      />
+                      <span className="nb-order-name">{variant.title}</span>
+                      <span className="nb-order-qty">× {quantity}</span>
+                    </div>
+                  </td>
+                  <td>{taka2(total)}</td>
+                </tr>
+                <tr>
+                  <th scope="row">Subtotal</th>
+                  <td>{taka2(total)}</td>
+                </tr>
+                <tr>
+                  <th scope="row">Shipping</th>
+                  <td>সারা বাংলাদেশে ফ্রী হোম ডেলিভারি</td>
+                </tr>
+                <tr className="nb-order-total">
+                  <th scope="row">Total</th>
+                  <td>{taka2(total)}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-          <div>
-            <span>মোট</span>
-            <span>৳{taka(total)}</span>
+        ) : (
+          <div className="nb-block nb-summary" aria-labelledby="nb-summary-title">
+            <h2 id="nb-summary-title" hidden={!hidePicker}>
+              আপনার অর্ডার ডিটেইলস
+            </h2>
+            <div>
+              <span>
+                {variant.title}
+                {quantity > 1 ? ` × ${quantity}` : ""}
+              </span>
+              <span>৳{taka(total)}</span>
+            </div>
+            <div>
+              <span>মোট</span>
+              <span>৳{taka(total)}</span>
+            </div>
+            <div className="nb-summary-total">
+              <span>Total</span>
+              <span>৳{taka(total)}</span>
+            </div>
           </div>
-          <div className="nb-summary-total">
-            <span>Total</span>
-            <span>৳{taka(total)}</span>
-          </div>
-        </div>
+        )}
 
         <section
         className="nb-block"

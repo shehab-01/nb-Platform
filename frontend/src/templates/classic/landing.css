@@ -117,6 +117,75 @@
   color: var(--nb-price);
 }
 
+/* The order summary as a receipt-style table (campaign template): thumbnail,
+   name and quantity on the left, money on the right, dashed rules between
+   rows and the total in bold. */
+.nb-order-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.nb-order-table th,
+.nb-order-table td {
+  padding: 12px 0;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px dashed var(--nb-line);
+}
+.nb-order-table thead th {
+  padding-top: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--nb-price);
+}
+.nb-order-table tbody th {
+  font-weight: 500;
+  color: var(--nb-muted);
+}
+.nb-order-table td:last-child,
+.nb-order-table th:last-child {
+  width: 38%;
+  padding-left: 12px;
+}
+.nb-order-table tr:last-child th,
+.nb-order-table tr:last-child td {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.nb-order-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.nb-order-thumb {
+  flex: 0 0 64px;
+  width: 64px;
+  height: 64px;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid var(--nb-line);
+}
+.nb-order-thumb[data-placeholder] {
+  object-fit: contain;
+  padding: 8px;
+  background: var(--deep);
+}
+.nb-order-name {
+  flex: 1 1 auto;
+  line-height: 1.45;
+}
+.nb-order-qty {
+  flex: 0 0 auto;
+  color: var(--nb-muted);
+  white-space: nowrap;
+}
+.nb-order-total th,
+.nb-order-total td {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--nb-price);
+}
+
 /* --- Product ------------------------------------------------------------ */
 
 .nb-product h1 {

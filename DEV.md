@@ -140,3 +140,66 @@ cd frontend && API_URL=http://localhost:8001 ADMIN_HOST=admin.nb.local DEV_STORE
 docker compose down -v && docker compose up -d --build && \
   docker compose exec api python -m scripts.seed_dev
 ```
+
+## Performance
+
+Measured 12 Sep 2026. The server render is not where time goes: a store page
+is ~10 ms TTFB on the server for both v1 and v2 (two API calls at 1–8 ms,
+host→store config cached 30 s in-process, template module cached by Node).
+What differs is what the page makes the phone download.
+
+**TTFB on the server** (run on the host; expect ~10 ms warm, ~100 ms cold):
+
+```bash
+for i in 1 2 3; do curl -s -o /dev/null -H 'Host: store.naturebazar.bd' -w 'ttfb=%{time_starttransfer}s total=%{time_total}s size=%{size_download}\n' http://127.0.0.1:8090/; done
+```
+
+**Lighthouse (mobile, simulated 4G)** — PageSpeed Insights' keyless API is
+rate-limited per day; the same engine runs locally:
+
+```bash
+docker run --rm --cap-add=SYS_ADMIN --net=host --shm-size=1g femtopixel/google-lighthouse \
+  https://store.naturebazar.bd/ --only-categories=performance --form-factor=mobile \
+  --screenEmulation.mobile --throttling-method=simulate --output=json --quiet \
+  --chrome-flags="--headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage" > lh.json
+python3 -c "import json;a=json.load(open('lh.json'))['audits'];print({k:a[k]['displayValue'] for k in ('largest-contentful-paint','total-blocking-time','first-contentful-paint')}, sum(i.get('transferSize',0) for i in a['network-requests']['details']['items'])//1024,'KB')"
+```
+
+| page | score | FCP | LCP | TBT | requests / transfer |
+|---|---|---|---|---|---|
+| v1 naturebazar.shop (classic) | 100 | 0.9 s | 1.4 s | 0 ms | 26 / 123 KB |
+| v2 store.naturebazar.bd, before (campaign) | 91–92 | 1.3 s | 3.0–3.2 s | 60 ms | 34 / 604 KB |
+| v2 store.naturebazar.bd, after | _re-run after deploying `fd084c9` and `python -m scripts.backfill_image_variants`_ | | | | |
+
+Where v2's extra bytes were: five campaign pictures (~180 KB WebP) that v1
+does not have, two Bengali font files (74 KB — v1 loads the same five font
+files), fbevents.js (108 KB, deferred until after hydration on both), and a
+300×300 PNG as the live product photo (161 KB; its WebP copy is 22 KB).
+
+**Product pictures** (`fd084c9`): resized WebP copies are made once at upload
+(api/media.py, quality 88 — see that commit for the side-by-side), served as
+a `<picture>` srcset with the untouched original as fallback, the LCP one
+preloaded with `fetchpriority=high`, `/media` cached one year immutable.
+Local store with a real 1254 px product JPG, same Lighthouse run:
+
+| local store1 (classic) | score | FCP | LCP | LCP image (Lighthouse's phone) | transfer |
+|---|---|---|---|---|---|
+| before (next/image q75 on demand) | 90 | 1.7 s | 3.5 s | 74 KB | 407 KB |
+| after (WebP q88 copies, preloaded) | 89 | 1.2 s | 3.7 s | 126 KB | 460 KB |
+
+Sharpness was the constraint: the copy a 3x phone fetches went from 139 KB
+(q75) to 221 KB (q88), so LCP is flat and FCP/Speed Index improved. Existing
+uploads need `docker compose exec api python -m scripts.backfill_image_variants`
+once (`--force` after changing `WEBP_QUALITY`).
+
+**JS shipped to the storefront** (gzip, from the page's `<script>` tags): v2
+179 KB in 12 chunks; v1 181 KB in 11; the admin's orders page 287 KB, none
+of whose chunks reach the storefront. One 1.7 KB storefront chunk carries the
+campaign template's wrapper on classic stores too — Turbopack merges modules
+that small into a shared chunk; it grows only with the number of templates.
+
+**Fonts and third-party**: next/font self-hosts all three faces with
+`display: swap`; Manrope is preloaded, Hind Siliguri and Noto Bengali are
+fetched after the CSS (`preload: false`, so admin pages never download them)
+— the same five files at the same point on v1. Meta Pixel and GTM load after
+hydration on first interaction or a 1.5 s timer, as on v1.

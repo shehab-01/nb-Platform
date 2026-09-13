@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_TEMPLATE, loadTemplate, resolveTemplateName, templateNames } from "@/templates";
-import { TEMPLATE_CATALOG, resolveContent } from "@/templates/catalog";
+import { TEMPLATE_CATALOG, resolveContent, templateInfo } from "@/templates/catalog";
 
 describe("template registry", () => {
   it("knows the classic template", () => {
@@ -22,6 +22,12 @@ describe("template registry", () => {
       expect(info.name.length).toBeGreaterThan(0);
       expect(info.preview.startsWith("/")).toBe(true);
     }
+  });
+  it("says which templates sell only the default variant", () => {
+    expect(TEMPLATE_CATALOG.classic.singleVariant).toBe(false);
+    expect(TEMPLATE_CATALOG.campaign.singleVariant).toBe(true);
+    expect(TEMPLATE_CATALOG.campaign2.singleVariant).toBe(true);
+    expect(templateInfo("no-such").singleVariant).toBe(false);
   });
   it("resolves content with defaults and drops foreign keys", () => {
     const c = resolveContent("campaign", { banner: "/media/stores/2/x.jpg", nope: "/y" });

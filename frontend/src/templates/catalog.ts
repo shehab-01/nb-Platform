@@ -25,6 +25,10 @@ export type TemplateInfo = {
   preview: string;
   highlights: string[];
   content: ContentField[];
+  /** True when the template has no size picker and sells only the live
+   * product's default variant. The store form warns before switching a
+   * multi-variant store onto such a template. */
+  singleVariant: boolean;
 };
 
 const LOGO: ContentField = {
@@ -89,6 +93,7 @@ export const TEMPLATE_CATALOG: Record<string, TemplateInfo> = {
       "Meta Pixel + Conversions API events",
     ],
     content: [LOGO],
+    singleVariant: false,
   },
   campaign: {
     id: "campaign",
@@ -102,6 +107,7 @@ export const TEMPLATE_CATALOG: Record<string, TemplateInfo> = {
       "Each picture replaceable per store",
     ],
     content: CAMPAIGN_PICTURES,
+    singleVariant: true,
   },
   campaign2: {
     id: "campaign2",
@@ -115,6 +121,7 @@ export const TEMPLATE_CATALOG: Record<string, TemplateInfo> = {
       "Same six pictures as Bazar Campaign",
     ],
     content: CAMPAIGN_PICTURES,
+    singleVariant: true,
   },
 };
 
@@ -145,6 +152,7 @@ export function templateInfo(id: string): TemplateInfo {
       preview: "",
       highlights: [],
       content: [],
+      singleVariant: false,
     }
   );
 }

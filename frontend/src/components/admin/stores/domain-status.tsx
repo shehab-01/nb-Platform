@@ -43,12 +43,36 @@ const LOOK: Record<DomainStatus, { label: string; className: string }> = {
 const PILL =
   "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium whitespace-nowrap";
 
+/** A status as one small dot: green when live, amber when not yet
+ *  published, red when broken, grey while unknown. Sized to sit before a
+ *  line of text; the caller wraps it in a tooltip. */
+function StatusDot({ tone }: { tone: "ok" | "warn" | "bad" | "unknown" }) {
+  return (
+    <span
+      className={cn(
+        "inline-block size-2 shrink-0 rounded-full",
+        tone === "ok" && "bg-emerald-500 ring-3 ring-emerald-500/20",
+        tone === "warn" && "bg-amber-500 ring-3 ring-amber-500/20",
+        tone === "bad" && "bg-destructive ring-3 ring-destructive/20",
+        tone === "unknown" && "bg-muted-foreground/50",
+      )}
+    />
+  );
+}
+
+function tone(status: DomainStatus): "ok" | "warn" | "bad" {
+  if (status === "ok") return "ok";
+  if (status === "not_published" || status === "wrong_store") return "warn";
+  return "bad";
+}
+
 export function DomainStatusPill({
   health,
   loading,
   error,
-  /** Just the coloured dot, for the top bar where the address is the label
-   *  and the words would only crowd it. The tooltip still spells it out. */
+  /** Just the coloured dot, no pill, for the top bar where the address
+   *  beside it is the label and the words would only crowd it. The tooltip
+   *  still spells the verdict out. */
   dotOnly = false,
 }: {
   /** The probe for the domain this row shows, or undefined before it lands. */
@@ -58,16 +82,12 @@ export function DomainStatusPill({
   dotOnly?: boolean;
 }) {
   if (loading) {
-    return (
-      <span
-        className={cn(
-          PILL,
-          "border-transparent bg-muted text-muted-foreground",
-          dotOnly && "px-1.5"
-        )}
-      >
+    return dotOnly ? (
+      <Loader2 className="size-3 animate-spin text-muted-foreground" />
+    ) : (
+      <span className={cn(PILL, "border-transparent bg-muted text-muted-foreground")}>
         <Loader2 className="size-3 animate-spin" />
-        {!dotOnly && "Checking…"}
+        Checking…
       </span>
     );
   }
@@ -75,15 +95,15 @@ export function DomainStatusPill({
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <span
-            className={cn(
-              PILL,
-              "border-transparent bg-muted text-muted-foreground",
-              dotOnly && "px-1.5"
-            )}
-          >
-            {dotOnly ? <span className="size-1.5 rounded-full bg-muted-foreground" /> : "Check failed"}
-          </span>
+          {dotOnly ? (
+            <span className="inline-flex">
+              <StatusDot tone="unknown" />
+            </span>
+          ) : (
+            <span className={cn(PILL, "border-transparent bg-muted text-muted-foreground")}>
+              Check failed
+            </span>
+          )}
         </TooltipTrigger>
         <TooltipContent className="max-w-72">
           <p className="font-medium">Check failed</p>
@@ -107,19 +127,25 @@ export function DomainStatusPill({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className={cn(PILL, look.className, dotOnly && "px-1.5")}>
-          <span
-            className={cn(
-              "size-1.5 rounded-full",
-              health.status === "ok"
-                ? "bg-emerald-500"
-                : health.status === "not_published" || health.status === "wrong_store"
-                  ? "bg-amber-500"
-                  : "bg-destructive"
-            )}
-          />
-          {!dotOnly && label}
-        </span>
+        {dotOnly ? (
+          <span className="inline-flex">
+            <StatusDot tone={tone(health.status)} />
+          </span>
+        ) : (
+          <span className={cn(PILL, look.className)}>
+            <span
+              className={cn(
+                "size-1.5 rounded-full",
+                tone(health.status) === "ok"
+                  ? "bg-emerald-500"
+                  : tone(health.status) === "warn"
+                    ? "bg-amber-500"
+                    : "bg-destructive"
+              )}
+            />
+            {label}
+          </span>
+        )}
       </TooltipTrigger>
       <TooltipContent className="max-w-72">
         {/* The dot alone says nothing without this, so the verdict leads. */}

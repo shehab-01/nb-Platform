@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { TemplatePreview } from "@/components/admin/stores/template-preview";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -21,6 +22,7 @@ import {
   type Store,
   type StoreInput,
 } from "@/lib/api";
+import type { Product } from "@/lib/products";
 import { cn } from "@/lib/utils";
 import { resolveContent, templateInfo } from "@/templates/catalog";
 
@@ -77,12 +79,16 @@ export function StoreForm({
   templates,
   allStores = [],
   existingPictures = NO_PICTURES,
+  liveProduct = null,
   onSave,
 }: {
   store: Store | null;
   templates: string[];
   /** Every store, for the live "prefix already used" check. */
   allStores?: Store[];
+  /** The store's product on sale, so the form can say what a template
+   *  without a size picker would actually sell. */
+  liveProduct?: Product | null;
   /** The store's own pictures already uploaded, by slot key (URLs). */
   existingPictures?: Record<string, string>;
   onSave: (input: StoreInput) => Promise<Store>;
@@ -128,6 +134,22 @@ export function StoreForm({
 
   const creating = store === null;
   const slots = templateInfo(d.template).content;
+  // Switching a store that offers several sizes onto a template without a
+  // picker silently narrows the offer to the default size. Orders stay
+  // correct either way (the API prices from the variant the page names),
+  // but the admin must know what will be on sale, so the change is spelled
+  // out and has to be acknowledged before Save.
+  const [narrowingConfirmed, setNarrowingConfirmed] = React.useState(false);
+  const narrowing = React.useMemo(() => {
+    if (!store || !liveProduct || liveProduct.variants.length < 2) return null;
+    if (d.template === store.template) return null;
+    if (!templateInfo(d.template).singleVariant || templateInfo(store.template).singleVariant) {
+      return null;
+    }
+    const sold = liveProduct.variants.find((v) => v.isDefault) ?? liveProduct.variants[0];
+    return { sold, hidden: liveProduct.variants.filter((v) => v !== sold) };
+  }, [store, liveProduct, d.template]);
+  React.useEffect(() => setNarrowingConfirmed(false), [d.template]);
   const slugOk = /^[a-z0-9][a-z0-9-]{0,39}$/.test(d.slug);
   const prefixOk = PREFIX_RE.test(d.orderPrefix);
   const prefixTakenBy = allStores.find(
@@ -138,7 +160,8 @@ export function StoreForm({
     d.domain.trim().length > 0 &&
     prefixOk &&
     !prefixTakenBy &&
-    (!creating || slugOk);
+    (!creating || slugOk) &&
+    (narrowing === null || narrowingConfirmed);
   // What is still missing, in the order the fields are asked for.
   const blocker = !d.domain.trim()
     ? "Domain is required"
@@ -150,7 +173,9 @@ export function StoreForm({
           ? `Order prefix is already used by ${prefixTakenBy.name}`
           : !prefixOk
             ? "Order prefix must start with a letter"
-            : null;
+            : narrowing && !narrowingConfirmed
+              ? "Confirm the template change"
+              : null;
   const customCount = slots.filter(
     (s) => pictures[s.key] || (existingPictures[s.key] && !resets.has(s.key)),
   ).length;
@@ -290,6 +315,33 @@ export function StoreForm({
               </SelectContent>
             </Select>
           </Row>
+          {narrowing && (
+            <div
+              role="alert"
+              className="my-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100"
+            >
+              <p className="font-semibold">
+                {templateInfo(d.template).name} has no size picker
+              </p>
+              <p className="mt-1 text-pretty">
+                It will sell only the default size of {liveProduct?.title}:{" "}
+                <span className="font-medium">
+                  {narrowing.sold.label || "the default"} at ৳{narrowing.sold.unitPrice}
+                </span>
+                . {narrowing.hidden.length === 1 ? "This size" : `These ${narrowing.hidden.length} sizes`}{" "}
+                will not be offered until you switch back:{" "}
+                {narrowing.hidden.map((v) => v.label || v.sku).join(", ")}. Orders already
+                placed are not affected.
+              </p>
+              <label className="mt-3 flex items-center gap-2 text-sm font-medium">
+                <Checkbox
+                  checked={narrowingConfirmed}
+                  onCheckedChange={(v) => setNarrowingConfirmed(v === true)}
+                />
+                I understand, sell only {narrowing.sold.label || "the default size"}
+              </label>
+            </div>
+          )}
           {!creating && (
             <Row label="Active" hint={d.isActive ? "Serving customers" : "Domain answers, nothing sells"}>
               <Switch checked={d.isActive} onCheckedChange={(v) => setD({ ...d, isActive: v })} />

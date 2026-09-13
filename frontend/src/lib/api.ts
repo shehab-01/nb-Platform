@@ -1039,8 +1039,14 @@ export type ProductSaveInput = {
   variants: VariantSaveInput[];
 };
 
-export async function listProducts(): Promise<Product[]> {
-  return (await request<ApiProduct[]>("/api/products")).map(mapProduct);
+/**
+ * The store's products. By default the store the admin shell is working in;
+ * `storeId` names another one, for the super admin editing a store they have
+ * not switched to (the header override wins over the shell's choice).
+ */
+export async function listProducts(storeId?: number): Promise<Product[]> {
+  const init = storeId === undefined ? undefined : { headers: { "X-Admin-Store": String(storeId) } };
+  return (await request<ApiProduct[]>("/api/products", init)).map(mapProduct);
 }
 
 /**

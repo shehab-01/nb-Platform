@@ -78,10 +78,15 @@ async def for_order(
     """What to price an order against: the variant the customer picked, or the
     store's default when the form did not say (the old storefront never does).
 
-    None when an id was sent and matches nothing in this store — a stale page
-    after a variant was deleted, a made-up id, or another store's variant —
-    or when nothing was sent and nothing is live. Either way the caller
-    refuses the order rather than quietly selling something else.
+    None when an id was sent and matches nothing on sale in this store — a
+    stale page after a variant was deleted, a made-up id, another store's
+    variant, or a variant of a product that is no longer the live one — or
+    when nothing was sent and nothing is live. Either way the caller refuses
+    the order rather than quietly selling something else.
+
+    The is_active check is what keeps a tab left open across a product
+    change (or a template change, which takes a moment to reach every
+    visitor) from ordering something the admin has taken off sale.
     """
     if variant_id is None:
         return await active(session, store_id)
@@ -89,6 +94,6 @@ async def for_order(
     if variant is None:
         return None
     product = await session.get(Product, variant.product_id)
-    if product is None or product.store_id != store_id:
+    if product is None or product.store_id != store_id or not product.is_active:
         return None
     return sellable(product, variant)

@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { StoreDomainBadge } from "@/components/admin/store-domain-badge";
-import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { HEADER_LINKS, pageTitle, type HeaderLink } from "@/lib/admin-nav";
 import { cn } from "@/lib/utils";
@@ -69,9 +68,10 @@ export function AdminHeader() {
       <div className="ml-auto flex items-center gap-3">
         <StoreDomainBadge />
         {/* Two different things sit on this side — where the store lives, and
-            where to go next — so a hairline keeps them from reading as one
-            row of controls. */}
-        <Separator orientation="vertical" className="hidden h-4 md:block" />
+            where to go next — so a short hairline keeps them from reading as
+            one row of controls. A plain span: the Separator primitive
+            stretches to the bar's full height when vertical. */}
+        <span aria-hidden className="hidden h-4 w-px bg-border md:block" />
         <nav className="flex items-center gap-1 overflow-x-auto">
           {HEADER_LINKS.map((link) => (
             <HeaderItem

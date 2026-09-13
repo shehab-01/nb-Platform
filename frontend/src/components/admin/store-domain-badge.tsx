@@ -51,29 +51,15 @@ export function StoreDomainBadge() {
   if (storeId === null || (!loading && !error && !domain)) return null;
 
   return (
-    <div className="hidden items-center gap-1.5 md:flex">
-      {domain && (
-        <a
-          href={`https://${domain.host}`}
-          target="_blank"
-          rel="noreferrer noopener"
-          title={`Open https://${domain.host}`}
-          className="group inline-flex items-center gap-1.5 text-sm text-muted-foreground no-underline transition-colors hover:text-foreground"
-        >
-          {/* Brackets, not a border: they frame the address without adding
-              another box to a bar that already has several. */}
-          <span className="text-muted-foreground/40 select-none">[</span>
-          {domain.host}
-          <ExternalLink className="size-3 opacity-0 transition-opacity group-hover:opacity-70" />
-          <span className="text-muted-foreground/40 select-none">]</span>
-        </a>
-      )}
+    <div className="hidden items-center gap-2 md:flex">
+      {/* The dot leads, like a status light on a device: is it on, then
+          where. Clicking it re-checks. */}
       <button
         type="button"
         title="Check again"
         disabled={loading}
         onClick={() => storeId !== null && void check(storeId, true)}
-        className="cursor-pointer disabled:cursor-default"
+        className="inline-flex size-5 cursor-pointer items-center justify-center rounded-full disabled:cursor-default"
       >
         <DomainStatusPill
           health={domain ?? undefined}
@@ -82,6 +68,18 @@ export function StoreDomainBadge() {
           dotOnly
         />
       </button>
+      {domain && (
+        <a
+          href={`https://${domain.host}`}
+          target="_blank"
+          rel="noreferrer noopener"
+          title={`Open https://${domain.host}`}
+          className="group inline-flex items-center gap-1 text-sm text-muted-foreground no-underline transition-colors hover:text-foreground"
+        >
+          {domain.host}
+          <ExternalLink className="size-3 opacity-0 transition-opacity group-hover:opacity-70" />
+        </a>
+      )}
     </div>
   );
 }

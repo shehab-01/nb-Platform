@@ -146,7 +146,9 @@ async def my_stores(
     Empty for an approved user with no memberships, who then sees only the
     waiting page."""
     return [
-        StoreAccessOut(store_id=a.store_id, slug=a.slug, name=a.name, role=a.role)
+        StoreAccessOut(
+            store_id=a.store_id, slug=a.slug, name=a.name, role=a.role, template=a.template
+        )
         for a in await tenancy.accessible_stores(session, user)
     ]
 

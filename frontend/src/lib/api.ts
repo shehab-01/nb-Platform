@@ -594,9 +594,15 @@ export async function setUserMemberships(
 /** The stores the signed-in user may open: what the switcher lists. */
 export async function getMyStores(): Promise<StoreAccess[]> {
   const rows = await request<
-    { store_id: number; slug: string; name: string; role: string }[]
+    { store_id: number; slug: string; name: string; role: string; template: string }[]
   >("/api/me/stores");
-  return rows.map((r) => ({ storeId: r.store_id, slug: r.slug, name: r.name, role: r.role }));
+  return rows.map((r) => ({
+    storeId: r.store_id,
+    slug: r.slug,
+    name: r.name,
+    role: r.role,
+    template: r.template,
+  }));
 }
 
 export type Store = {

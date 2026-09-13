@@ -8,6 +8,8 @@ export type StoreAccess = {
   name: string;
   /** "super_admin" for a platform super admin, else the membership role. */
   role: string;
+  /** The storefront template the store renders (see templates/catalog). */
+  template: string;
 };
 
 const STORAGE_KEY = "nb_admin_store";

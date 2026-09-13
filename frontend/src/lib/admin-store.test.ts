@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { pickStore, type StoreAccess } from "@/lib/admin-store";
 
-const a: StoreAccess = { storeId: 1, slug: "a", name: "A", role: "staff" };
-const b: StoreAccess = { storeId: 2, slug: "b", name: "B", role: "owner" };
+const a: StoreAccess = { storeId: 1, slug: "a", name: "A", role: "staff", template: "classic" };
+const b: StoreAccess = { storeId: 2, slug: "b", name: "B", role: "owner", template: "classic" };
 
 describe("pickStore", () => {
   it("returns null with no stores", () => {

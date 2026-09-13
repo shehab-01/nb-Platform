@@ -3,6 +3,7 @@
 import Image from "next/image";
 import * as React from "react";
 
+import { useAuth } from "@/components/admin/auth-context";
 import { ProductEditor } from "@/components/admin/products/product-editor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,7 @@ import {
   type ProductSaveInput,
 } from "@/lib/api";
 import type { Product } from "@/lib/products";
+import { templateInfo } from "@/templates/catalog";
 
 /**
  * The catalogue. A product is a group — a name and a description — and its
@@ -34,6 +36,7 @@ import type { Product } from "@/lib/products";
  * default, description — is changed in one editor dialog and saved together.
  */
 export default function ProductsPage() {
+  const { store } = useAuth();
   const [products, setProducts] = React.useState<Product[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -109,6 +112,16 @@ export default function ProductsPage() {
     });
   };
 
+  // The store's template decides whether the versions are even offered: a
+  // campaign template has no picker and sells the default one only. Staff
+  // adding versions here would otherwise expect them to appear on the page.
+  const template = templateInfo(store?.template ?? "classic");
+  const live = products.find((p) => p.isActive) ?? null;
+  const soldOnly =
+    template.singleVariant && live && live.variants.length > 1
+      ? (live.variants.find((v) => v.isDefault) ?? live.variants[0])
+      : null;
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-4">
@@ -120,6 +133,27 @@ export default function ProductsPage() {
           Add product
         </Button>
       </div>
+
+      {soldOnly && (
+        <div
+          role="note"
+          lang="bn"
+          className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100"
+        >
+          <p className="font-semibold">
+            এই স্টোরের টেমপ্লেট ({template.name}) এ সাইজ বাছাইয়ের অপশন নেই।
+          </p>
+          <p className="mt-1 text-pretty">
+            ল্যান্ডিং পেজে শুধু ডিফল্ট ভার্সন{" "}
+            <span className="font-medium">
+              {soldOnly.label || live?.title} (৳{soldOnly.unitPrice})
+            </span>{" "}
+            বিক্রি হবে। বাকি {live ? live.variants.length - 1 : 0} টি ভার্সন কাস্টমার
+            দেখতে বা অর্ডার করতে পারবে না। নতুন ভার্সন যোগ করলে সেটাও দেখাবে না, যতক্ষণ না
+            টেমপ্লেট বদলানো হয় বা সেটাকে ডিফল্ট করা হয়।
+          </p>
+        </div>
+      )}
 
       {error && (
         <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
@@ -231,8 +265,19 @@ export default function ProductsPage() {
                       {variant.sku}
                     </TableCell>
                     <TableCell>
-                      {variant.isDefault && (
+                      {variant.isDefault ? (
                         <Badge variant="outline">Default</Badge>
+                      ) : (
+                        product.isActive &&
+                        template.singleVariant && (
+                          <Badge
+                            variant="outline"
+                            lang="bn"
+                            className="border-amber-300 text-amber-800 dark:text-amber-300"
+                          >
+                            পেজে নেই
+                          </Badge>
+                        )
                       )}
                     </TableCell>
                   </TableRow>

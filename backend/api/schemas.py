@@ -744,6 +744,7 @@ class StoreAccessOut(BaseModel):
     slug: str
     name: str
     role: str
+    template: str
 
 
 class StoreOut(BaseModel):

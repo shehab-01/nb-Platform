@@ -57,6 +57,10 @@ class StoreAccess:
     name: str
     role: str
     is_active: bool = True
+    # Which storefront the store renders. The admin's pages use it to say
+    # what the shop actually offers (a campaign template sells only the
+    # default version), so every member gets it, not just the super admin.
+    template: str = "classic"
 
 
 @dataclass(frozen=True)
@@ -85,7 +89,9 @@ def accessible(user: User, memberships: list[StoreAccess], all_stores: list[Stor
     Pure, so the rule is testable without a database."""
     if is_super_admin(user):
         return [
-            StoreAccess(s.store_id, s.slug, s.name, UserRole.super_admin.value, s.is_active)
+            StoreAccess(
+                s.store_id, s.slug, s.name, UserRole.super_admin.value, s.is_active, s.template
+            )
             for s in all_stores
             if s.is_active
         ]
@@ -94,7 +100,14 @@ def accessible(user: User, memberships: list[StoreAccess], all_stores: list[Stor
 
 async def load_memberships(session: AsyncSession, user_id: int) -> list[StoreAccess]:
     rows = await session.execute(
-        select(StoreUser.store_id, Store.slug, Store.name, StoreUser.role, Store.is_active)
+        select(
+            StoreUser.store_id,
+            Store.slug,
+            Store.name,
+            StoreUser.role,
+            Store.is_active,
+            Store.template,
+        )
         .join(Store, Store.id == StoreUser.store_id)
         .where(StoreUser.user_id == user_id)
         .order_by(Store.id)
@@ -104,9 +117,11 @@ async def load_memberships(session: AsyncSession, user_id: int) -> list[StoreAcc
 
 async def load_all_stores(session: AsyncSession) -> list[StoreAccess]:
     rows = await session.execute(
-        select(Store.id, Store.slug, Store.name, Store.is_active).order_by(Store.id)
+        select(Store.id, Store.slug, Store.name, Store.is_active, Store.template).order_by(
+            Store.id
+        )
     )
-    return [StoreAccess(r.id, r.slug, r.name, "", r.is_active) for r in rows]
+    return [StoreAccess(r.id, r.slug, r.name, "", r.is_active, r.template) for r in rows]
 
 
 async def accessible_stores(session: AsyncSession, user: User) -> list[StoreAccess]:

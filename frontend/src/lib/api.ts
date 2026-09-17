@@ -6,6 +6,8 @@ import type {
   OrderSource,
   OrderStatus,
   OrderTag,
+  PathaoConfidence,
+  PathaoLocation,
 } from "@/lib/orders";
 import type { Product, Variant } from "@/lib/products";
 import type { StoreAccess } from "@/lib/admin-store";
@@ -44,6 +46,10 @@ type ApiOrder = {
   pathao_delivery_fee: number | null;
   pathao_sent_at: string | null;
   pathao_tracking_url: string | null;
+  pathao_city_id?: number | null;
+  pathao_zone_id?: number | null;
+  pathao_area_id?: number | null;
+  pathao_address_confidence?: PathaoConfidence | null;
   tags: {
     id: number;
     label: string;
@@ -178,6 +184,12 @@ function mapOrder(order: ApiOrder): Order {
     pathaoDeliveryFee: order.pathao_delivery_fee ?? null,
     pathaoSentAt: order.pathao_sent_at ?? null,
     pathaoTrackingUrl: order.pathao_tracking_url ?? null,
+    pathaoLocation: {
+      cityId: order.pathao_city_id ?? null,
+      zoneId: order.pathao_zone_id ?? null,
+      areaId: order.pathao_area_id ?? null,
+    },
+    pathaoAddressConfidence: order.pathao_address_confidence ?? null,
     fraud: mapFraud(order.fraud_check),
     items: (order.items ?? []).map(
       (item): OrderItem => ({
@@ -247,6 +259,8 @@ export async function updateOrder(
     address?: string;
     printed?: boolean;
     courier?: boolean;
+    /** Replaces the delivery location outright; leave out to keep it. */
+    pathaoLocation?: PathaoLocation;
   }
 ): Promise<Order> {
   const order = await request<ApiOrder>(`/api/orders/${id}`, {
@@ -259,6 +273,9 @@ export async function updateOrder(
       address: patch.address,
       printed: patch.printed,
       courier: patch.courier,
+      pathao_location: patch.pathaoLocation
+        ? locationBody(patch.pathaoLocation)
+        : undefined,
     }),
   });
   return mapOrder(order);
@@ -374,6 +391,105 @@ async function pathaoBatched(
     }
   }
   return merged;
+}
+
+function locationBody(location: PathaoLocation) {
+  return {
+    city_id: location.cityId,
+    zone_id: location.zoneId,
+    area_id: location.areaId,
+  };
+}
+
+/** One of Pathao's cities, zones or areas. */
+export type PathaoPlace = { id: number; name: string };
+
+/**
+ * Pathao's geography is the same for every store and changes rarely, so each
+ * list is fetched once per page load and shared by every picker on it. A
+ * failed fetch is not kept: the next picker asks again.
+ */
+const placeCache = new Map<string, Promise<PathaoPlace[]>>();
+
+function places(path: string): Promise<PathaoPlace[]> {
+  const cached = placeCache.get(path);
+  if (cached) return cached;
+  const pending = request<PathaoPlace[]>(path).catch((err) => {
+    placeCache.delete(path);
+    throw err;
+  });
+  placeCache.set(path, pending);
+  return pending;
+}
+
+/** Answers 503 (ApiError) when the store has no Pathao credentials. */
+export function listPathaoCities(): Promise<PathaoPlace[]> {
+  return places("/api/orders/pathao/cities");
+}
+
+export function listPathaoZones(cityId: number): Promise<PathaoPlace[]> {
+  return places(`/api/orders/pathao/cities/${cityId}/zones`);
+}
+
+export function listPathaoAreas(zoneId: number): Promise<PathaoPlace[]> {
+  return places(`/api/orders/pathao/zones/${zoneId}/areas`);
+}
+
+export type AddressParse = {
+  /** false for "Pathao could not place it" and for any failure alike. */
+  matched: boolean;
+  cityId: number | null;
+  cityName: string | null;
+  zoneId: number | null;
+  zoneName: string | null;
+  areaId: number | null;
+  areaName: string | null;
+  confidence: "high" | "medium" | "low";
+};
+
+type ApiAddressParse = {
+  matched: boolean;
+  city_id: number | null;
+  city_name: string | null;
+  zone_id: number | null;
+  zone_name: string | null;
+  area_id: number | null;
+  area_name: string | null;
+  confidence: "high" | "medium" | "low";
+};
+
+/**
+ * Ask Pathao where a typed address is. Never throws for a miss: the server
+ * answers matched=false whenever it has nothing, and the form leaves the
+ * dropdowns to staff. Only a store without Pathao gets an error (503).
+ */
+export async function parseAddress(address: string): Promise<AddressParse> {
+  const r = await request<ApiAddressParse>("/api/orders/pathao/parse-address", {
+    method: "POST",
+    body: JSON.stringify({ address }),
+  });
+  return {
+    matched: r.matched,
+    cityId: r.city_id,
+    cityName: r.city_name,
+    zoneId: r.zone_id,
+    zoneName: r.zone_name,
+    areaId: r.area_id,
+    areaName: r.area_name,
+    confidence: r.confidence,
+  };
+}
+
+/**
+ * Parse an existing order's saved address and store the answer on it. Only
+ * fills a blank location; an order already decided comes back unchanged.
+ */
+export async function parseOrderAddress(orderId: number): Promise<Order> {
+  return mapOrder(
+    await request<ApiOrder>(`/api/orders/${orderId}/pathao/parse-address`, {
+      method: "POST",
+    })
+  );
 }
 
 /** Book each order with Pathao. Successes carry the consignment id. */
@@ -1130,6 +1246,8 @@ export type ManualOrderInput = {
   approved: boolean;
   /** A total staff negotiated on the phone, overriding the catalogue sum. */
   totalOverride?: number;
+  /** Where Pathao delivers, as the parser filled it in or staff picked it. */
+  pathaoLocation?: PathaoLocation;
 };
 
 /**
@@ -1156,6 +1274,9 @@ export async function createManualOrder(
         comment: input.comment ?? "",
         approved: input.approved,
         total_override: input.totalOverride ?? null,
+        pathao_location: input.pathaoLocation
+          ? locationBody(input.pathaoLocation)
+          : null,
       }),
     })
   );

@@ -41,6 +41,9 @@ services:
       # Meta and Pathao credentials are per store (Admin → Settings). Only
       # the Pathao environment stays deployment-wide.
       PATHAO_BASE_URL: ${PATHAO_BASE_URL:-https://courier-api-sandbox.pathao.com}
+      # Pathao's address parser (docs/PATHAO-ADDRESS-PARSER.md). Only works
+      # with live tokens; set empty to switch the feature off.
+      PATHAO_PARSER_URL: ${PATHAO_PARSER_URL:-https://merchant.pathao.com/api/v1/address-parser}
       MEDIA_ROOT: /app/media
     volumes:
       # Uploaded product images. A named volume, not a bind or a path inside

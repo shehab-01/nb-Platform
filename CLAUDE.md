@@ -8,7 +8,8 @@ imported later as one tenant.
 
 Read `docs/DESIGN-V2.md` (target design), `docs/PLAN.md` (phases and where we
 are), `docs/ARCHITECTURE-V1.md` (what we inherited), `DEV.md` (running it),
-`docs/DEPLOY.md` (production next to v1).
+`docs/DEPLOY.md` (production next to v1), `docs/PATHAO-ADDRESS-PARSER.md`
+(Pathao's undocumented address parser and why our token works on it).
 
 ## Hard rules
 
@@ -55,8 +56,8 @@ are), `docs/ARCHITECTURE-V1.md` (what we inherited), `DEV.md` (running it),
 
 ```
 backend/   FastAPI. api/models.py, api/routers/*, api/services/* (meta_capi,
-           pathao), api/stores.py (host → store), api/tenancy.py (memberships,
-           X-Admin-Store), alembic/versions (0001–0024), scripts/seed_dev.py,
+           pathao, pathao_address), api/stores.py (host → store), api/tenancy.py
+           (memberships, X-Admin-Store), alembic/versions (0001–0026), scripts/seed_dev.py,
            tests/ (pytest, no DB)
 frontend/  Next.js 16 App Router. src/proxy.ts (host routing), src/lib/store.ts
            (server-side store config), src/lib/admin-store.ts (+ lib/http.ts:

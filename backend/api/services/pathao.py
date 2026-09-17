@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -155,6 +156,17 @@ def build_order_payload(order: Order, cfg: PathaoConfig, order_no: str) -> dict[
     }
     if order.comment:
         payload["special_instruction"] = " ".join(order.comment.split())[:200]
+    # Where to deliver, in Pathao's ids, when the parser or staff decided it.
+    # Each key is omitted rather than sent as null: without them Pathao sorts
+    # the parcel from the address text, as it always did before these existed.
+    # A zone without its city is never sent — Pathao validates zones against
+    # the city — and an area without its zone likewise.
+    if order.pathao_city_id:
+        payload["recipient_city"] = order.pathao_city_id
+        if order.pathao_zone_id:
+            payload["recipient_zone"] = order.pathao_zone_id
+            if order.pathao_area_id:
+                payload["recipient_area"] = order.pathao_area_id
     return payload
 
 
@@ -373,6 +385,71 @@ async def price_plan(
     return data if isinstance(data, dict) else {}
 
 
+# --- Geography ----------------------------------------------------------------
+#
+# Pathao's city / zone / area lists are the same for every merchant, so one
+# in-process copy serves every store; whichever store asks first pays the
+# call. A day is a long TTL, but the lists change rarely and a restart
+# refreshes them anyway.
+
+PLACES_TTL_SECONDS = 24 * 3600
+_places: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+
+
+def _places_get(key: str) -> list[dict[str, Any]] | None:
+    entry = _places.get(key)
+    if entry is None or entry[0] <= time.monotonic():
+        return None
+    return entry[1]
+
+
+def _places_put(key: str, value: list[dict[str, Any]]) -> None:
+    if len(_places) >= 5_000:
+        _places.clear()
+    _places[key] = (time.monotonic() + PLACES_TTL_SECONDS, value)
+
+
+def clear_places_cache() -> None:
+    _places.clear()
+
+
+async def _fetch_places(cfg: PathaoConfig, store_id: int, key: str, path: str, id_field: str, name_field: str) -> list[dict[str, Any]]:
+    cached = _places_get(key)
+    if cached is not None:
+        return cached
+    try:
+        body = await _call(cfg, store_id, "GET", path)
+    except requests.RequestException as exc:
+        raise PathaoError(f"Could not reach Pathao: {exc}") from exc
+    data = body.get("data") if isinstance(body, dict) else None
+    rows = data.get("data") if isinstance(data, dict) else None
+    places = [
+        {"id": int(row[id_field]), "name": str(row.get(name_field) or "").strip()}
+        for row in (rows if isinstance(rows, list) else [])
+        if isinstance(row, dict) and row.get(id_field) is not None
+    ]
+    places.sort(key=lambda place: place["name"].lower())
+    if places:
+        _places_put(key, places)
+    return places
+
+
+async def list_cities(cfg: PathaoConfig, store_id: int) -> list[dict[str, Any]]:
+    return await _fetch_places(cfg, store_id, "cities", "city-list", "city_id", "city_name")
+
+
+async def list_zones(cfg: PathaoConfig, store_id: int, city_id: int) -> list[dict[str, Any]]:
+    return await _fetch_places(
+        cfg, store_id, f"zones:{city_id}", f"cities/{city_id}/zone-list", "zone_id", "zone_name"
+    )
+
+
+async def list_areas(cfg: PathaoConfig, store_id: int, zone_id: int) -> list[dict[str, Any]]:
+    return await _fetch_places(
+        cfg, store_id, f"areas:{zone_id}", f"zones/{zone_id}/area-list", "area_id", "area_name"
+    )
+
+
 def is_rate_limited(exc: PathaoError) -> bool:
     return exc.status == 429
 
@@ -395,7 +472,10 @@ __all__ = [
     "enabled",
     "error_text",
     "is_sandbox",
+    "list_areas",
+    "list_cities",
     "list_stores",
+    "list_zones",
     "order_info",
     "price_plan",
     "recipient_phone",

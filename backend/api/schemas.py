@@ -71,6 +71,25 @@ class TagCreate(BaseModel):
     label: str = Field(min_length=1, max_length=50)
 
 
+class PathaoLocationIn(BaseModel):
+    """Where Pathao should deliver, in its own ids. Sent whole: a zone implies
+    its city, an area its zone, and all three null clears the location. The
+    ids come from our own city/zone/area lists or from the parser; Pathao
+    validates them again at booking time."""
+
+    city_id: int | None = Field(default=None, ge=1)
+    zone_id: int | None = Field(default=None, ge=1)
+    area_id: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _nested(self) -> "PathaoLocationIn":
+        if self.zone_id is not None and self.city_id is None:
+            raise ValueError("A zone needs its city")
+        if self.area_id is not None and self.zone_id is None:
+            raise ValueError("An area needs its zone")
+        return self
+
+
 class OrderUpdate(BaseModel):
     status: OrderStatus | None = None
     printed: bool | None = None
@@ -79,6 +98,8 @@ class OrderUpdate(BaseModel):
     customer_name: str | None = Field(default=None, min_length=1, max_length=120)
     phone: str | None = Field(default=None, min_length=6, max_length=32)
     address: str | None = Field(default=None, min_length=4, max_length=1000)
+    # Absent leaves the delivery location alone; present replaces it.
+    pathao_location: PathaoLocationIn | None = None
 
     @field_validator("phone")
     @classmethod
@@ -184,6 +205,12 @@ class OrderOut(BaseModel):
     pathao_status: str | None = None
     pathao_delivery_fee: int | None = None
     pathao_sent_at: datetime | None = None
+    # The delivery location in Pathao's ids (parser or staff), and how sure
+    # the parser was: high / medium / low, or "manual" once staff chose.
+    pathao_city_id: int | None = None
+    pathao_zone_id: int | None = None
+    pathao_area_id: int | None = None
+    pathao_address_confidence: str | None = None
     # Read to derive auto_captured; never serialised — it is the browser's key.
     draft_key: str | None = Field(default=None, exclude=True)
 
@@ -285,6 +312,32 @@ class PathaoFailure(BaseModel):
 class PathaoSendOut(BaseModel):
     orders: list[OrderOut]
     failed: list[PathaoFailure]
+
+
+class AddressParseIn(BaseModel):
+    address: str = Field(min_length=1, max_length=1000)
+
+
+class AddressParseOut(BaseModel):
+    """Pathao's address parser, normalised (api.services.pathao_address).
+    matched=False for a miss and for every kind of failure alike: the form
+    treats both the same way, by leaving the dropdowns to staff."""
+
+    matched: bool
+    city_id: int | None = None
+    city_name: str | None = None
+    zone_id: int | None = None
+    zone_name: str | None = None
+    area_id: int | None = None
+    area_name: str | None = None
+    confidence: str = "low"
+
+
+class PathaoPlaceOut(BaseModel):
+    """One city, zone or area from Pathao's lists."""
+
+    id: int
+    name: str
 
 
 class PathaoStatusOut(BaseModel):
@@ -560,6 +613,8 @@ class ManualOrderCreate(BaseModel):
     # total changes. None (the default) means "use the catalogue total" —
     # this is never sent for web orders, only ones staff typed in.
     total_override: int | None = Field(default=None, ge=0, le=10_000_000)
+    # Where Pathao delivers, as the parser filled it in or staff picked it.
+    pathao_location: PathaoLocationIn | None = None
 
     @field_validator("phone")
     @classmethod

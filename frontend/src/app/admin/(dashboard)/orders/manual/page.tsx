@@ -7,6 +7,7 @@ import { Loader2, Minus, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/components/admin/auth-context";
 import { OrderSummaryModal } from "@/components/admin/orders/order-summary-modal";
 import { FraudCards } from "@/components/admin/orders/fraud-summary";
+import { PathaoLocationPicker } from "@/components/admin/orders/pathao-location-picker";
 import { PreviousOrders } from "@/components/admin/orders/previous-orders";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,7 +30,7 @@ import {
 } from "@/lib/api";
 import type { FraudCheck } from "@/lib/orders";
 import { cleanPhoneInput, toBdMobile } from "@/lib/phone";
-import type { Order } from "@/lib/orders";
+import { EMPTY_LOCATION, type Order, type PathaoLocation } from "@/lib/orders";
 import { variantTitle, type Variant } from "@/lib/products";
 import { notifyOrdersChanged } from "@/lib/use-order-counts";
 import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
@@ -56,6 +57,13 @@ export default function ManualOrderPage() {
   const [name, setName] = React.useState("");
   const [address, setAddress] = React.useState("");
   const [comment, setComment] = React.useState("");
+  // Pathao's city / zone / area, filled in from the address by its parser or
+  // picked by staff. Bumping parseSignal (on blur) parses straight away;
+  // formKey remounts the picker so a new order starts untouched.
+  const [location, setLocation] = React.useState<PathaoLocation>(EMPTY_LOCATION);
+  const [parseSignal, setParseSignal] = React.useState(0);
+  const [formKey, setFormKey] = React.useState(0);
+  const chooseLocation = React.useCallback((next: PathaoLocation) => setLocation(next), []);
 
   const [products, setProducts] = React.useState<Sellable[]>([]);
   const [productSearch, setProductSearch] = React.useState("");
@@ -197,6 +205,7 @@ export default function ManualOrderPage() {
       name.trim().length > 0 ||
       address.trim().length > 0 ||
       comment.trim().length > 0 ||
+      location.cityId !== null ||
       cart.length > 0 ||
       totalOverride !== null);
   const guard = useUnsavedChanges(dirty);
@@ -249,6 +258,7 @@ export default function ManualOrderPage() {
           unitPriceOverride: line.priceOverride,
         })),
         totalOverride: overridden ? total : undefined,
+        pathaoLocation: location.cityId !== null ? location : undefined,
       });
       notifyOrdersChanged();
       setDone(
@@ -262,6 +272,8 @@ export default function ManualOrderPage() {
       setName("");
       setAddress("");
       setComment("");
+      setLocation(EMPTY_LOCATION);
+      setFormKey((k) => k + 1);
       setCart([]);
       setTotalOverride(null);
       setPrevious(NO_LOOKUP);
@@ -360,6 +372,7 @@ export default function ManualOrderPage() {
                   placeholder="Enter address"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
+                  onBlur={() => setParseSignal((n) => n + 1)}
                 />
               </div>
               <div className="grid gap-2">
@@ -372,6 +385,17 @@ export default function ManualOrderPage() {
                   onChange={(e) => setComment(e.target.value)}
                 />
               </div>
+            </div>
+
+            <div className="mt-4">
+              <PathaoLocationPicker
+                key={formKey}
+                address={address}
+                value={location}
+                onChange={chooseLocation}
+                parseSignal={parseSignal}
+                disabled={saving}
+              />
             </div>
           </div>
 

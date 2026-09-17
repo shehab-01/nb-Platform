@@ -119,6 +119,17 @@ class Order(Base):
     pathao_status: Mapped[str | None] = mapped_column(String(60))
     pathao_delivery_fee: Mapped[int | None] = mapped_column(Integer)
     pathao_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Where Pathao should deliver, in its own city/zone/area ids: filled by
+    # Pathao's address parser or picked by staff (see
+    # api.services.pathao_address), and sent with the booking. Area is
+    # optional: the parser rarely returns one and Pathao books without it.
+    pathao_city_id: Mapped[int | None] = mapped_column(Integer)
+    pathao_zone_id: Mapped[int | None] = mapped_column(Integer)
+    pathao_area_id: Mapped[int | None] = mapped_column(Integer)
+    # The parser's full answer for this order's address, plus whether staff
+    # kept it or picked by hand. Kept whole so a failed delivery can be traced
+    # to a coarse parse, and so address→zone pairs accumulate as data.
+    pathao_address_parse: Mapped[dict | None] = mapped_column(JSONB)
     # Which worker has claimed this order (is calling the customer).
     assigned_to: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), index=True
@@ -190,6 +201,19 @@ class Order(Base):
         if "handler" in sa_inspect(self).unloaded:
             return None
         return self.handler.nickname if self.handler else None
+
+    @property
+    def pathao_address_confidence(self) -> str | None:
+        """high / medium / low from the parser, "manual" once staff picked the
+        location themselves; None when nothing has been decided yet."""
+        parse = self.pathao_address_parse
+        if not isinstance(parse, dict):
+            return None
+        if parse.get("selected") == "manual":
+            # A cleared location is nothing decided, not a staff decision.
+            return "manual" if self.pathao_city_id is not None else None
+        value = parse.get("confidence")
+        return str(value) if value else None
 
     __table_args__ = (
         # The admin list query: WHERE store_id = ? AND status IN (...) ORDER BY created_at
@@ -327,6 +351,26 @@ class IntegrationToken(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class PathaoAddressParse(Base):
+    """
+    Cache of Pathao's address parser, keyed by a hash of the normalised
+    address text (see api.services.pathao_address). Platform-wide on purpose:
+    the answer maps a place to Pathao's geography and does not depend on
+    which merchant asked, and the address text itself is not stored here —
+    the order keeps its own copy. Rows expire by created_at; the endpoint is
+    undocumented and probably rate-limited, and most traffic is the same
+    neighbourhoods over and over.
+    """
+
+    __tablename__ = "pathao_address_parses"
+
+    address_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    result: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
     )
 
 

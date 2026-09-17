@@ -156,6 +156,20 @@ export function shortName(fullName: string): string {
   return name ? name[0].toUpperCase() + name.slice(1) : "";
 }
 
+export type PathaoLocation = {
+  cityId: number | null;
+  zoneId: number | null;
+  areaId: number | null;
+};
+
+export const EMPTY_LOCATION: PathaoLocation = { cityId: null, zoneId: null, areaId: null };
+
+export function sameLocation(a: PathaoLocation, b: PathaoLocation): boolean {
+  return a.cityId === b.cityId && a.zoneId === b.zoneId && a.areaId === b.areaId;
+}
+
+export type PathaoConfidence = "high" | "medium" | "low" | "manual";
+
 export type OrderTag = {
   id: number;
   label: string;
@@ -209,6 +223,13 @@ export type Order = {
   pathaoDeliveryFee: number | null;
   pathaoSentAt: string | null;
   pathaoTrackingUrl: string | null;
+  /** Where Pathao delivers, in its ids: from the address parser or staff. */
+  pathaoLocation: PathaoLocation;
+  /**
+   * How the location was decided: the parser's high / medium / low, or
+   * "manual" once staff picked it; null while nothing has been decided.
+   */
+  pathaoAddressConfidence: PathaoConfidence | null;
   /** BDCourier courier history for this phone, once checked. */
   fraud: FraudCheck | null;
 };

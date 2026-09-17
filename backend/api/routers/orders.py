@@ -26,8 +26,10 @@ from api.models import (
 from api.phone import bd_mobile, phone_digits, phone_key
 from api.ratelimit import client_ip, drafts_limiter, orders_limiter
 from api import catalogue, stores, tenancy
-from api.services import bdcourier, meta_capi, pathao, pathao_sync
+from api.services import bdcourier, meta_capi, pathao, pathao_address, pathao_sync
 from api.schemas import (
+    AddressParseIn,
+    AddressParseOut,
     FraudCheckOut,
     BulkOrderResult,
     BulkOrderUpdate,
@@ -50,6 +52,8 @@ from api.schemas import (
     ManualOrderCreate,
     PhoneLookupOut,
     PathaoFailure,
+    PathaoLocationIn,
+    PathaoPlaceOut,
     PathaoSendIn,
     PathaoSendOut,
     TagCreate,
@@ -1090,6 +1094,8 @@ async def create_manual_order(
         items=items,
         handled_by=user.id,
     )
+    if payload.pathao_location is not None:
+        await _set_location(session, order, payload.pathao_location)
     session.add(order)
     await session.flush()
     session.add(
@@ -1114,6 +1120,26 @@ def _summarise(items: list[OrderItem]) -> str:
     if len(items) == 1:
         return items[0].product_name[:255]
     return ", ".join(f"{i.product_name} x{i.quantity}" for i in items)[:255]
+
+
+async def _set_location(
+    session: AsyncSession, order: Order, location: PathaoLocationIn
+) -> None:
+    """Put staff's (or the form's auto-filled) delivery location on the order,
+    and record next to it what the parser had said about this address, if it
+    was ever asked — from the cache only, never a live call. "parser" when
+    the ids are exactly the parser's own, "manual" when staff chose."""
+    order.pathao_city_id = location.city_id
+    order.pathao_zone_id = location.zone_id
+    order.pathao_area_id = location.area_id
+    parsed = await pathao_address.cached(session, order.address)
+    agreed = (
+        parsed is not None
+        and parsed.matched
+        and (parsed.city_id, parsed.zone_id, parsed.area_id)
+        == (location.city_id, location.zone_id, location.area_id)
+    )
+    pathao_address.record_on_order(order, parsed, selected="parser" if agreed else "manual")
 
 
 @router.post("/{order_id}/claim", response_model=OrderOut)
@@ -1365,6 +1391,126 @@ async def send_to_pathao(
     return PathaoSendOut(orders=await _load_orders(session, sent_ids), failed=failed)
 
 
+async def _pathao_cfg(session: AsyncSession, store_id: int) -> stores.PathaoConfig:
+    integrations = await stores.load_integrations(session, store_id)
+    if integrations is None or not integrations.pathao.enabled:
+        raise HTTPException(status_code=503, detail="Pathao is not configured for this store")
+    return integrations.pathao
+
+
+def _places_out(places: list[dict]) -> list[PathaoPlaceOut]:
+    return [PathaoPlaceOut(id=p["id"], name=p["name"]) for p in places]
+
+
+async def _places(coro) -> list[PathaoPlaceOut]:
+    try:
+        return _places_out(await coro)
+    except pathao.PathaoError as exc:
+        raise HTTPException(status_code=502, detail=pathao.error_text(exc)) from exc
+
+
+@router.get("/pathao/cities", response_model=list[PathaoPlaceOut])
+async def pathao_cities(
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
+) -> list[PathaoPlaceOut]:
+    """Pathao's cities, for the delivery-location dropdowns. Answers 503 when
+    the store has no Pathao credentials, which is how the admin learns to
+    hide the picker."""
+    cfg = await _pathao_cfg(session, ctx.store.id)
+    return await _places(pathao.list_cities(cfg, ctx.store.id))
+
+
+@router.get("/pathao/cities/{city_id}/zones", response_model=list[PathaoPlaceOut])
+async def pathao_zones(
+    city_id: int,
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
+) -> list[PathaoPlaceOut]:
+    cfg = await _pathao_cfg(session, ctx.store.id)
+    return await _places(pathao.list_zones(cfg, ctx.store.id, city_id))
+
+
+@router.get("/pathao/zones/{zone_id}/areas", response_model=list[PathaoPlaceOut])
+async def pathao_areas(
+    zone_id: int,
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
+) -> list[PathaoPlaceOut]:
+    cfg = await _pathao_cfg(session, ctx.store.id)
+    return await _places(pathao.list_areas(cfg, ctx.store.id, zone_id))
+
+
+def _parse_out(result: pathao_address.ParseResult) -> AddressParseOut:
+    return AddressParseOut(
+        matched=result.matched,
+        city_id=result.city_id,
+        city_name=result.city_name,
+        zone_id=result.zone_id,
+        zone_name=result.zone_name,
+        area_id=result.area_id,
+        area_name=result.area_name,
+        confidence=result.confidence,
+    )
+
+
+@router.post("/pathao/parse-address", response_model=AddressParseOut)
+async def parse_address(
+    payload: AddressParseIn,
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
+) -> AddressParseOut:
+    """
+    Where Pathao thinks a typed address is, for auto-filling the manual
+    order form's dropdowns. The browser never talks to Pathao itself: the
+    token stays here, and so do the cache and the circuit breaker. A miss and
+    a failure look the same (matched=False) — staff simply pick by hand.
+    """
+    cfg = await _pathao_cfg(session, ctx.store.id)
+    return _parse_out(
+        await pathao_address.parse(session, cfg, ctx.store.id, payload.address)
+    )
+
+
+@router.post("/{order_id}/pathao/parse-address", response_model=OrderOut)
+async def parse_order_address(
+    order_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
+) -> Order:
+    """
+    Run the parser over an existing order's address and, when it answers,
+    store the location on the order. Only fills a blank: an order whose
+    location was already decided (by a previous parse or by staff) is left
+    exactly as it is, so opening the modal twice never undoes a correction.
+    Staff re-parse an edited address from the form instead.
+    """
+    cfg = await _pathao_cfg(session, ctx.store.id)
+    order = await session.get(Order, order_id)
+    if order is None or order.store_id != ctx.store.id:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.pathao_city_id is not None or order.pathao_address_parse is not None:
+        return order
+    result = await pathao_address.parse(session, cfg, ctx.store.id, order.address)
+    # parse() may have committed a cache row; reload the order so this write
+    # lands on a live instance whichever way that went.
+    order = await session.get(Order, order_id, with_for_update={"of": Order})
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    # A failed call (raw=None) is not recorded: the next opening of the
+    # order asks again, once the parser is back. A real miss is, so an
+    # address Pathao cannot sort is not re-asked on every opening.
+    if (
+        order.pathao_city_id is None
+        and order.pathao_address_parse is None
+        and result.raw is not None
+    ):
+        pathao_address.apply_to_order(order, result)
+        await session.commit()
+    return await _get_fresh_order(session, order_id)
+
+
 @router.post("/pathao/refresh", response_model=PathaoSendOut)
 async def refresh_pathao(
     payload: PathaoSendIn,
@@ -1427,6 +1573,7 @@ async def update_order(
             payload.address,
             payload.printed,
             payload.courier,
+            payload.pathao_location,
         )
     ):
         raise HTTPException(status_code=400, detail="Nothing to update")
@@ -1480,6 +1627,13 @@ async def update_order(
         if value and value != order.address:
             order.address = value
             details_changed.append("address")
+    if payload.pathao_location is not None:
+        loc = payload.pathao_location
+        if (loc.city_id, loc.zone_id, loc.area_id) != (
+            order.pathao_city_id, order.pathao_zone_id, order.pathao_area_id
+        ):
+            await _set_location(session, order, loc)
+            details_changed.append("delivery location")
     if details_changed:
         session.add(
             OrderEvent(

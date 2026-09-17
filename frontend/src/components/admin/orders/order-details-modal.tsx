@@ -6,6 +6,7 @@ import { ArrowLeft, ExternalLink, Phone } from "lucide-react";
 import { useAuth } from "@/components/admin/auth-context";
 import { FraudCards } from "@/components/admin/orders/fraud-summary";
 import { OrderTags } from "@/components/admin/orders/order-tags";
+import { PathaoLocationPicker } from "@/components/admin/orders/pathao-location-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,7 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { recheckOrderFraud, updateOrder } from "@/lib/api";
+import { parseOrderAddress, recheckOrderFraud, updateOrder } from "@/lib/api";
 import {
   CHANGE_STATUS_OPTIONS,
   ORDER_SOURCE_LABELS,
@@ -34,12 +35,15 @@ import {
   SOURCE_BADGE_CLASS,
   STATUS_BADGE_CLASS,
   STATUS_PAGES,
+  EMPTY_LOCATION,
   activeClaim,
   formatOrderDateTime,
+  sameLocation,
   staffLabel,
   timeAgo,
   type Order,
   type OrderStatus,
+  type PathaoLocation,
 } from "@/lib/orders";
 import { toBdMobile } from "@/lib/phone";
 import { cn } from "@/lib/utils";
@@ -73,6 +77,13 @@ export function OrderDetailsModal({
   const [editPhone, setEditPhone] = React.useState("");
   const [rechecking, setRechecking] = React.useState(false);
   const [editAddress, setEditAddress] = React.useState("");
+  // Pathao's city / zone / area for the parcel. The picker spells the value
+  // out (locationLabel) for the review prompt; savedLabel is the spelling of
+  // what is on the order, kept while the two are still the same.
+  const [editLocation, setEditLocation] = React.useState<PathaoLocation>(EMPTY_LOCATION);
+  const [locationLabel, setLocationLabel] = React.useState("");
+  const [savedLabel, setSavedLabel] = React.useState("");
+  const [parseSignal, setParseSignal] = React.useState(0);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   // Unsaved edits are reviewed before a status change or before closing:
@@ -87,10 +98,46 @@ export function OrderDetailsModal({
       setEditName(order.customerName);
       setEditPhone(order.phone);
       setEditAddress(order.address);
+      setEditLocation(order.pathaoLocation);
+      setSavedLabel("");
+      setParseSignal(0);
       setError(null);
       setReview(null);
     }
   }, [order?.id, open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Ask Pathao where the saved address is, once, the first time an order is
+  // opened with nothing decided yet. The server stores the answer, so the
+  // next opening has it already; a miss is stored too, so an address Pathao
+  // cannot place is not asked about on every opening. Silent either way.
+  React.useEffect(() => {
+    if (!open || !order) return;
+    if (order.pathaoLocation.cityId !== null || order.pathaoAddressConfidence !== null) return;
+    let cancelled = false;
+    parseOrderAddress(order.id)
+      .then((updated) => {
+        if (cancelled) return;
+        onOrderUpdated(updated);
+        setEditLocation((current) =>
+          sameLocation(current, EMPTY_LOCATION) ? updated.pathaoLocation : current
+        );
+      })
+      .catch(() => {
+        // No Pathao on this store, or the parser is down: staff pick by hand.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, order?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const chooseLocation = React.useCallback((next: PathaoLocation) => setEditLocation(next), []);
+  const onLocationLabel = React.useCallback((label: string) => setLocationLabel(label), []);
+
+  // While the picker still shows the saved location, remember how it is
+  // spelled — that is the "from" of the review prompt once it changes.
+  React.useEffect(() => {
+    if (order && sameLocation(editLocation, order.pathaoLocation)) setSavedLabel(locationLabel);
+  }, [order, editLocation, locationLabel]);
 
   // A silent retry when the courier history is missing or last errored — an
   // outage or a store that only just got its BDCourier key configured. Not
@@ -154,6 +201,10 @@ export function OrderDetailsModal({
   if (editAddress.trim() && editAddress.trim() !== order.address) {
     changes.push({ field: "Address", from: order.address, to: editAddress.trim() });
   }
+  const locationChanged = !sameLocation(editLocation, order.pathaoLocation);
+  if (locationChanged) {
+    changes.push({ field: "Delivery location", from: savedLabel, to: locationLabel });
+  }
   if (note !== order.comment) {
     changes.push({ field: "Note", from: order.comment, to: note });
   }
@@ -162,12 +213,14 @@ export function OrderDetailsModal({
     phone: phoneNormalised ?? undefined,
     address: editAddress.trim() || undefined,
     comment: note !== order.comment ? note : undefined,
+    pathaoLocation: locationChanged ? editLocation : undefined,
   };
 
   const discardEdits = () => {
     setEditName(order.customerName);
     setEditPhone(order.phone);
     setEditAddress(order.address);
+    setEditLocation(order.pathaoLocation);
     setNote(order.comment);
   };
 
@@ -208,6 +261,7 @@ export function OrderDetailsModal({
     customerName?: string;
     phone?: string;
     address?: string;
+    pathaoLocation?: PathaoLocation;
   }) => {
     setBusy(true);
     setError(null);
@@ -338,7 +392,20 @@ export function OrderDetailsModal({
                   <Textarea
                     value={editAddress}
                     onChange={(e) => setEditAddress(e.target.value)}
+                    onBlur={() => setParseSignal((n) => n + 1)}
                     rows={3}
+                  />
+                </div>
+                <div className="mt-4">
+                  <PathaoLocationPicker
+                    key={order.id}
+                    address={editAddress}
+                    value={editLocation}
+                    onChange={chooseLocation}
+                    onLabel={onLocationLabel}
+                    initialConfidence={order.pathaoAddressConfidence}
+                    parseSignal={parseSignal}
+                    disabled={busy}
                   />
                 </div>
               </div>

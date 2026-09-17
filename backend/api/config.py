@@ -71,6 +71,13 @@ class Settings:
     pathao_tracking_url: str = os.getenv(
         "PATHAO_TRACKING_URL", "https://merchant.pathao.com/tracking"
     )
+    # Pathao's address parser (see docs/PATHAO-ADDRESS-PARSER.md). It is an
+    # undocumented endpoint on the merchant panel's host, not on the courier
+    # API host, and it only answers a token issued by the live API — with the
+    # sandbox base URL above it is simply unavailable. Empty disables it.
+    pathao_parser_url: str = os.getenv(
+        "PATHAO_PARSER_URL", "https://merchant.pathao.com/api/v1/address-parser"
+    ).strip()
 
     # Auth
     google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "")

@@ -58,6 +58,9 @@ export function PathaoLocationPicker({
   disabled?: boolean;
 }) {
   const [available, setAvailable] = React.useState<boolean | null>(null);
+  // Why the city list could not be loaded (the API's own message), so a
+  // failing Pathao call is visible to staff instead of only in the console.
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [cities, setCities] = React.useState<PathaoPlace[]>([]);
   const [zones, setZones] = React.useState<PathaoPlace[]>([]);
   const [areas, setAreas] = React.useState<PathaoPlace[]>([]);
@@ -94,12 +97,18 @@ export function PathaoLocationPicker({
         if (cancelled) return;
         setCities(list);
         setAvailable(true);
+        setLoadError(null);
       })
       .catch((err) => {
         if (cancelled) return;
         // 503: no Pathao credentials on this store — the picker has no
-        // purpose. Anything else is a hiccup; keep the box, empty.
-        setAvailable(!(err instanceof ApiError && err.status === 503));
+        // purpose. Anything else is a hiccup; keep the box, empty, and say
+        // what Pathao answered.
+        const unconfigured = err instanceof ApiError && err.status === 503;
+        setAvailable(!unconfigured);
+        if (!unconfigured) {
+          setLoadError(err instanceof Error && err.message ? err.message : "Could not load Pathao cities");
+        }
       });
     return () => {
       cancelled = true;
@@ -303,7 +312,11 @@ export function PathaoLocationPicker({
         </div>
       </div>
 
-      <StatusLine confidence={confidence} missed={missed} hasLocation={hasLocation} />
+      {loadError ? (
+        <p className="mt-2 text-xs text-destructive">Pathao cities could not be loaded: {loadError}</p>
+      ) : (
+        <StatusLine confidence={confidence} missed={missed} hasLocation={hasLocation} />
+      )}
     </div>
   );
 }

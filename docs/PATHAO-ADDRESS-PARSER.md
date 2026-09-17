@@ -91,16 +91,27 @@ its zone.
 `selected: "parser" | "manual"`, so a failed delivery can be traced to a
 coarse or wrong parse, and so address → zone pairs accumulate as data.
 
-## Open question: does create-order accept a null `recipient_area`?
+## Zone or area not found: what gets sent
 
-Not tested against the sandbox from this repo: the development database has
-no Pathao credentials. What is known: the live v1 integration has been booking
-parcels for months with none of the three ids in the payload, so *absent* is
-accepted. The code therefore never sends `null` — it leaves the key out —
-and the Area dropdown is marked optional. If a sandbox test ever shows that a
-zone **without** an area is rejected, make Area required in
-`PathaoLocationPicker` once a zone is chosen; do not auto-pick the first area,
-that silently guesses a delivery point.
+Pathao's own documentation for create-order and bulk create (read 2026-09)
+says `recipient_city`, `recipient_zone` and `recipient_area` are all
+optional, must **not** be sent as `null`, and are "populated automatically
+based on the recipient_address" when left out. That is what the code does:
+each key is omitted when unset, so an order with no zone, or no area, books
+exactly as v1 always has and Pathao sorts it from the address text. Area
+stays optional in the picker; the first area under a zone is never
+auto-picked, that would silently guess a delivery point.
+
+## When the parse happens
+
+- **Storefront orders**: right after the order is saved, as a background
+  task (`parse_order_later`), so the details modal opens with the location
+  filled. The customer's response never waits on Pathao. At most two parses
+  run at once, so a campaign burst is a trickle to Pathao, not a flood.
+- **Manual orders**: the form parses as staff type; an order saved without
+  a location is parsed once more in the background.
+- **Opening the modal**: still parses when nothing is recorded yet (parser
+  was down at creation, or the order predates this), and only fills a blank.
 
 ## Endpoints (admin, `orders` permission, `X-Admin-Store`)
 

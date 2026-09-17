@@ -189,3 +189,36 @@ def test_booking_payload_carries_location_only_when_nested():
     order.pathao_city_id = None
     payload = pathao.build_order_payload(order, CFG, "NB-1")
     assert "recipient_city" not in payload and "recipient_zone" not in payload
+
+
+def test_parse_order_later_needs_credentials_and_parser(monkeypatch):
+    """No task is scheduled without store credentials or with the parser
+    switched off — the order response must never pay for a no-op."""
+    from api.services import pathao_address
+    from api.stores import PathaoConfig
+
+    scheduled: list[object] = []
+
+    class Loop:
+        def create_task(self, coro):
+            scheduled.append(coro)
+            coro.close()
+            return _DoneTask()
+
+    class _DoneTask:
+        def add_done_callback(self, cb):
+            pass
+
+    monkeypatch.setattr(pathao_address.asyncio, "get_running_loop", lambda: Loop())
+    monkeypatch.setattr(pathao_address.settings, "pathao_parser_url", "https://x/parse")
+
+    pathao_address.parse_order_later(1, 2, PathaoConfig())
+    assert scheduled == []
+
+    full = PathaoConfig(client_id="a", client_secret="b", username="c", password="d", store_id=5)
+    pathao_address.parse_order_later(1, 2, full)
+    assert len(scheduled) == 1
+
+    monkeypatch.setattr(pathao_address.settings, "pathao_parser_url", "")
+    pathao_address.parse_order_later(1, 2, full)
+    assert len(scheduled) == 1

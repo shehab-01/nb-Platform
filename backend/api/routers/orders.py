@@ -525,6 +525,9 @@ async def create_order(
     # to the order for the lists and the modal. Skipped without a key.
     if integrations is not None:
         bdcourier.check_order_later(order.id, store.id, order.phone, integrations.bdcourier_api_key)
+        # Pathao's guess at the delivery location, so the modal opens with it
+        # already filled. Skipped without Pathao credentials.
+        pathao_address.parse_order_later(order.id, store.id, integrations.pathao)
     return order
 
 
@@ -1111,6 +1114,11 @@ async def create_manual_order(
     integrations = await stores.load_integrations(session, ctx.store.id)
     if integrations is not None:
         bdcourier.check_order_later(order.id, ctx.store.id, order.phone, integrations.bdcourier_api_key)
+        # The manual form parses as staff type; only an order saved without
+        # a location (parser down at the time, or the picker left blank) is
+        # tried again here.
+        if order.pathao_city_id is None and order.pathao_address_parse is None:
+            pathao_address.parse_order_later(order.id, ctx.store.id, integrations.pathao)
     return await _get_fresh_order(session, order.id)
 
 

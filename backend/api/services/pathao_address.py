@@ -325,12 +325,70 @@ def apply_to_order(order: Order, result: ParseResult) -> bool:
     return True
 
 
+# --- On order creation -------------------------------------------------------------
+
+# Strong references to in-flight parses: a bare create_task() result can be
+# garbage-collected mid-flight.
+_tasks: set[asyncio.Task[None]] = set()
+# New orders arrive in bursts (a campaign, a bulk import); this keeps the
+# parser to a trickle rather than N parallel calls to an undocumented
+# endpoint, which the spec forbids.
+_gate = asyncio.Semaphore(2)
+
+
+async def _parse_order(order_id: int, store_id: int, cfg: PathaoConfig) -> None:
+    # Imported here so the service can be unit-tested without an engine.
+    from api.db import async_session
+
+    try:
+        async with _gate:
+            async with async_session() as session:
+                order = await session.get(Order, order_id)
+                # Only fills a blank, like the modal's parse: staff or an
+                # earlier parse may have got there first.
+                if (
+                    order is None
+                    or order.pathao_city_id is not None
+                    or order.pathao_address_parse is not None
+                ):
+                    return
+                result = await parse(session, cfg, store_id, order.address or "")
+                # parse() may have committed a cache row; re-read under lock.
+                order = await session.get(Order, order_id, with_for_update={"of": Order})
+                if (
+                    order is not None
+                    and order.pathao_city_id is None
+                    and order.pathao_address_parse is None
+                    and result.raw is not None
+                ):
+                    apply_to_order(order, result)
+                    await session.commit()
+    except Exception:  # noqa: BLE001 — a convenience must never surface as a 500
+        log.exception("Pathao address parse for order %s failed", order_id)
+
+
+def parse_order_later(order_id: int, store_id: int, cfg: PathaoConfig) -> None:
+    """Parse a new order's address as its own task, so the location is
+    already on the order when staff open it. The order response never waits
+    on Pathao. No credentials or parser switched off: no task."""
+    if not cfg.enabled or not enabled():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    task = loop.create_task(_parse_order(order_id, store_id, cfg))
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
+
+
 __all__ = [
     "MIN_CHARS",
     "NO_MATCH",
     "ParseResult",
     "apply_to_order",
     "breaker",
+    "parse_order_later",
     "cache_key",
     "cached",
     "confidence_of",

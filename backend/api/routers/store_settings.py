@@ -137,9 +137,12 @@ def redact(row: StoreSettings | None) -> StoreSettingsOut:
 
 
 def apply_secret(current: bytes | None, incoming: str | None) -> bytes | None:
-    """None keeps, "" clears, text replaces (encrypted)."""
+    """None keeps, "" clears, text replaces (encrypted). Surrounding
+    whitespace is dropped: a trailing newline from a paste is not part of
+    any token or password, and Pathao answers it with a bare 400."""
     if incoming is None:
         return current
+    incoming = incoming.strip()
     if incoming == "":
         return None
     return crypto.encrypt(incoming)

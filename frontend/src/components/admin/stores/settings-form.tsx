@@ -74,31 +74,17 @@ export function SettingsForm({
     setStatus(null);
   };
 
-  const runTest = async () => {
-    setTesting(true);
-    setTest(null);
-    try {
-      setTest(await testPathao(storeId));
-    } catch (err) {
-      setTest({
-        enabled: false,
-        sandbox: true,
-        baseUrl: "",
-        storeId: 0,
-        stores: [],
-        error: err instanceof Error ? err.message : "Test failed",
-      });
-    } finally {
-      setTesting(false);
-    }
-  };
-
   const weight = Number(d.pathaoParcelWeightKg);
   const valid = weight >= 0.5 && weight <= 10 && (d.pathaoStoreId === "" || /^\d+$/.test(d.pathaoStoreId));
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!valid || busy) return;
+    await save();
+  };
+
+  /** Writes the draft; true when it was accepted. */
+  const save = async (): Promise<boolean> => {
+    if (!valid || busy) return false;
     setBusy(true);
     setStatus(null);
     try {
@@ -126,10 +112,34 @@ export function SettingsForm({
       }));
       setStatus({ ok: true, text: "Saved" });
       setDirty(false);
+      return true;
     } catch (err) {
       setStatus({ ok: false, text: err instanceof Error ? err.message : "Save failed" });
+      return false;
     } finally {
       setBusy(false);
+    }
+  };
+
+  const runTest = async () => {
+    // The test reads saved credentials, and the Save button is below the
+    // fold: save pending edits first rather than test the previous values.
+    if (dirty && !(await save())) return;
+    setTesting(true);
+    setTest(null);
+    try {
+      setTest(await testPathao(storeId));
+    } catch (err) {
+      setTest({
+        enabled: false,
+        sandbox: true,
+        baseUrl: "",
+        storeId: 0,
+        stores: [],
+        error: err instanceof Error ? err.message : "Test failed",
+      });
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -193,11 +203,11 @@ export function SettingsForm({
         <Field label="">
           <div className="flex flex-col gap-2">
             <div className="flex items-center gap-3">
-              <Button type="button" variant="outline" size="sm" disabled={testing} onClick={runTest}>
+              <Button type="button" variant="outline" size="sm" disabled={testing || busy || !valid} onClick={runTest}>
                 {testing ? "Testing…" : "Test connection"}
               </Button>
               <span className="text-xs text-muted-foreground">
-                {dirty ? "Save first: the test uses saved credentials." : "Logs in to Pathao with the saved credentials."}
+                {dirty ? "Saves your edits, then logs in to Pathao." : "Logs in to Pathao with the saved credentials."}
               </span>
             </div>
             {test && (

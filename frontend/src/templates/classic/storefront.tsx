@@ -462,8 +462,10 @@ export function Storefront({
                   : `অর্ডার কনফার্ম করুন ${taka(total)} TK`}
               </button>
               <p className="nb-confirm-note">
-                আমাদের একজন কাস্টমার প্রতিনিধি আপনাকে কল করে আবার কনফার্ম হবে
-                <br />
+                <span className="nb-confirm-call">
+                  আমাদের একজন কাস্টমার প্রতিনিধি আপনাকে কল করে আবার কনফার্ম হবে
+                  <br />
+                </span>
                 ক্যাশ অন ডেলিভারি · সারা বাংলাদেশে ফ্রি ডেলিভারি
               </p>
             </form>

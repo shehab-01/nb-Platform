@@ -317,6 +317,10 @@
   color: var(--c2-mute);
   font-size: 13px;
 }
+/* This campaign does not promise a confirmation call. */
+.nb-c2 .nb-confirm-call {
+  display: none;
+}
 .nb-c2 .nb-cta-bottom {
   margin: 6px 0 4px;
   padding: 17px;

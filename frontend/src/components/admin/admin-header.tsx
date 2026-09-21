@@ -72,7 +72,9 @@ export function AdminHeader() {
             one row of controls. A plain span: the Separator primitive
             stretches to the bar's full height when vertical. */}
         <span aria-hidden className="hidden h-4 w-px bg-border md:block" />
-        <nav className="flex items-center gap-1 overflow-x-auto">
+        {/* Phones get only the sidebar: the quick links would otherwise
+            overflow the bar sideways. */}
+        <nav className="hidden items-center gap-1 md:flex">
           {HEADER_LINKS.map((link) => (
             <HeaderItem
               key={link.title}

@@ -58,6 +58,8 @@ export function Storefront({
   beforeProduct,
   hidePicker = false,
   hideTopCta = false,
+  hideBottomCta = false,
+  headerExtra,
   productBelowFold = false,
   hideProductCard = false,
   orderTable = false,
@@ -74,6 +76,11 @@ export function Storefront({
   hidePicker?: boolean;
   /** Drop the red "order" button between the product card and the summary. */
   hideTopCta?: boolean;
+  /** Drop the "order" button under the card, above the footer. */
+  hideBottomCta?: boolean;
+  /** Rendered inside the logo bar after the logo; a template's own header
+   * control (a compact order button, say). */
+  headerExtra?: ReactNode;
   /** No title and photo at the top of the card: the campaign's banners have
    * already shown the product by the time the visitor gets here. */
   hideProductCard?: boolean;
@@ -236,6 +243,7 @@ export function Storefront({
           priority
           unoptimized={rawImage(store.content.logo)}
         />
+        {headerExtra}
       </header>
 
       {beforeProduct}
@@ -466,16 +474,18 @@ export function Storefront({
         <ProductDescription text={listing.description} />
       </section>
 
-      <button
-        type="button"
-        className="nb-cta-top nb-cta-bottom"
-        onClick={() => {
-          trackAddToCart(items);
-          scrollToOrder();
-        }}
-      >
-        অর্ডার করতে চাই
-      </button>
+      {hideBottomCta ? null : (
+        <button
+          type="button"
+          className="nb-cta-top nb-cta-bottom"
+          onClick={() => {
+            trackAddToCart(items);
+            scrollToOrder();
+          }}
+        >
+          অর্ডার করতে চাই
+        </button>
+      )}
       </div>
 
       <footer className="nb-footer">

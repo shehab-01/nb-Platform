@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import "@/templates/classic/landing.css";
 import "./campaign2.css";
@@ -54,17 +54,33 @@ export function Storefront(props: StorefrontProps) {
     return () => io.disconnect();
   }, []);
 
+  // Once the page has scrolled past the top, the logo slides to the left and
+  // a compact order button slides in on the right (see .nb-c2[data-scrolled]).
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 40);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
   const scrollToOrder = () => {
     document.getElementById("order")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   return (
-    <div className="nb-c2">
+    <div className="nb-c2" data-scrolled={scrolled || undefined}>
       <Classic
         {...props}
         store={store}
         hidePicker
         hideTopCta
+        hideBottomCta
+        headerExtra={
+          <button type="button" className="c2-header-cta" onClick={scrollToOrder} tabIndex={scrolled ? 0 : -1}>
+            অর্ডার করুন
+          </button>
+        }
         // The banners have shown the product; the card opens on the order
         // table, and the banner (not the product photo) is the LCP.
         hideProductCard
@@ -105,6 +121,12 @@ export function Storefront(props: StorefrontProps) {
                 <ProductPicture src={c.prizes} srcSet={s.prizes} alt="পুরস্কার" width={877} height={877} />
               </div>
             </section>
+
+            <div className="c2-cta-row" data-c2-reveal="">
+              <button type="button" className="c2-cta" onClick={scrollToOrder}>
+                অর্ডার করুন
+              </button>
+            </div>
 
             <section className="c2-section" data-c2-reveal="">
               <h2>আমাদের স্পেশাল আচার কম্বো</h2>

@@ -82,12 +82,57 @@
 
 /* --- Header ------------------------------------------------------------- */
 
+/* The logo sits centred until the page scrolls (data-scrolled on .nb-c2),
+   then slides to the left edge while a compact order button slides in on
+   the right. Both are absolutely placed so the move is a plain transition. */
 .nb-c2 .nb-header {
+  position: sticky;
   background: rgba(5, 32, 15, 0.92);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border-bottom: 1px solid rgba(217, 165, 55, 0.25);
   box-shadow: none;
+}
+.nb-c2 .nb-header img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  transition: left 0.45s cubic-bezier(0.2, 0.7, 0.2, 1), transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.nb-c2[data-scrolled] .nb-header img {
+  left: 16px;
+  transform: translate(0, -50%);
+}
+.c2-header-cta {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  padding: 9px 16px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--c2-gold-3), var(--c2-gold-2));
+  color: #05200f;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(217, 165, 55, 0.3);
+  opacity: 0;
+  transform: translate(16px, -50%) scale(0.9);
+  pointer-events: none;
+  transition: opacity 0.35s ease, transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.nb-c2[data-scrolled] .c2-header-cta {
+  opacity: 1;
+  transform: translate(0, -50%) scale(1);
+  pointer-events: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nb-c2 .nb-header img,
+  .c2-header-cta {
+    transition: none;
+  }
 }
 
 /* --- Campaign block ----------------------------------------------------- */
@@ -124,6 +169,10 @@
   letter-spacing: 0;
   color: var(--c2-gold);
 }
+/* Tighter than the intro's gap: the kicker belongs to the heading. */
+.c2-kicker + h1 {
+  margin-top: -8px;
+}
 .c2-intro h1 {
   margin: 0;
   /* Shrinks on narrow phones so "এই মাসের ৩০ তারিখ" stays on one line. */
@@ -150,6 +199,12 @@
   border-radius: 999px;
   font-size: 16px;
   animation: c2-pulse 2.6s ease-in-out infinite;
+}
+/* The mid-page order button, between the prizes and the product showcase. */
+.c2-cta-row {
+  display: flex;
+  justify-content: center;
+  padding: 18px 20px 6px;
 }
 .c2-section {
   padding: 18px 16px 8px;

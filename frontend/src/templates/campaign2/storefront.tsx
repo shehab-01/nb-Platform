@@ -100,7 +100,7 @@ export function Storefront(props: StorefrontProps) {
                 <span className="c2-line">এই মাসের ৩০ তারিখ</span>
               </h1>
               <p>
-                স্পেশাল আচার কম্বো অর্ডার করে অংশ নিন ১০ লাখ টাকা ক্যাশ ও ১০০০+ গিফট
+                স্পেশাল আচার কম্বো অর্ডার করে অংশ নিন দশ লাখ টাকা ক্যাশ ও এক হাজার+ গিফট
                 আইটেমের ক্যাম্পেইনে।
               </p>
               <button type="button" className="c2-cta" onClick={scrollToOrder}>

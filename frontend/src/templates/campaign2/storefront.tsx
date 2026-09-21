@@ -77,11 +77,11 @@ export function Storefront(props: StorefrontProps) {
             </section>
 
             <section className="c2-intro">
-              <span className="c2-kicker">Nature Millionaire Campaign</span>
+              <span className="c2-kicker">নেচার মিলিয়নিয়ার ক্যাম্পেইন</span>
               <h1>
-                প্রতিদিন জিতে নিন
+                ফাইনাল ড্র
                 <br />
-                আকর্ষণীয় পুরস্কার
+                এই মাসের ৩০ তারিখ
               </h1>
               <p>
                 স্পেশাল আচার কম্বো অর্ডার করে অংশ নিন ১০ লাখ টাকা ক্যাশ ও ১০০০+ গিফট

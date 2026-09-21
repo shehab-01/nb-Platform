@@ -120,8 +120,8 @@
   font-family: var(--font-barlow, "Barlow Condensed"), sans-serif;
   font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
+  /* No tracking: letter-spacing breaks Bangla conjunct shaping. */
+  letter-spacing: 0;
   color: var(--c2-gold);
 }
 .c2-intro h1 {
@@ -176,7 +176,8 @@
   padding: 18px;
 }
 .c2-offer img {
-  width: 200px;
+  width: 260px;
+  max-width: 100%;
 }
 [data-c2-reveal] {
   opacity: 0;

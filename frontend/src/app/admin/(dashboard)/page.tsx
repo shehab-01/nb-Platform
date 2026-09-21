@@ -27,6 +27,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { useAuth } from "@/components/admin/auth-context";
+import { storeTitle } from "@/lib/admin-store";
 import { Label } from "@/components/ui/label";
 import {
   Popover,
@@ -118,7 +120,8 @@ function rangeLabel(r: Range): string {
 }
 
 /**
- * The daily target board. "Nature Bazar — Ecotine" at the top, the month so
+ * The daily target board. The store's admin title ("Nature Bazar — Ecotine")
+ * at the top, the month so
  * far beneath it, then the chosen days in detail (today, unless the picker
  * says otherwise), the month's shape as a line, and who confirmed the most.
  */
@@ -130,6 +133,7 @@ export default function AdminDashboardPage() {
   const [data, setData] = React.useState<Dashboard | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [performer, setPerformer] = React.useState<Performer | null>(null);
+  const { store } = useAuth();
 
   React.useEffect(() => {
     let cancelled = false;
@@ -160,7 +164,7 @@ export default function AdminDashboardPage() {
       {/* --- Title, centred --------------------------------------------- */}
       <div className="text-center">
         <h1 className="text-3xl font-bold tracking-tight text-[#07582d] dark:text-[#7ed3a0]">
-          Nature Bazar — Ecotine
+          {store ? storeTitle(store) : "Dashboard"}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">{fullDate(range.to)}</p>
       </div>

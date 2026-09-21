@@ -710,12 +710,20 @@ export async function setUserMemberships(
 /** The stores the signed-in user may open: what the switcher lists. */
 export async function getMyStores(): Promise<StoreAccess[]> {
   const rows = await request<
-    { store_id: number; slug: string; name: string; role: string; template: string }[]
+    {
+      store_id: number;
+      slug: string;
+      name: string;
+      subtitle: string | null;
+      role: string;
+      template: string;
+    }[]
   >("/api/me/stores");
   return rows.map((r) => ({
     storeId: r.store_id,
     slug: r.slug,
     name: r.name,
+    subtitle: r.subtitle ?? null,
     role: r.role,
     template: r.template,
   }));
@@ -725,6 +733,8 @@ export type Store = {
   id: number;
   slug: string;
   name: string;
+  /** Shown after the name in the admin ("Nature Bazar — Ecotine"); null = none. */
+  subtitle: string | null;
   template: string;
   currency: string;
   /** "NB" in "NB-1042"; unique across stores. */
@@ -741,6 +751,7 @@ type ApiStore = {
   id: number;
   slug: string;
   name: string;
+  subtitle: string | null;
   template: string;
   currency: string;
   order_prefix: string;
@@ -757,6 +768,7 @@ function mapStore(s: ApiStore): Store {
     id: s.id,
     slug: s.slug,
     name: s.name,
+    subtitle: s.subtitle ?? null,
     template: s.template,
     currency: s.currency,
     orderPrefix: s.order_prefix,
@@ -772,6 +784,8 @@ function mapStore(s: ApiStore): Store {
 export type StoreInput = {
   slug?: string;
   name: string;
+  /** "" clears it. */
+  subtitle: string;
   template: string;
   currency: string;
   orderPrefix: string;
@@ -784,6 +798,7 @@ function storeBody(input: StoreInput) {
   return {
     ...(input.slug !== undefined ? { slug: input.slug } : {}),
     name: input.name,
+    subtitle: input.subtitle,
     template: input.template,
     currency: input.currency,
     order_prefix: input.orderPrefix,

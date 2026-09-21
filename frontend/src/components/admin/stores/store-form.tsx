@@ -57,6 +57,7 @@ const NO_PICTURES: Record<string, string> = {};
 
 type Draft = {
   name: string;
+  subtitle: string;
   slug: string;
   slugTouched: boolean;
   orderPrefix: string;
@@ -96,6 +97,7 @@ export function StoreForm({
   const router = useRouter();
   const [d, setD] = React.useState<Draft>({
     name: store?.name ?? "",
+    subtitle: store?.subtitle ?? "",
     slug: store?.slug ?? "",
     slugTouched: store !== null,
     orderPrefix: store?.orderPrefix ?? "",
@@ -189,6 +191,7 @@ export function StoreForm({
       const saved = await onSave({
         ...(creating ? { slug: d.slug } : {}),
         name: d.name.trim(),
+        subtitle: d.subtitle.trim(),
         template: d.template,
         currency: store?.currency ?? "BDT",
         orderPrefix: d.orderPrefix,
@@ -253,6 +256,20 @@ export function StoreForm({
                   orderPrefix: d.prefixTouched ? d.orderPrefix : suggestPrefix(e.target.value),
                 })
               }
+            />
+          </Row>
+          <Row
+            label="Subtitle"
+            htmlFor="subtitle"
+            hint="Optional. Shown after the name in the admin only, e.g. “Nature Bazar — Ecotine”"
+          >
+            <Input
+              id="subtitle"
+              className="w-90 max-w-full"
+              maxLength={120}
+              placeholder="Ecotine"
+              value={d.subtitle}
+              onChange={(e) => setD({ ...d, subtitle: e.target.value })}
             />
           </Row>
           <Row

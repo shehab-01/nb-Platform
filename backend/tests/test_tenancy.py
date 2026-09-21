@@ -168,7 +168,9 @@ def test_my_stores_lists_only_memberships(app):
     app.state["members"] = {7: {2: "manager"}, 8: {1: "owner"}}
     res = get(app, "/api/me/stores")
     assert res.status_code == 200
-    assert res.json() == [{"store_id": 2, "slug": "b", "name": "B", "role": "manager", "template": "classic"}]
+    assert res.json() == [
+        {"store_id": 2, "slug": "b", "name": "B", "subtitle": None, "role": "manager", "template": "classic"}
+    ]
 
 
 def test_my_stores_is_empty_with_no_memberships(app):

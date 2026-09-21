@@ -798,6 +798,7 @@ class StoreAccessOut(BaseModel):
     store_id: int
     slug: str
     name: str
+    subtitle: str | None = None
     role: str
     template: str
 
@@ -810,6 +811,7 @@ class StoreOut(BaseModel):
     id: int
     slug: str
     name: str
+    subtitle: str | None
     template: str
     currency: str
     order_prefix: str
@@ -831,6 +833,8 @@ _PREFIX_RE = r"^[A-Z][A-Z0-9]{0,7}$"
 class StoreCreate(BaseModel):
     slug: str = Field(pattern=_SLUG_RE)
     name: str = Field(min_length=1, max_length=120)
+    # Optional qualifier shown after the name in the admin; empty means none.
+    subtitle: str | None = Field(default=None, max_length=120)
     # "NB" in "NB-1042". Uppercase letters and digits, unique across stores.
     order_prefix: str = Field(min_length=1, max_length=8)
     template: str = Field(default="classic", max_length=40)
@@ -862,6 +866,12 @@ class StoreCreate(BaseModel):
     def _currency(cls, value: str) -> str:
         return value.upper()
 
+    @field_validator("subtitle")
+    @classmethod
+    def _subtitle(cls, value: str | None) -> str | None:
+        value = (value or "").strip()
+        return value or None
+
     @field_validator("order_prefix")
     @classmethod
     def _prefix(cls, value: str) -> str:
@@ -885,6 +895,8 @@ class StoreUpdate(BaseModel):
     """Everything but the slug, which is the store's stable handle."""
 
     name: str | None = Field(default=None, min_length=1, max_length=120)
+    # Sent as "" to clear.
+    subtitle: str | None = Field(default=None, max_length=120)
     order_prefix: str | None = Field(default=None, min_length=1, max_length=8)
     template: str | None = Field(default=None, max_length=40)
     currency: str | None = Field(default=None, min_length=3, max_length=3)
@@ -895,6 +907,9 @@ class StoreUpdate(BaseModel):
     _domains = field_validator("domains")(StoreCreate._domains.__func__)  # type: ignore[attr-defined]
     _prefix = field_validator("order_prefix")(StoreCreate._prefix.__func__)  # type: ignore[attr-defined]
     _theme = field_validator("theme")(StoreCreate._theme.__func__)  # type: ignore[attr-defined]
+    # Subtitle: a missing key means "leave it", "" means "clear it" (the
+    # validator turns "" into None; the router checks model_fields_set).
+    _subtitle = field_validator("subtitle")(StoreCreate._subtitle.__func__)  # type: ignore[attr-defined]
 
 
 class MembershipIn(BaseModel):

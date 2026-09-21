@@ -147,7 +147,12 @@ async def my_stores(
     waiting page."""
     return [
         StoreAccessOut(
-            store_id=a.store_id, slug=a.slug, name=a.name, role=a.role, template=a.template
+            store_id=a.store_id,
+            slug=a.slug,
+            name=a.name,
+            subtitle=a.subtitle,
+            role=a.role,
+            template=a.template,
         )
         for a in await tenancy.accessible_stores(session, user)
     ]
@@ -163,6 +168,7 @@ def _out(store: Store) -> StoreOut:
         id=store.id,
         slug=store.slug,
         name=store.name,
+        subtitle=store.subtitle,
         template=store.template,
         currency=store.currency,
         order_prefix=store.order_prefix,
@@ -264,6 +270,7 @@ async def create_store(
     store = Store(
         slug=payload.slug,
         name=payload.name,
+        subtitle=payload.subtitle,
         order_prefix=payload.order_prefix,
         template=payload.template,
         currency=payload.currency,
@@ -286,6 +293,8 @@ async def update_store(
     store = await _get_or_404(session, store_id)
     if payload.name is not None:
         store.name = payload.name
+    if "subtitle" in payload.model_fields_set:
+        store.subtitle = payload.subtitle
     if payload.order_prefix is not None and payload.order_prefix != store.order_prefix:
         await _check_prefix(session, payload.order_prefix, store.id)
         store.order_prefix = payload.order_prefix

@@ -1,9 +1,32 @@
 import { describe, expect, it } from "vitest";
 
-import { pickStore, type StoreAccess } from "@/lib/admin-store";
+import { pickStore, storeTitle, type StoreAccess } from "@/lib/admin-store";
 
-const a: StoreAccess = { storeId: 1, slug: "a", name: "A", role: "staff", template: "classic" };
-const b: StoreAccess = { storeId: 2, slug: "b", name: "B", role: "owner", template: "classic" };
+const a: StoreAccess = {
+  storeId: 1,
+  slug: "a",
+  name: "A",
+  subtitle: null,
+  role: "staff",
+  template: "classic",
+};
+const b: StoreAccess = {
+  storeId: 2,
+  slug: "b",
+  name: "B",
+  subtitle: "Ecotine",
+  role: "owner",
+  template: "classic",
+};
+
+describe("storeTitle", () => {
+  it("is the plain name without a subtitle", () => {
+    expect(storeTitle(a)).toBe("A");
+  });
+  it("joins name and subtitle with an em dash", () => {
+    expect(storeTitle(b)).toBe("B — Ecotine");
+  });
+});
 
 describe("pickStore", () => {
   it("returns null with no stores", () => {

@@ -6,6 +6,8 @@ export type StoreAccess = {
   storeId: number;
   slug: string;
   name: string;
+  /** Optional qualifier shown after the name inside the admin only. */
+  subtitle: string | null;
   /** "super_admin" for a platform super admin, else the membership role. */
   role: string;
   /** The storefront template the store renders (see templates/catalog). */
@@ -50,4 +52,10 @@ export function pickStore(
 ): StoreAccess | null {
   if (stores.length === 0) return null;
   return stores.find((s) => s.storeId === remembered) ?? stores[0];
+}
+
+/** "Nature Bazar — Ecotine" when the store has a subtitle, else the name.
+ * For admin chrome only: the storefront's browser tab shows the plain name. */
+export function storeTitle(store: { name: string; subtitle?: string | null }): string {
+  return store.subtitle ? `${store.name} — ${store.subtitle}` : store.name;
 }

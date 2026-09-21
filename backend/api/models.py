@@ -568,6 +568,9 @@ class Store(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     slug: Mapped[str] = mapped_column(String(40), unique=True)
     name: Mapped[str] = mapped_column(String(120))
+    # Shown after the name inside the admin only ("Nature Bazar — Ecotine");
+    # the storefront's browser tab stays the plain name.
+    subtitle: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # "NB" in "NB-1042". Unique across stores so a number names one order.
     order_prefix: Mapped[str] = mapped_column(String(8), unique=True)
     template: Mapped[str] = mapped_column(String(40), default="classic")

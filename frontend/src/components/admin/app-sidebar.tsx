@@ -49,6 +49,7 @@ import {
   SidebarMenuSubItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { storeTitle } from "@/lib/admin-store";
 import { PAGE_STATUSES, countForPage } from "@/lib/orders";
 import { ROLE_LABELS, STORE_ROLE_LABELS, type StoreRole } from "@/lib/team";
 import { useOrderCounts } from "@/lib/use-order-counts";
@@ -127,7 +128,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   </div>
                   <div className="grid flex-1 text-left text-sm leading-tight">
                     <span className="truncate font-semibold">
-                      {store?.name ?? "No store yet"}
+                      {store ? storeTitle(store) : "No store yet"}
                     </span>
                     <span className="truncate text-xs text-muted-foreground">
                       {store ? roleLabel(store.role) : "Create one under Stores"}
@@ -147,7 +148,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <DropdownMenuSeparator />
                 {stores.map((s) => (
                   <DropdownMenuItem key={s.storeId} onClick={() => selectStore(s.storeId)}>
-                    <span className="truncate">{s.name}</span>
+                    <span className="truncate">{storeTitle(s)}</span>
                     <span className="ml-auto text-xs text-muted-foreground">
                       {roleLabel(s.role)}
                     </span>

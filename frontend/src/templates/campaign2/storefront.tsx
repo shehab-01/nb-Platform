@@ -77,11 +77,11 @@ export function Storefront(props: StorefrontProps) {
             </section>
 
             <section className="c2-intro">
-              <span className="c2-kicker">নেচার মিলিয়নিয়ার ক্যাম্পেইন</span>
+              <span className="c2-kicker">নেচার বাজার মিলিয়নিয়ার ক্যাম্পেইন</span>
               <h1>
-                ফাইনাল ড্র
+                <span className="c2-line">ফাইনাল ড্র</span>
                 <br />
-                এই মাসের ৩০ তারিখ
+                <span className="c2-line">এই মাসের ৩০ তারিখ</span>
               </h1>
               <p>
                 স্পেশাল আচার কম্বো অর্ডার করে অংশ নিন ১০ লাখ টাকা ক্যাশ ও ১০০০+ গিফট

@@ -126,11 +126,15 @@
 }
 .c2-intro h1 {
   margin: 0;
-  font-size: 27px;
+  /* Shrinks on narrow phones so "এই মাসের ৩০ তারিখ" stays on one line. */
+  font-size: clamp(22px, 7vw, 27px);
   line-height: 1.35;
   font-weight: 700;
   color: #fff;
-  text-wrap: pretty;
+}
+/* Each heading line is fixed copy: never let one wrap into two. */
+.c2-intro h1 .c2-line {
+  white-space: nowrap;
 }
 .c2-intro p {
   margin: 0;

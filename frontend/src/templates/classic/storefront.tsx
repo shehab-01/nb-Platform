@@ -6,6 +6,7 @@ import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "reac
 import "./landing.css";
 import { OrderSuccess } from "@/components/storefront/order-success";
 import { ProductPicture } from "@/components/storefront/product-picture";
+import { isValidAddress } from "@/lib/address";
 import { ApiError } from "@/lib/http";
 import {
   onLastOrderChange,
@@ -111,7 +112,7 @@ export function Storefront({
   const [fresh, setFresh] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<
-    "cooldown" | "throttled" | "failed" | "phone" | null
+    "cooldown" | "throttled" | "failed" | "phone" | "address" | null
   >(null);
   const [phoneValue, setPhoneValue] = useState("");
   const orderSectionRef = useRef<HTMLElement>(null);
@@ -178,6 +179,13 @@ export function Storefront({
       event.currentTarget.phone?.focus?.();
       return;
     }
+    // Drafts autosave whatever was typed; only a real submit needs an
+    // address a courier can use.
+    if (!isValidAddress(address)) {
+      setSubmitError("address");
+      event.currentTarget.address?.focus?.();
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -222,7 +230,9 @@ export function Storefront({
           : status === 429
             ? "throttled"
             : status === 422
-              ? "phone"
+              ? err instanceof ApiError && /address/i.test(err.message)
+                ? "address"
+                : "phone"
               : "failed",
       );
     } finally {
@@ -428,9 +438,18 @@ export function Storefront({
                   rows={3}
                   minLength={4}
                   maxLength={1000}
-                  placeholder="বাসা নম্বর, গ্রাম/মহল্লা, উপজেলা, জেলা"
+                  onChange={() => {
+                    if (submitError === "address") setSubmitError(null);
+                  }}
+                  aria-invalid={submitError === "address" || undefined}
+                  placeholder="বাসা/রোড নম্বর, গ্রাম/মহল্লা, উপজেলা, জেলা"
                 />
               </label>
+              {submitError === "address" && (
+                <p className="nb-form-error">
+                  সম্পূর্ণ ঠিকানা লিখুন — বাসা/রোড, এলাকা, জেলা (কমপক্ষে ৩ শব্দ, শুধু সংখ্যা নয়)।
+                </p>
+              )}
               {submitError === "phone" && (
                 <p className="nb-form-error">
                   সঠিক মোবাইল নাম্বার দিন — ১১ ডিজিট, 01 দিয়ে শুরু (যেমন

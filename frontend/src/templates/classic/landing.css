@@ -357,7 +357,8 @@
   outline: 2px solid var(--nb-gold);
   outline-offset: 1px;
 }
-.nb-field input[aria-invalid="true"] {
+.nb-field input[aria-invalid="true"],
+.nb-field textarea[aria-invalid="true"] {
   border-color: var(--nb-red);
 }
 

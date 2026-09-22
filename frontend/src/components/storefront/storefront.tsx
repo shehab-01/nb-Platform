@@ -7,6 +7,7 @@ import {
   bengaliNumber,
   OrderSuccess,
 } from "@/components/storefront/order-success";
+import { isValidAddress } from "@/lib/address";
 import { ApiError } from "@/lib/http";
 import { cleanPhoneInput, toBdMobile } from "@/lib/phone";
 import {
@@ -44,7 +45,7 @@ export function Storefront({ product }: { product: StorefrontProduct }) {
   const orderSectionRef = useRef<HTMLElement>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<
-    "cooldown" | "throttled" | "failed" | "phone" | null
+    "cooldown" | "throttled" | "failed" | "phone" | "address" | null
   >(null);
   const [phoneValue, setPhoneValue] = useState("");
   const orderTableRef = useRef<HTMLElement>(null);
@@ -116,6 +117,13 @@ export function Storefront({ product }: { product: StorefrontProduct }) {
       event.currentTarget.phone?.focus?.();
       return;
     }
+    // Drafts autosave whatever was typed; only a real submit needs an
+    // address a courier can use.
+    if (!isValidAddress(address)) {
+      setSubmitError("address");
+      event.currentTarget.address?.focus?.();
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -162,7 +170,9 @@ export function Storefront({ product }: { product: StorefrontProduct }) {
           : status === 429
             ? "throttled"
             : status === 422
-              ? "phone"
+              ? err instanceof ApiError && /address/i.test(err.message)
+                ? "address"
+                : "phone"
               : "failed",
       );
     } finally {
@@ -296,9 +306,18 @@ export function Storefront({ product }: { product: StorefrontProduct }) {
                   rows={3}
                   minLength={4}
                   maxLength={1000}
-                  placeholder="আপনার সম্পূর্ণ ঠিকানা লিখুন"
+                  onChange={() => {
+                    if (submitError === "address") setSubmitError(null);
+                  }}
+                  aria-invalid={submitError === "address" || undefined}
+                  placeholder="বাসা/রোড নম্বর, গ্রাম/মহল্লা, উপজেলা, জেলা"
                 />
               </label>
+              {submitError === "address" && (
+                <p className="form-error">
+                  সম্পূর্ণ ঠিকানা লিখুন — বাসা/রোড, এলাকা, জেলা (কমপক্ষে ৩ শব্দ, শুধু সংখ্যা নয়)।
+                </p>
+              )}
               {submitError === "phone" && (
                 <p className="form-error">
                   সঠিক মোবাইল নাম্বার দিন — ১১ ডিজিট, 01 দিয়ে শুরু (যেমন

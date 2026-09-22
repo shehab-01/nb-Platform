@@ -13,6 +13,7 @@ from pydantic import (
     model_validator,
 )
 
+from api.address import ADDRESS_RULE, valid_address
 from api.config import settings
 from api.models import OrderSource, OrderStatus, UserRole, UserStatus
 from api.phone import bd_mobile
@@ -50,6 +51,16 @@ class OrderCreate(BaseModel):
     @classmethod
     def _phone(cls, value: str) -> str:
         return _valid_bd_mobile(value)
+
+    # Only here, on the storefront's real submit: drafts (OrderDraft) keep a
+    # half-typed address, and staff edits/manual orders may hold a rough one
+    # until the confirmation call.
+    @field_validator("address")
+    @classmethod
+    def _address(cls, value: str) -> str:
+        if not valid_address(value):
+            raise ValueError(ADDRESS_RULE)
+        return value
 
 
 class OrderDraft(BaseModel):

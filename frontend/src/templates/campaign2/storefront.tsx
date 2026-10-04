@@ -97,7 +97,7 @@ export function Storefront(props: StorefrontProps) {
               <h1>
                 <span className="c2-line">ফাইনাল ড্র</span>
                 <br />
-                <span className="c2-line">এই মাসের ৩০ তারিখ</span>
+                <span className="c2-line">অক্টোবর ৩০ তারিখ</span>
               </h1>
               <p>
                 স্পেশাল আচার কম্বো অর্ডার করে অংশ নিন দশ লাখ টাকা ক্যাশ ও এক হাজার+ গিফট

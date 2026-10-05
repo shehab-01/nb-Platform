@@ -20,10 +20,15 @@
   border-color: rgba(255, 255, 255, 0.6);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
 }
-/* More room inside each step: size picker, order details, form. */
+/* More room inside each step (size picker, order details, form) and
+   between them, so each reads as its own step. */
 .nb-cl .nb-block {
-  margin-top: 14px;
+  margin-top: 22px;
   padding: 16px;
+}
+/* The order button under the picture gets the same breathing room below. */
+.nb-cl .nb-cta-top:not(.nb-cta-bottom) {
+  margin-bottom: 22px;
 }
 /* The description has no frame, but its text lines up with the text inside
    the boxes above it: their 16px padding plus their 1px border. */

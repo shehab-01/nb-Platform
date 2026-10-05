@@ -34,9 +34,6 @@ export function Storefront(props: StorefrontProps) {
         // "আপনার অর্ডার ডিটেইলস": product, quantity, subtotal, shipping and
         // total, following whichever size is picked above it.
         orderTable
-        // The header button is always a tap away once scrolled; no second
-        // order button above the footer.
-        hideBottomCta
         headerExtra={
           <button type="button" className="cl-header-cta" onClick={scrollToOrder} tabIndex={scrolled ? 0 : -1}>
             অর্ডার করুন

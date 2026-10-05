@@ -1,8 +1,103 @@
-/* Bazar Classic's header (classic/page.tsx). The logo sits centred until the
-   page scrolls (data-scrolled on .nb-cl), then slides to the left edge while
-   a compact red order button slides in on the right — the same move as
-   Bazar Campaign Gold, in the classic colours. Scoped under .nb-cl so the
+/* Bazar Classic's own finish over the shared classic page (classic/page.tsx):
+   the header, buttons and card edges below, each borrowed from Bazar
+   Campaign Gold but kept in the classic colours. Scoped under .nb-cl so the
    campaign templates, which reuse the classic page, never get it. */
+
+/* --- Ground and cards ---------------------------------------------------- */
+
+/* A touch deeper than the store's ground, whatever it is, so white cards
+   stand clear of it; the firmer edge and soft shadow do the rest. */
+.nb-cl .nb-landing {
+  background: color-mix(in srgb, var(--nb-bg) 94%, #12341f);
+}
+.nb-cl .nb-card {
+  border-color: #dce2d5;
+  box-shadow: 0 2px 10px rgba(18, 52, 31, 0.07);
+}
+
+/* --- Buttons ------------------------------------------------------------- */
+
+/* Pill buttons with a light sweep across them, as on Bazar Campaign Gold:
+   the red order buttons stay red, the confirm button stays gold. */
+@keyframes cl-shine {
+  0% { transform: translateX(-120%) skewX(-18deg); }
+  60%, 100% { transform: translateX(260%) skewX(-18deg); }
+}
+@keyframes cl-cta-pulse {
+  0%, 100% { box-shadow: 0 10px 24px rgba(226, 60, 52, 0.28), 0 0 0 0 rgba(226, 60, 52, 0.4); }
+  50% { box-shadow: 0 10px 24px rgba(226, 60, 52, 0.28), 0 0 0 10px rgba(226, 60, 52, 0); }
+}
+
+.nb-cl .nb-cta-top,
+.nb-cl .nb-confirm {
+  position: relative;
+  overflow: hidden;
+  border-radius: 999px;
+  transition: transform 0.18s ease;
+}
+.nb-cl .nb-cta-top {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--nb-red) 80%, #fff), var(--nb-red));
+  box-shadow: 0 10px 24px rgba(226, 60, 52, 0.28);
+  animation: cl-cta-pulse 2.6s ease-in-out infinite;
+}
+.nb-cl .nb-confirm {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--nb-gold) 80%, #fff), var(--nb-gold));
+  box-shadow: 0 10px 24px rgba(200, 144, 47, 0.28);
+}
+.nb-cl .nb-confirm:disabled {
+  background: #d9cdb4;
+  box-shadow: none;
+}
+.nb-cl .nb-cta-top::after,
+.nb-cl .nb-confirm:not(:disabled)::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 42%;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0));
+  animation: cl-shine 3.4s ease-in-out infinite;
+  pointer-events: none;
+}
+.nb-cl .nb-cta-top:hover,
+.nb-cl .nb-confirm:not(:disabled):hover {
+  transform: translateY(-2px);
+}
+.nb-cl .nb-cta-top:active,
+.nb-cl .nb-confirm:not(:disabled):active {
+  transform: translateY(1px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .nb-cl .nb-cta-top,
+  .nb-cl .nb-cta-top::after,
+  .nb-cl .nb-confirm::after {
+    animation: none;
+  }
+}
+
+/* No promise of a confirmation call under the confirm button. */
+.nb-cl .nb-confirm-call {
+  display: none;
+}
+
+/* --- Footer -------------------------------------------------------------- */
+
+/* Bazar Campaign Gold's deep green and gold, on the classic rounded card. */
+.nb-cl .nb-footer {
+  background: #05200f;
+  border-color: rgba(217, 165, 55, 0.25);
+  color: rgba(247, 241, 227, 0.7);
+}
+.nb-cl .nb-footer a {
+  color: #d9a537;
+}
+
+/* --- Header -------------------------------------------------------------- */
+
+/* The logo sits centred until the page scrolls (data-scrolled on .nb-cl),
+   then slides to the left edge while a compact red order button slides in
+   on the right. */
 
 .nb-cl .nb-header {
   position: sticky;

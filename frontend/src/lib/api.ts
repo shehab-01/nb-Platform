@@ -147,6 +147,8 @@ export type OrderListParams = {
   status?: OrderStatus[];
   /** How the order arrived: website, a recovered incomplete form, or manual. */
   source?: OrderSource[];
+  /** Delivery column values: "not_sent", "pending" or "status:<Pathao text>". */
+  delivery?: string[];
   dateFrom?: string;
   dateTo?: string;
   q?: string;
@@ -219,6 +221,13 @@ export async function getOrderCounts(): Promise<Record<OrderStatus, number>> {
   return data.counts as Record<OrderStatus, number>;
 }
 
+/** The Pathao status texts the store's booked orders carry, within `status`. */
+export async function listDeliveryStatuses(status: OrderStatus[]): Promise<string[]> {
+  const search = new URLSearchParams();
+  for (const s of status) search.append("status", s);
+  return request<string[]>(`/api/orders/delivery-statuses?${search}`);
+}
+
 export async function listOrders(
   params: OrderListParams
 ): Promise<OrderListResponse> {
@@ -227,6 +236,7 @@ export async function listOrders(
   if (params.pageSize) search.set("page_size", String(params.pageSize));
   for (const status of params.status ?? []) search.append("status", status);
   for (const source of params.source ?? []) search.append("source", source);
+  for (const value of params.delivery ?? []) search.append("delivery", value);
   if (params.dateFrom) search.set("date_from", params.dateFrom);
   if (params.dateTo) search.set("date_to", params.dateTo);
   if (params.q) search.set("q", params.q);

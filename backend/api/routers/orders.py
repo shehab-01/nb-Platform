@@ -531,12 +531,37 @@ async def create_order(
     return order
 
 
+# The Delivery filter's two values that are not Pathao status text. Pathao's
+# own statuses ("Pickup_Requested", "Delivered", ...) arrive as "status:<text>"
+# so no status Pathao invents can collide with these.
+DELIVERY_NOT_SENT = "not_sent"
+DELIVERY_PENDING = "pending"
+DELIVERY_STATUS_PREFIX = "status:"
+
+
+def _delivery_filter(value: str):
+    """One Delivery filter value as a condition on Order."""
+    if value == DELIVERY_NOT_SENT:
+        return Order.pathao_consignment_id.is_(None)
+    if value == DELIVERY_PENDING:
+        return and_(
+            Order.pathao_consignment_id.is_not(None), Order.pathao_status.is_(None)
+        )
+    if value.startswith(DELIVERY_STATUS_PREFIX):
+        return and_(
+            Order.pathao_consignment_id.is_not(None),
+            Order.pathao_status == value.removeprefix(DELIVERY_STATUS_PREFIX),
+        )
+    raise HTTPException(status_code=400, detail=f"Unknown delivery filter {value!r}")
+
+
 @router.get("", response_model=OrderListOut)
 async def list_orders(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=1000),
     status: list[OrderStatus] | None = Query(None),
     source: list[OrderSource] | None = Query(None),
+    delivery: list[str] | None = Query(None),
     date_from: date | None = None,
     date_to: date | None = None,
     q: str | None = Query(None, max_length=100),
@@ -551,6 +576,10 @@ async def list_orders(
     # in by staff. The lists let staff ask "how did today's orders come in?"
     if source:
         filters.append(Order.source.in_([s.value for s in source]))
+    # Where the parcel is, as the Delivery column shows it: not booked with
+    # Pathao yet, booked with no status back, or Pathao's own status text.
+    if delivery:
+        filters.append(or_(*(_delivery_filter(value) for value in delivery)))
     if date_from:
         filters.append(Order.created_at >= _day_start(date_from))
     if date_to:
@@ -612,6 +641,28 @@ async def order_counts(
         if status in counts:
             counts[status] = count
     return OrderCountsOut(counts=counts)
+
+
+@router.get("/delivery-statuses", response_model=list[str])
+async def delivery_statuses(
+    status: list[OrderStatus] | None = Query(None),
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
+) -> list[str]:
+    """Every Pathao status text the store's booked orders carry (within the
+    given statuses), for the Delivery filter's options. Pathao decides these
+    words, so the list comes from the data rather than a fixed vocabulary."""
+    filters = [
+        Order.store_id == ctx.store.id,
+        Order.pathao_consignment_id.is_not(None),
+        Order.pathao_status.is_not(None),
+    ]
+    if status:
+        filters.append(Order.status.in_(status))
+    rows = await session.scalars(
+        select(distinct(Order.pathao_status)).where(*filters).order_by(Order.pathao_status)
+    )
+    return list(rows)
 
 
 @router.get("/claims", response_model=ClaimsOut)

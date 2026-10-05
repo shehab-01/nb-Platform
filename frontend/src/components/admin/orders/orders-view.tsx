@@ -30,6 +30,7 @@ import {
   releaseOrderOnLeave,
   sendToPathao,
   type Claim,
+  listDeliveryStatuses,
   type OrderListParams,
 } from "@/lib/api";
 import { printStickers } from "@/lib/stickers";
@@ -77,6 +78,9 @@ function queryToParams(
     } else if (filter.id === "source") {
       const picked = filter.value as OrderSource[];
       if (picked.length) params.source = picked;
+    } else if (filter.id === "delivery") {
+      const picked = filter.value as string[];
+      if (picked.length) params.delivery = picked;
     } else if (filter.id === "customerName") {
       const q = String(filter.value).trim();
       if (q) params.q = q;
@@ -164,6 +168,24 @@ export function OrdersView({
     () => scopeKey.split(",") as OrderStatus[],
     [scopeKey]
   );
+
+  // The Shipping list filters by delivery status instead of order status.
+  // Pathao names its own statuses, so the options are whatever this page's
+  // orders currently carry, re-read whenever the list reloads.
+  const deliveryFilter = bulkActions === "ship";
+  const [deliveryStatuses, setDeliveryStatuses] = React.useState<string[]>([]);
+  React.useEffect(() => {
+    if (!deliveryFilter) return;
+    let cancelled = false;
+    listDeliveryStatuses(scope)
+      .then((statuses) => {
+        if (!cancelled) setDeliveryStatuses(statuses);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [deliveryFilter, scope, orders]);
 
   const lastSearch = React.useRef<string | undefined>(undefined);
   const silentRef = React.useRef(false);
@@ -668,16 +690,31 @@ export function OrdersView({
         searchColumnId="customerName"
         searchPlaceholder="Search by name, phone, or order ID..."
         facetedFilters={[
-          {
-            columnId: "status",
-            title: "Status",
-            options: ORDER_STATUSES.filter((status) =>
-              statusOptions.includes(status.value)
-            ).map((status) => ({
-              label: status.label,
-              value: status.value,
-            })),
-          },
+          // Shipping holds one status, so a Status filter there has nothing
+          // to choose; it asks where each parcel is instead.
+          deliveryFilter
+            ? {
+                columnId: "delivery",
+                title: "Delivery status",
+                options: [
+                  { label: "Not sent", value: "not_sent" },
+                  { label: "Pending", value: "pending" },
+                  ...deliveryStatuses.map((status) => ({
+                    label: status.replace(/_/g, " "),
+                    value: `status:${status}`,
+                  })),
+                ],
+              }
+            : {
+                columnId: "status",
+                title: "Status",
+                options: ORDER_STATUSES.filter((status) =>
+                  statusOptions.includes(status.value)
+                ).map((status) => ({
+                  label: status.label,
+                  value: status.value,
+                })),
+              },
           // Every value the column can hold, not only the ones on this page:
           // the filter is a question ("which of these came in by hand?"), and
           // an empty answer is an answer.

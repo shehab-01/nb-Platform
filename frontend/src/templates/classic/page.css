@@ -5,11 +5,10 @@
 
 /* --- Ground and cards ---------------------------------------------------- */
 
-/* The brand green as the page ground, a shade lighter than the header (the
-   store's own --deep) so the bar still reads as a bar; white cards sit on
-   it with a deeper shadow. */
+/* A touch deeper than the store's ground, whatever it is, so white cards
+   stand clear of it; the firmer edge and soft shadow do the rest. */
 .nb-cl .nb-landing {
-  background: color-mix(in srgb, var(--deep) 85%, #2e8b57);
+  background: color-mix(in srgb, var(--nb-bg) 94%, #12341f);
 }
 .nb-cl .nb-stack {
   padding: 14px;
@@ -17,8 +16,8 @@
 }
 .nb-cl .nb-card {
   padding: 18px 16px;
-  border-color: rgba(255, 255, 255, 0.6);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+  border-color: #dce2d5;
+  box-shadow: 0 2px 10px rgba(18, 52, 31, 0.07);
 }
 /* More room inside each step (size picker, order details, form) and
    between them, so each reads as its own step. */
@@ -142,8 +141,6 @@
   background: color-mix(in srgb, var(--deep) 88%, transparent);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  /* Green on green: a thin gold rule keeps the bar apart from the ground. */
-  border-bottom: 1px solid rgba(217, 165, 55, 0.25);
 }
 .nb-cl .nb-header img {
   position: absolute;

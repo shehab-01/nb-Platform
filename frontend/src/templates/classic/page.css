@@ -17,15 +17,20 @@
 
 /* --- Buttons ------------------------------------------------------------- */
 
-/* Pill buttons with a light sweep across them, as on Bazar Campaign Gold:
-   the red order buttons stay red, the confirm button stays gold. */
+/* Gold pill buttons with a light sweep across them, as on Bazar Campaign
+   Gold: the order button, the header button and the confirm button. */
+.nb-cl {
+  --cl-gold-from: #e7b948;
+  --cl-gold-to: #c99120;
+  --cl-gold-ink: #05200f;
+}
 @keyframes cl-shine {
   0% { transform: translateX(-120%) skewX(-18deg); }
   60%, 100% { transform: translateX(260%) skewX(-18deg); }
 }
 @keyframes cl-cta-pulse {
-  0%, 100% { box-shadow: 0 10px 24px rgba(226, 60, 52, 0.28), 0 0 0 0 rgba(226, 60, 52, 0.4); }
-  50% { box-shadow: 0 10px 24px rgba(226, 60, 52, 0.28), 0 0 0 10px rgba(226, 60, 52, 0); }
+  0%, 100% { box-shadow: 0 10px 24px rgba(217, 165, 55, 0.28), 0 0 0 0 rgba(217, 165, 55, 0.45); }
+  50% { box-shadow: 0 10px 24px rgba(217, 165, 55, 0.28), 0 0 0 10px rgba(217, 165, 55, 0); }
 }
 
 .nb-cl .nb-cta-top,
@@ -33,16 +38,13 @@
   position: relative;
   overflow: hidden;
   border-radius: 999px;
+  background: linear-gradient(135deg, var(--cl-gold-from), var(--cl-gold-to));
+  color: var(--cl-gold-ink);
+  box-shadow: 0 10px 24px rgba(217, 165, 55, 0.28);
   transition: transform 0.18s ease;
 }
 .nb-cl .nb-cta-top {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--nb-red) 80%, #fff), var(--nb-red));
-  box-shadow: 0 10px 24px rgba(226, 60, 52, 0.28);
   animation: cl-cta-pulse 2.6s ease-in-out infinite;
-}
-.nb-cl .nb-confirm {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--nb-gold) 80%, #fff), var(--nb-gold));
-  box-shadow: 0 10px 24px rgba(200, 144, 47, 0.28);
 }
 .nb-cl .nb-confirm:disabled {
   background: #d9cdb4;
@@ -76,6 +78,24 @@
   }
 }
 
+/* --- Order details ------------------------------------------------------- */
+
+/* Bazar Campaign Gold's figures: Barlow Condensed for the column labels and
+   the big total (Latin only, so the Bangla shipping line keeps its face). */
+.nb-cl .nb-order-table thead th {
+  font-family: var(--font-barlow, "Barlow Condensed"), sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #8a7c5c;
+}
+.nb-cl .nb-order-total td {
+  font-family: var(--font-barlow, "Barlow Condensed"), sans-serif;
+  font-size: 26px;
+  color: #0a3b22;
+}
+
 /* No promise of a confirmation call under the confirm button. */
 .nb-cl .nb-confirm-call {
   display: none;
@@ -96,7 +116,7 @@
 /* --- Header -------------------------------------------------------------- */
 
 /* The logo sits centred until the page scrolls (data-scrolled on .nb-cl),
-   then slides to the left edge while a compact red order button slides in
+   then slides to the left edge while a compact gold order button slides in
    on the right. */
 
 .nb-cl .nb-header {
@@ -119,8 +139,8 @@
 }
 
 @keyframes cl-pulse {
-  0%, 100% { box-shadow: 0 6px 16px rgba(226, 60, 52, 0.3), 0 0 0 0 rgba(226, 60, 52, 0.45); }
-  50% { box-shadow: 0 6px 16px rgba(226, 60, 52, 0.3), 0 0 0 8px rgba(226, 60, 52, 0); }
+  0%, 100% { box-shadow: 0 6px 16px rgba(217, 165, 55, 0.3), 0 0 0 0 rgba(217, 165, 55, 0.45); }
+  50% { box-shadow: 0 6px 16px rgba(217, 165, 55, 0.3), 0 0 0 8px rgba(217, 165, 55, 0); }
 }
 
 .cl-header-cta {
@@ -130,13 +150,13 @@
   padding: 9px 16px;
   border: 0;
   border-radius: 999px;
-  background: var(--nb-red);
-  color: #fff;
+  background: linear-gradient(135deg, var(--cl-gold-from), var(--cl-gold-to));
+  color: var(--cl-gold-ink);
   font: inherit;
   font-size: 14px;
   font-weight: 700;
   cursor: pointer;
-  box-shadow: 0 6px 16px rgba(226, 60, 52, 0.3);
+  box-shadow: 0 6px 16px rgba(217, 165, 55, 0.3);
   opacity: 0;
   transform: translate(16px, -50%) scale(0.9);
   pointer-events: none;

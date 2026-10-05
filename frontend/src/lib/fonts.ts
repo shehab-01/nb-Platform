@@ -31,9 +31,10 @@ export const bengali = Noto_Sans_Bengali({
 });
 
 /**
- * Barlow Condensed is the Bazar Campaign Gold template's accent face: the
- * small uppercase campaign label and the big total. Latin only, three
- * weights, and not preloaded — only that template asks for it.
+ * Barlow Condensed is the accent face of Bazar Campaign Gold (the small
+ * uppercase campaign label and the big total) and of Bazar Classic's order
+ * details. Latin only, three weights, and not preloaded — only pages that
+ * use it download it.
  */
 export const barlow = Barlow_Condensed({
   weight: ["500", "600", "700"],

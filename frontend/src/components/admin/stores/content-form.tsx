@@ -59,26 +59,17 @@ export function ContentForm({
               key={field.key}
               className={cn("flex flex-wrap items-center gap-4 py-4", i > 0 && "border-t")}
             >
-              {src ? (
-                // Plain img: uploaded pictures come from /media and sizes vary.
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={src}
-                  alt={field.label}
-                  className="h-[58px] w-[130px] shrink-0 rounded-lg border bg-muted/30 object-contain"
-                />
-              ) : (
-                // An optional picture with no default: nothing shows yet.
-                <div className="flex h-[58px] w-[130px] shrink-0 items-center justify-center rounded-lg border border-dashed bg-muted/30 text-xs text-muted-foreground">
-                  None
-                </div>
-              )}
+              {/* Plain img: uploaded pictures come from /media and sizes vary. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={src}
+                alt={field.label}
+                className="h-[58px] w-[130px] shrink-0 rounded-lg border bg-muted/30 object-contain"
+              />
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium">{field.label}</span>
-                  <Badge variant={custom ? "default" : "outline"}>
-                    {custom ? "Custom" : field.defaultUrl ? "Default" : "Not set"}
-                  </Badge>
+                  <Badge variant={custom ? "default" : "outline"}>{custom ? "Custom" : "Default"}</Badge>
                 </div>
                 <span className="text-xs text-muted-foreground">{field.size}</span>
               </div>

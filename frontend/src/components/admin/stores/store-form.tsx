@@ -388,22 +388,15 @@ export function StoreForm({
                       {slot.size}
                     </p>
                   </div>
-                  {src ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={src}
-                      alt=""
-                      className={cn(
-                        "h-14 w-26 shrink-0 rounded-lg border object-contain p-1",
-                        custom ? "border-solid bg-background" : "border-dashed bg-muted/40",
-                      )}
-                    />
-                  ) : (
-                    // An optional picture with no default: nothing shows yet.
-                    <div className="flex h-14 w-26 shrink-0 items-center justify-center rounded-lg border border-dashed bg-muted/40 text-xs text-muted-foreground">
-                      None
-                    </div>
-                  )}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={src}
+                    alt=""
+                    className={cn(
+                      "h-14 w-26 shrink-0 rounded-lg border object-contain p-1",
+                      custom ? "border-solid bg-background" : "border-dashed bg-muted/40",
+                    )}
+                  />
                   <p className="min-w-0 flex-1 basis-44 text-xs text-pretty text-muted-foreground">
                     {custom ? "This store's own picture." : slot.hint}
                   </p>

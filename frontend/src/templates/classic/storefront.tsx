@@ -256,21 +256,6 @@ export function Storefront({
         {headerExtra}
       </header>
 
-      {/* Optional banner (content.hero). Only Bazar Classic declares it, so
-          the campaign templates built on this page never get one here. */}
-      {store.content.hero ? (
-        <section className="nb-hero">
-          <ProductPicture
-            src={store.content.hero}
-            srcSet={store.contentSrcset.hero}
-            alt={storeName}
-            width={1146}
-            height={672}
-            priority
-          />
-        </section>
-      ) : null}
-
       {beforeProduct}
 
       <div className="nb-stack">
@@ -295,8 +280,7 @@ export function Storefront({
                 alt={variant.title}
                 width={variant.imageWidth ?? 1120}
                 height={variant.imageHeight ?? 1120}
-                // With a banner on top, the banner is the picture to fetch first.
-                priority={!productBelowFold && !store.content.hero}
+                priority={!productBelowFold}
               />
             </div>
           </>

@@ -8,8 +8,7 @@
 export type ContentField = {
   key: string;
   label: string;
-  /** Path under /public: what shows until the store uploads its own. Empty
-   * for an optional picture: the template shows nothing until one is uploaded. */
+  /** Path under /public: what shows until the store uploads its own. */
   defaultUrl: string;
   /** Guidance for the upload, e.g. "1146×672 · JPG". */
   size: string;
@@ -38,16 +37,6 @@ const LOGO: ContentField = {
   defaultUrl: "/logo.png",
   size: "300×96 · PNG",
   hint: "Transparent background, sits on the dark header",
-};
-
-/** Optional banner above the classic product card. No default, so a classic
- * store looks the same until it uploads one. */
-const CLASSIC_HERO: ContentField = {
-  key: "hero",
-  label: "Hero banner",
-  defaultUrl: "",
-  size: "1146×672 · JPG",
-  hint: "Optional banner above the product; hidden until you upload one",
 };
 
 /** The pictures both campaign templates show, in page order. */
@@ -103,7 +92,7 @@ export const TEMPLATE_CATALOG: Record<string, TemplateInfo> = {
       "Abandoned-form capture",
       "Meta Pixel + Conversions API events",
     ],
-    content: [LOGO, CLASSIC_HERO],
+    content: [LOGO],
     singleVariant: false,
   },
   campaign: {

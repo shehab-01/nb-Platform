@@ -9,6 +9,7 @@ export type Membership = {
   storeId: number;
   slug: string;
   name: string;
+  subtitle: string | null;
   role: StoreRole;
 };
 

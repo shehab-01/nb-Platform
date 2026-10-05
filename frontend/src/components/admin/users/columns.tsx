@@ -6,6 +6,7 @@ import { MoreHorizontal } from "lucide-react";
 import { SortableHeader } from "@/components/admin/data-table/data-table-sort-header";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { storeTitle } from "@/lib/admin-store";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -113,7 +114,7 @@ export function getTeamColumns({
           <div className="flex flex-wrap gap-1">
             {m.map((x) => (
               <Badge key={x.storeId} variant="outline" title={STORE_ROLE_LABELS[x.role]}>
-                {x.name}
+                {storeTitle(x)}
                 <span className="ml-1 text-muted-foreground">{STORE_ROLE_LABELS[x.role].toLowerCase()}</span>
               </Badge>
             ))}

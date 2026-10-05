@@ -661,10 +661,16 @@ type ApiUser = {
   memberships?: ApiMembership[];
 };
 
-type ApiMembership = { store_id: number; slug: string; name: string; role: StoreRole };
+type ApiMembership = {
+  store_id: number;
+  slug: string;
+  name: string;
+  subtitle?: string | null;
+  role: StoreRole;
+};
 
 function mapMembership(m: ApiMembership): Membership {
-  return { storeId: m.store_id, slug: m.slug, name: m.name, role: m.role };
+  return { storeId: m.store_id, slug: m.slug, name: m.name, subtitle: m.subtitle ?? null, role: m.role };
 }
 
 function mapAuthUser(user: ApiUser): AuthUser {
@@ -741,6 +747,8 @@ export type Store = {
   orderPrefix: string;
   theme: Record<string, string>;
   isActive: boolean;
+  /** Set while the store is archived (always inactive then); null otherwise. */
+  archivedAt: string | null;
   domains: string[];
   primaryDomain: string | null;
   createdAt: string;
@@ -757,6 +765,7 @@ type ApiStore = {
   order_prefix: string;
   theme: Record<string, string>;
   is_active: boolean;
+  archived_at?: string | null;
   domains: string[];
   primary_domain: string | null;
   created_at: string;
@@ -774,6 +783,7 @@ function mapStore(s: ApiStore): Store {
     orderPrefix: s.order_prefix,
     theme: s.theme ?? {},
     isActive: s.is_active,
+    archivedAt: s.archived_at ?? null,
     domains: s.domains,
     primaryDomain: s.primary_domain,
     createdAt: s.created_at,
@@ -906,6 +916,16 @@ export async function updateStore(id: number, input: StoreInput): Promise<Store>
       body: JSON.stringify(rest),
     })
   );
+}
+
+/** Archive an inactive store (super admin). Nothing is deleted. */
+export async function archiveStore(id: number): Promise<Store> {
+  return mapStore(await request<ApiStore>(`/api/stores/${id}/archive`, { method: "POST" }));
+}
+
+/** Bring an archived store back; it stays inactive until switched on. */
+export async function restoreStore(id: number): Promise<Store> {
+  return mapStore(await request<ApiStore>(`/api/stores/${id}/restore`, { method: "POST" }));
 }
 
 /** Current session's user, or null when not signed in. */

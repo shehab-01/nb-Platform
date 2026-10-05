@@ -53,16 +53,23 @@ async def _memberships(
 ) -> dict[int, list[MembershipOut]]:
     """user id -> memberships, every user's or one user's."""
     query = (
-        select(StoreUser.user_id, StoreUser.store_id, Store.slug, Store.name, StoreUser.role)
+        select(
+            StoreUser.user_id,
+            StoreUser.store_id,
+            Store.slug,
+            Store.name,
+            Store.subtitle,
+            StoreUser.role,
+        )
         .join(Store, Store.id == StoreUser.store_id)
         .order_by(Store.id)
     )
     if user_id is not None:
         query = query.where(StoreUser.user_id == user_id)
     out: dict[int, list[MembershipOut]] = {}
-    for uid, store_id, slug, name, role in await session.execute(query):
+    for uid, store_id, slug, name, subtitle, role in await session.execute(query):
         out.setdefault(uid, []).append(
-            MembershipOut(store_id=store_id, slug=slug, name=name, role=role)
+            MembershipOut(store_id=store_id, slug=slug, name=name, subtitle=subtitle, role=role)
         )
     return out
 

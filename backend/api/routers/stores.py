@@ -7,6 +7,8 @@ Five routers, five gates. `router` (/storefront) and `check_router`
 the platform's business, no store role reaches it. `health_router` (/stores)
 is the one read a store's own staff share with a super admin, so it carries
 its own membership gate instead."""
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -174,6 +176,7 @@ def _out(store: Store) -> StoreOut:
         order_prefix=store.order_prefix,
         theme=store.theme or {},
         is_active=store.is_active,
+        archived_at=store.archived_at,
         domains=domains,
         primary_domain=primary or (domains[0] if domains else None),
         created_at=store.created_at,
@@ -306,11 +309,49 @@ async def update_store(
     if payload.theme is not None:
         store.theme = payload.theme
     if payload.is_active is not None:
+        if payload.is_active and store.archived_at is not None:
+            raise HTTPException(
+                status_code=409, detail="Store is archived; restore it before activating"
+            )
         store.is_active = payload.is_active
     if payload.domains is not None:
         await _set_domains(session, store, payload.domains)
     await session.commit()
     stores.invalidate()
+    return _out(await _reload(session, store_id))
+
+
+@admin_router.post("/{store_id}/archive", response_model=StoreOut)
+async def archive_store(
+    store_id: int, session: AsyncSession = Depends(get_session)
+) -> StoreOut:
+    """Retire a store without deleting anything. Only an inactive store can be
+    archived, so it has already stopped selling and dropped out of every
+    storefront and staff path; archiving also takes it out of the admin's
+    lists. Its domains stay attached so a restore brings it back whole."""
+    store = await _get_or_404(session, store_id)
+    if store.is_active:
+        raise HTTPException(
+            status_code=409, detail="Deactivate the store before archiving it"
+        )
+    if store.archived_at is None:
+        store.archived_at = datetime.now(timezone.utc)
+        await session.commit()
+        stores.invalidate()
+    return _out(await _reload(session, store_id))
+
+
+@admin_router.post("/{store_id}/restore", response_model=StoreOut)
+async def restore_store(
+    store_id: int, session: AsyncSession = Depends(get_session)
+) -> StoreOut:
+    """Undo an archive. The store comes back inactive; turning it on is a
+    separate, deliberate step."""
+    store = await _get_or_404(session, store_id)
+    if store.archived_at is not None:
+        store.archived_at = None
+        await session.commit()
+        stores.invalidate()
     return _out(await _reload(session, store_id))
 
 

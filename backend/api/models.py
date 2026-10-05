@@ -580,6 +580,11 @@ class Store(Base):
     # (see api.routers.store_content). Absent = template default.
     content: Mapped[dict] = mapped_column(JSONB, default=dict)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Set when a super admin archives the store (only while inactive). An
+    # archived store stays inactive until restored; its data is kept.
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

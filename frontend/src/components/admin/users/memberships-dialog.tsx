@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { storeTitle } from "@/lib/admin-store";
 import type { Store } from "@/lib/api";
 import {
   STORE_ROLE_HELP,
@@ -107,7 +108,7 @@ export function MembershipsDialog({
                 />
                 <label htmlFor={`store-${store.id}`} className="flex flex-1 flex-col text-sm">
                   <span className="font-medium">
-                    {store.name}
+                    {storeTitle(store)}
                     {!store.isActive && (
                       <span className="ml-2 text-xs text-muted-foreground">(inactive)</span>
                     )}

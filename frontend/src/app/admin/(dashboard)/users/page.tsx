@@ -179,7 +179,9 @@ export default function UsersPage() {
       />
       <MembershipsDialog
         member={membershipsFor}
-        stores={stores}
+        // Archived stores are not offered. A membership someone already has in
+        // one is kept: the dialog saves every role it was opened with.
+        stores={stores.filter((s) => !s.archivedAt)}
         onOpenChange={(open) => !open && setMembershipsFor(null)}
         onSave={handleMemberships}
       />

@@ -828,6 +828,7 @@ class StoreOut(BaseModel):
     order_prefix: str
     theme: dict
     is_active: bool
+    archived_at: datetime | None = None
     domains: list[str]
     primary_domain: str | None
     created_at: datetime
@@ -932,6 +933,8 @@ class MembershipOut(BaseModel):
     store_id: int
     slug: str
     name: str
+    # So the admin can say "Nature Bazar — Ecotine" where two stores share a name.
+    subtitle: str | None = None
     role: str
 
 

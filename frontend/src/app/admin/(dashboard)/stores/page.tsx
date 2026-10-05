@@ -16,7 +16,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getStoreHealth, listStores, type Store, type StoreHealth } from "@/lib/api";
+import {
+  archiveStore,
+  getStoreHealth,
+  listStores,
+  restoreStore,
+  type Store,
+  type StoreHealth,
+} from "@/lib/api";
 import { templateInfo } from "@/templates/catalog";
 
 /**
@@ -71,13 +78,47 @@ export default function StoresPage() {
     if (isSuperAdmin) void refresh();
   }, [isSuperAdmin, refresh]);
 
+  // Archived stores leave the main table for their own list below it.
+  const live = React.useMemo(() => stores.filter((s) => !s.archivedAt), [stores]);
+  const archived = React.useMemo(() => stores.filter((s) => s.archivedAt), [stores]);
+  const [busyId, setBusyId] = React.useState<number | null>(null);
+
+  const archive = async (store: Store) => {
+    const ok = window.confirm(
+      `Archive ${store.name}? It leaves the store list and staff can no longer be assigned to it. ` +
+        "Nothing is deleted: orders, products and customers are kept, and you can restore it from the Archived list."
+    );
+    if (!ok) return;
+    setBusyId(store.id);
+    try {
+      await archiveStore(store.id);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to archive store");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const restore = async (store: Store) => {
+    setBusyId(store.id);
+    try {
+      await restoreStore(store.id);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to restore store");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   // One probe per store, in parallel, once the list is here. Stores with no
-  // domain have nothing to check.
+  // domain have nothing to check, and archived ones serve nothing.
   React.useEffect(() => {
-    for (const store of stores) {
+    for (const store of live) {
       if (store.primaryDomain) void probe(store.id);
     }
-  }, [stores, probe]);
+  }, [live, probe]);
 
   if (!isSuperAdmin) {
     return <p className="text-sm text-muted-foreground">Super admin only.</p>;
@@ -124,7 +165,7 @@ export default function StoresPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {stores.length === 0 && (
+                {live.length === 0 && (
                   <TableRow>
                     <TableCell
                       colSpan={7}
@@ -134,7 +175,7 @@ export default function StoresPage() {
                     </TableCell>
                   </TableRow>
                 )}
-                {stores.map((store) => (
+                {live.map((store) => (
                   <TableRow key={store.id}>
                     <TableCell>
                       <div className="flex flex-col">
@@ -210,13 +251,28 @@ export default function StoresPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => router.push(`/admin/stores/${store.id}`)}
-                      >
-                        Edit
-                      </Button>
+                      <div className="flex justify-end gap-1">
+                        {/* Only an inactive store can be archived: switching it
+                            off first is the deliberate step that stops sales. */}
+                        {!store.isActive && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-muted-foreground"
+                            disabled={busyId === store.id}
+                            onClick={() => void archive(store)}
+                          >
+                            Archive
+                          </Button>
+                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => router.push(`/admin/stores/${store.id}`)}
+                        >
+                          Edit
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -224,6 +280,40 @@ export default function StoresPage() {
             </Table>
           </div>
         </div>
+      )}
+
+      {!loading && archived.length > 0 && (
+        <section className="rounded-xl border bg-card shadow-xs">
+          <div className="border-b px-4 py-3">
+            <h2 className="text-sm font-semibold">Archived</h2>
+            <p className="text-xs text-muted-foreground">
+              Kept with all their orders and products. Restoring brings a store
+              back inactive; switch it on from Edit when it should sell again.
+            </p>
+          </div>
+          <ul className="divide-y">
+            {archived.map((store) => (
+              <li key={store.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="font-medium">{store.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {store.slug}
+                    {store.archivedAt &&
+                      ` · archived ${new Date(store.archivedAt).toLocaleDateString()}`}
+                  </span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busyId === store.id}
+                  onClick={() => void restore(store)}
+                >
+                  Restore
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
     </div>
   );

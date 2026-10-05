@@ -35,7 +35,10 @@ describe("template registry", () => {
     expect(c.logo).toBe("/logo.png");
     expect(c.prizes).toBe("/prizes.jpg");
     expect("nope" in c).toBe(false);
-    expect(Object.keys(resolveContent("classic", {}))).toEqual(["logo"]);
+    expect(Object.keys(resolveContent("classic", {}))).toEqual(["logo", "hero"]);
+    expect(resolveContent("classic", {}).hero).toBe("");
+    expect(resolveContent("classic", { hero: "/media/stores/1/h.jpg" }).hero).toBe("/media/stores/1/h.jpg");
+    expect("hero" in resolveContent("campaign", { hero: "/media/stores/1/h.jpg" })).toBe(false);
     expect(resolveContent("unknown", {}).logo).toBe("/logo.png");
   });
   it("loads a module with the two components", async () => {

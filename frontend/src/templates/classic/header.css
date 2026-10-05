@@ -1,0 +1,64 @@
+/* Bazar Classic's header (classic/page.tsx). The logo sits centred until the
+   page scrolls (data-scrolled on .nb-cl), then slides to the left edge while
+   a compact red order button slides in on the right — the same move as
+   Bazar Campaign Gold, in the classic colours. Scoped under .nb-cl so the
+   campaign templates, which reuse the classic page, never get it. */
+
+.nb-cl .nb-header {
+  position: sticky;
+  /* The store's own header colour, a little see-through over the page. */
+  background: color-mix(in srgb, var(--deep) 88%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.nb-cl .nb-header img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  transition: left 0.45s cubic-bezier(0.2, 0.7, 0.2, 1), transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.nb-cl[data-scrolled] .nb-header img {
+  left: 16px;
+  transform: translate(0, -50%);
+}
+
+@keyframes cl-pulse {
+  0%, 100% { box-shadow: 0 6px 16px rgba(226, 60, 52, 0.3), 0 0 0 0 rgba(226, 60, 52, 0.45); }
+  50% { box-shadow: 0 6px 16px rgba(226, 60, 52, 0.3), 0 0 0 8px rgba(226, 60, 52, 0); }
+}
+
+.cl-header-cta {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  padding: 9px 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--nb-red);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(226, 60, 52, 0.3);
+  opacity: 0;
+  transform: translate(16px, -50%) scale(0.9);
+  pointer-events: none;
+  transition: opacity 0.35s ease, transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.nb-cl[data-scrolled] .cl-header-cta {
+  opacity: 1;
+  transform: translate(0, -50%) scale(1);
+  pointer-events: auto;
+  animation: cl-pulse 2.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nb-cl .nb-header img,
+  .cl-header-cta {
+    transition: none;
+  }
+  .nb-cl[data-scrolled] .cl-header-cta {
+    animation: none;
+  }
+}

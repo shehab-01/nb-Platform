@@ -51,6 +51,16 @@
   object-fit: contain;
 }
 
+/* Optional store banner under the header, edge to edge like the campaign's. */
+.nb-hero {
+  margin: 0;
+}
+.nb-hero img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 /* --- Cards -------------------------------------------------------------- */
 
 .nb-stack {

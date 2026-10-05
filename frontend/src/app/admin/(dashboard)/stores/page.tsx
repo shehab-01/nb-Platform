@@ -24,6 +24,7 @@ import {
   type Store,
   type StoreHealth,
 } from "@/lib/api";
+import { storeTitle } from "@/lib/admin-store";
 import { templateInfo } from "@/templates/catalog";
 
 /**
@@ -85,7 +86,7 @@ export default function StoresPage() {
 
   const archive = async (store: Store) => {
     const ok = window.confirm(
-      `Archive ${store.name}? It leaves the store list and staff can no longer be assigned to it. ` +
+      `Archive ${storeTitle(store)}? It leaves the store list and staff can no longer be assigned to it. ` +
         "Nothing is deleted: orders, products and customers are kept, and you can restore it from the Archived list."
     );
     if (!ok) return;
@@ -179,7 +180,7 @@ export default function StoresPage() {
                   <TableRow key={store.id}>
                     <TableCell>
                       <div className="flex flex-col">
-                        <span className="font-medium">{store.name}</span>
+                        <span className="font-medium">{storeTitle(store)}</span>
                         <span className="text-xs text-muted-foreground">
                           {store.slug}
                         </span>
@@ -253,18 +254,26 @@ export default function StoresPage() {
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
                         {/* Only an inactive store can be archived: switching it
-                            off first is the deliberate step that stops sales. */}
-                        {!store.isActive && (
+                            off first is the deliberate step that stops sales.
+                            Shown on every row so the option is findable; the
+                            wrapper carries the hint, a disabled button can't. */}
+                        <span
+                          title={
+                            store.isActive
+                              ? "Switch this store off (Edit → Active) before archiving it"
+                              : "Archive this store"
+                          }
+                        >
                           <Button
                             variant="ghost"
                             size="sm"
                             className="text-muted-foreground"
-                            disabled={busyId === store.id}
+                            disabled={store.isActive || busyId === store.id}
                             onClick={() => void archive(store)}
                           >
                             Archive
                           </Button>
-                        )}
+                        </span>
                         <Button
                           variant="outline"
                           size="sm"
@@ -295,7 +304,7 @@ export default function StoresPage() {
             {archived.map((store) => (
               <li key={store.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                 <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="font-medium">{store.name}</span>
+                  <span className="font-medium">{storeTitle(store)}</span>
                   <span className="text-xs text-muted-foreground">
                     {store.slug}
                     {store.archivedAt &&

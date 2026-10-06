@@ -64,9 +64,36 @@ export function incentiveFor(delivered: number): number {
   return INCENTIVE_TIERS.find((t) => delivered >= t.delivered)?.bdt ?? 0;
 }
 
-/** Returned out of everything confirmed. */
+/** Returned out of everything confirmed, as a whole percentage rounded UP —
+ *  18.1% is 19% — and that whole number is what the incentive tiers judge.
+ *  returned × 100 ÷ confirmed divides two whole numbers, so a rate that is
+ *  exactly whole (9 of 50 → 18) comes out exact and is never pushed up a
+ *  point by float error. null with nothing confirmed. */
+export function returnPct(f: Figures): number | null {
+  return f.confirmed ? Math.ceil((f.returned * 100) / f.confirmed) : null;
+}
+
 export function returnRate(f: Figures): string {
-  return f.confirmed ? `${Math.round((f.returned / f.confirmed) * 100)}%` : "—";
+  const pct = returnPct(f);
+  return pct === null ? "—" : `${pct}%`;
+}
+
+/** How much of the month's earned incentive is paid, by the month's return
+ *  rate (rounded up, as above), strictest first. */
+export const RETURN_PENALTY: { label: string; from: number; share: number }[] = [
+  { label: "25% or more", from: 25, share: 0 },
+  { label: "20% to 24%", from: 20, share: 0.25 },
+  { label: "19%", from: 19, share: 0.5 },
+  { label: "Up to 18%", from: 0, share: 1 },
+];
+
+export function returnTier(f: Figures) {
+  const pct = returnPct(f) ?? 0;
+  return RETURN_PENALTY.find((t) => pct >= t.from)!;
+}
+
+export function payableShare(f: Figures): number {
+  return returnTier(f).share;
 }
 
 export function bdt(n: number): string {

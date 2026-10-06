@@ -182,6 +182,15 @@ async def admin_store(
     return StoreContext(store=store, role=role, user=user)
 
 
+async def super_admin_store(ctx: StoreContext = Depends(admin_store)) -> StoreContext:
+    """The StoreContext, for super admins only: pages about the staff
+    themselves (their figures, their incentive) that no store role sees,
+    not even the owner."""
+    if not ctx.is_super_admin:
+        raise HTTPException(status_code=403, detail="Super admin only")
+    return ctx
+
+
 def require(permission: str):
     """Dependency factory: the StoreContext, or 403 when the role lacks the
     permission. `dependencies=[Depends(require("catalogue.write"))]`."""

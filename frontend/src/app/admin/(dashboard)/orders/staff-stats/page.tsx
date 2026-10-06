@@ -1,7 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, ListChecks } from "lucide-react";
+import { ChevronDown, ListChecks } from "lucide-react";
+import { useAuth } from "@/components/admin/auth-context";
+import { MonthSwitcher } from "@/components/admin/month-switcher";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -35,34 +37,21 @@ import {
   getStaffDayOrders,
   getStaffStats,
   type StaffDayOrder,
-  type StaffDayStats,
   type StaffMember,
   type StaffStats,
 } from "@/lib/api";
 import { ORDER_STATUS_LABELS, type OrderStatus } from "@/lib/orders";
+import {
+  dhakaToday,
+  monthLabel,
+  staffName,
+  sum,
+  ZERO,
+  type Figures,
+} from "@/lib/staff-stats";
 import { cn } from "@/lib/utils";
 
-// --- Months, the shop's way --------------------------------------------------
-// YYYY-MM and YYYY-MM-DD strings that mean Dhaka calendar days; arithmetic is
-// done in UTC so a viewer's own timezone never moves a day boundary.
-
-function dhakaToday(): string {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
-}
-
-function shiftMonth(month: string, n: number): string {
-  const d = new Date(`${month}-01T00:00:00Z`);
-  d.setUTCMonth(d.getUTCMonth() + n);
-  return d.toISOString().slice(0, 7);
-}
-
-function monthLabel(month: string): string {
-  return new Date(`${month}-01T00:00:00Z`).toLocaleDateString("en-GB", {
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-}
+// --- Days --------------------------------------------------------------------
 
 function dayLabel(iso: string): string {
   return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", {
@@ -93,35 +82,11 @@ const WEEKDAYS = ["Sat", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri"];
 
 // --- Figures -----------------------------------------------------------------
 
-type Figures = Omit<StaffDayStats, "user_id" | "day">;
-
-const ZERO: Figures = {
-  handled: 0,
-  no_response: 0,
-  cancelled: 0,
-  confirmed: 0,
-  from_incomplete: 0,
-  delivered: 0,
-  returned: 0,
-};
-
-function sum(rows: Figures[]): Figures {
-  const out = { ...ZERO };
-  for (const r of rows) {
-    for (const k of Object.keys(out) as (keyof Figures)[]) out[k] += r[k];
-  }
-  return out;
-}
-
-/** Delivered out of the parcels that have finished their trip; parcels
- *  still on the road don't count against anyone yet. */
+/** Delivered out of everything confirmed. It starts low for recent days and
+ *  climbs as their parcels arrive — never a flattering 100% from the first
+ *  few deliveries. */
 function deliveryRate(f: Figures): string {
-  const settled = f.delivered + f.returned;
-  return settled ? `${Math.round((f.delivered / settled) * 100)}%` : "—";
-}
-
-function staffName(s: StaffMember | undefined): string {
-  return s ? s.nickname || s.name : "Unknown";
+  return f.confirmed ? `${Math.round((f.delivered / f.confirmed) * 100)}%` : "—";
 }
 
 const ALL = "all";
@@ -135,6 +100,7 @@ const CELL_METRICS: { key: Metric; label: string; short: string; className: stri
   { key: "confirmed", label: "Confirmed", short: "conf", className: "text-foreground" },
   { key: "from_incomplete", label: "From Incomplete", short: "inc", className: "text-amber-700 dark:text-amber-400" },
   { key: "returned", label: "Returned", short: "ret", className: "text-red-700 dark:text-red-400" },
+  { key: "in_transit", label: "In transit", short: "trn", className: "text-sky-700 dark:text-sky-400" },
   { key: "no_response", label: "No response", short: "n/r", className: "text-muted-foreground" },
   { key: "cancelled", label: "Cancelled", short: "can", className: "text-muted-foreground" },
   { key: "handled", label: "Handled", short: "hdl", className: "text-muted-foreground" },
@@ -147,9 +113,18 @@ const CELL_METRICS: { key: Metric; label: string; short: string; className: stri
  *
  * Delivered is credited to the day the order was confirmed, not the day the
  * parcel arrived, so a day's delivered figure keeps growing for a few days
- * as Pathao reports in. Manual orders are not counted at all.
+ * as Pathao reports in. Manual orders are not counted at all. Super admins
+ * only — the API refuses everyone else too.
  */
 export default function StaffStatsPage() {
+  const { isSuperAdmin } = useAuth();
+  if (!isSuperAdmin) {
+    return <p className="text-sm text-muted-foreground">Super admin only.</p>;
+  }
+  return <StaffStatsView />;
+}
+
+function StaffStatsView() {
   const today = dhakaToday();
   const thisMonth = today.slice(0, 7);
   const [month, setMonth] = React.useState(thisMonth);
@@ -231,7 +206,7 @@ export default function StaffStatsPage() {
       )}
 
       {/* --- The month's totals --------------------------------------- */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-9">
         <Tile label="Handled" value={data && total.handled} hint="Status changes" />
         <Tile label="Confirmed" value={data && total.confirmed} />
         <Tile
@@ -244,9 +219,14 @@ export default function StaffStatsPage() {
         <Tile label="Delivered" value={data && total.delivered} tone="green" />
         <Tile label="Returned" value={data && total.returned} />
         <Tile
+          label="In transit"
+          value={data && total.in_transit}
+          hint="With Pathao now"
+        />
+        <Tile
           label="Delivery rate"
           value={data && deliveryRate(total)}
-          hint="Of parcels settled"
+          hint="Of confirmed"
         />
       </div>
 
@@ -336,28 +316,7 @@ function Controls({
   return (
     <div className="flex flex-wrap items-center gap-2">
       <MetricPicker shown={shown} onShown={onShown} />
-      <div className="flex items-center rounded-lg border">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Previous month"
-          onClick={() => onMonth(shiftMonth(month, -1))}
-        >
-          <ChevronLeft className="size-4" />
-        </Button>
-        <span className="min-w-32 text-center text-sm font-medium">
-          {monthLabel(month)}
-        </span>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Next month"
-          disabled={month >= thisMonth}
-          onClick={() => onMonth(shiftMonth(month, 1))}
-        >
-          <ChevronRight className="size-4" />
-        </Button>
-      </div>
+      <MonthSwitcher month={month} thisMonth={thisMonth} onMonth={onMonth} />
       <Select value={who} onValueChange={onWho}>
         <SelectTrigger className="min-w-44">
           <SelectValue />
@@ -466,6 +425,7 @@ const COLUMNS: { key: keyof Figures; label: string }[] = [
   { key: "cancelled", label: "Cancelled" },
   { key: "delivered", label: "Delivered" },
   { key: "returned", label: "Returned" },
+  { key: "in_transit", label: "In transit" },
 ];
 
 /** One row per person over the month, most confirmed first. */

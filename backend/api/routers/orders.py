@@ -1019,6 +1019,16 @@ _NOT_MANUAL = Order.source != OrderSource.manual.value
 _RETURNED = and_(
     func.lower(Order.pathao_status).in_(("return", "paid_return")), not_(_DELIVERED)
 )
+# In transit: handed to Pathao and not finished either way yet. Pathao's own
+# word decides finished, the same list its status sync stops polling at.
+_IN_TRANSIT = and_(
+    Order.pathao_consignment_id.is_not(None),
+    not_(_DELIVERED),
+    or_(
+        Order.pathao_status.is_(None),
+        func.lower(Order.pathao_status).not_in(pathao_sync.SETTLED),
+    ),
+)
 
 
 def _dhaka_date(column):
@@ -1065,7 +1075,7 @@ def _final_confirmations(store_id: int, start: datetime, end: datetime):
 async def staff_stats(
     month: str | None = Query(None, pattern=r"^\d{4}-\d{2}$"),
     session: AsyncSession = Depends(get_session),
-    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
+    ctx: tenancy.StoreContext = Depends(tenancy.super_admin_store),
 ) -> StaffStatsOut:
     """Every person's figures for each Dhaka day of a month ("2026-10";
     this month by default), and the people to choose between.
@@ -1142,15 +1152,21 @@ async def staff_stats(
             count.filter(Order.source == OrderSource.incomplete.value),
             count.filter(_DELIVERED),
             count.filter(_RETURNED),
+            count.filter(_IN_TRANSIT),
         )
         .join(Order, Order.id == ce.order_id)
         .where(final, Order.store_id == store_id, _NOT_MANUAL)
         .group_by(ce.actor_id, confirmed_on)
     )
-    for user_id, day, confirmed, from_incomplete, delivered, returned in credited:
+    for user_id, day, *figures in credited:
         row = entry(user_id, day)
-        row.confirmed, row.from_incomplete = confirmed, from_incomplete
-        row.delivered, row.returned = delivered, returned
+        (
+            row.confirmed,
+            row.from_incomplete,
+            row.delivered,
+            row.returned,
+            row.in_transit,
+        ) = figures
 
     # Everyone who belongs to the store, plus anyone who worked it without
     # a membership (a super admin), so the picker never hides a row.
@@ -1177,7 +1193,7 @@ async def staff_stats_day(
     user_id: int,
     day: date,
     session: AsyncSession = Depends(get_session),
-    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
+    ctx: tenancy.StoreContext = Depends(tenancy.super_admin_store),
 ) -> list[StaffDayOrder]:
     """The orders credited to one person on one Dhaka day — the ones behind
     their confirmed figure on the staff stats calendar — as they stand now."""

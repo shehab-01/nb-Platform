@@ -444,6 +444,8 @@ class StaffDayStats(BaseModel):
     from_incomplete: int = 0
     delivered: int = 0
     returned: int = 0
+    # Sent to Pathao, not yet delivered or returned.
+    in_transit: int = 0
 
 
 class StaffMember(BaseModel):

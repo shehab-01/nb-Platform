@@ -61,7 +61,8 @@ type NavItem = {
   icon: typeof LayoutDashboard;
   /** Needed in the current store to see this item. */
   permission?: Permission;
-  children?: { title: string; url: string }[];
+  /** superAdmin: shown to super admins only, whatever the store role. */
+  children?: { title: string; url: string; superAdmin?: boolean }[];
 };
 
 /** Everything about the store being worked in. */
@@ -83,7 +84,8 @@ const storeNav: NavItem[] = [
       { title: "Shipping", url: "/admin/orders/ship" },
       { title: "Cancelled", url: "/admin/orders/cancelled" },
       { title: "History", url: "/admin/orders/history" },
-      { title: "Staff Stats", url: "/admin/orders/staff-stats" },
+      { title: "Staff Stats", url: "/admin/orders/staff-stats", superAdmin: true },
+      { title: "Incentive", url: "/admin/orders/incentive", superAdmin: true },
     ],
   },
   { title: "Products", url: "/admin/products", icon: Package, permission: "catalogue.read" },
@@ -190,7 +192,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                         </CollapsibleTrigger>
                         <CollapsibleContent>
                           <SidebarMenuSub>
-                            {item.children.map((child) => {
+                            {item.children
+                              .filter((child) => !child.superAdmin || isSuperAdmin)
+                              .map((child) => {
                               // null until the first fetch lands, so the
                               // counters don't flash a wrong 0 on every load —
                               // and null for a page that holds no orders at

@@ -637,6 +637,8 @@ export type StaffDayStats = {
   from_incomplete: number;
   delivered: number;
   returned: number;
+  /** Sent to Pathao, not yet delivered or returned. */
+  in_transit: number;
 };
 
 export type StaffMember = { user_id: number; name: string; nickname: string | null };

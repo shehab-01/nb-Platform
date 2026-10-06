@@ -661,9 +661,22 @@ export type StaffDayOrder = {
   source: string;
   status: string;
   pathao_status: string | null;
+  /** Pathao's tracking number, once booked. */
+  consignment_id: string | null;
   delivered: boolean;
   confirmed_at: string;
 };
+
+/** One person's parcels still with Pathao, from orders they confirmed in a
+ *  month ("2026-10"). Returns and paid returns are finished, so never listed. */
+export async function getStaffInTransit(
+  userId: number,
+  month: string
+): Promise<StaffDayOrder[]> {
+  return request<StaffDayOrder[]>(
+    `/api/orders/staff-stats/in-transit?user_id=${userId}&month=${month}`
+  );
+}
 
 /** The orders credited to one person on one day, as they stand now. */
 export async function getStaffDayOrders(

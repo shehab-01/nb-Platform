@@ -470,6 +470,8 @@ class StaffDayOrder(BaseModel):
     source: str
     status: str
     pathao_status: str | None = None
+    # Pathao's tracking number, once the parcel is booked.
+    consignment_id: str | None = None
     delivered: bool
     confirmed_at: datetime
 

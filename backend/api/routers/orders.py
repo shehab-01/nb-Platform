@@ -1071,6 +1071,72 @@ def _final_confirmations(store_id: int, start: datetime, end: datetime):
     return ce, condition
 
 
+def _staff_month(month: str | None) -> tuple[date, datetime, datetime]:
+    """A "2026-10" month (this one by default) as its first day and the
+    instants it starts and ends in Dhaka, checked for sense."""
+    today = datetime.now(DHAKA).date()
+    if month:
+        year, mon = (int(part) for part in month.split("-"))
+        if not 1 <= mon <= 12:
+            raise HTTPException(status_code=400, detail="No such month")
+        first = date(year, mon, 1)
+    else:
+        first = today.replace(day=1)
+    if first > today:
+        raise HTTPException(status_code=400, detail="That month has not started yet")
+    start, end = _dhaka_month(first)
+    return first, start, end
+
+
+async def _credited_orders(
+    session: AsyncSession,
+    ctx: tenancy.StoreContext,
+    user_id: int,
+    start: datetime,
+    end: datetime,
+    *conditions,
+) -> list[StaffDayOrder]:
+    """The orders whose final confirmation was this person's within
+    [start, end), as they stand now, newest confirmation first."""
+    ce, final = _final_confirmations(ctx.store.id, start, end)
+    rows = await session.execute(
+        select(
+            Order.id,
+            Order.customer_name,
+            Order.source,
+            Order.status,
+            Order.pathao_status,
+            Order.pathao_consignment_id,
+            _DELIVERED.label("delivered"),
+            ce.created_at,
+        )
+        .select_from(ce)
+        .join(Order, Order.id == ce.order_id)
+        .where(
+            final,
+            ce.actor_id == user_id,
+            Order.store_id == ctx.store.id,
+            _NOT_MANUAL,
+            *conditions,
+        )
+        .order_by(ce.created_at.desc(), ce.id.desc())
+    )
+    return [
+        StaffDayOrder(
+            order_id=row.id,
+            order_no=f"{ctx.store.order_prefix}-{row.id}",
+            customer_name=row.customer_name,
+            source=row.source,
+            status=row.status,
+            pathao_status=row.pathao_status,
+            consignment_id=row.pathao_consignment_id,
+            delivered=bool(row.delivered),
+            confirmed_at=row.created_at,
+        )
+        for row in rows
+    ]
+
+
 @router.get("/staff-stats", response_model=StaffStatsOut)
 async def staff_stats(
     month: str | None = Query(None, pattern=r"^\d{4}-\d{2}$"),
@@ -1087,17 +1153,7 @@ async def staff_stats(
     audit trail and each order's Pathao status as they are now, so a day's
     deliveries fill in by themselves as the courier sync reports them.
     """
-    today = datetime.now(DHAKA).date()
-    if month:
-        year, mon = (int(part) for part in month.split("-"))
-        if not 1 <= mon <= 12:
-            raise HTTPException(status_code=400, detail="No such month")
-        first = date(year, mon, 1)
-    else:
-        first = today.replace(day=1)
-    if first > today:
-        raise HTTPException(status_code=400, detail="That month has not started yet")
-    start, end = _dhaka_month(first)
+    first, start, end = _staff_month(month)
     store_id = ctx.store.id
 
     days: dict[tuple[int, date], StaffDayStats] = {}
@@ -1198,35 +1254,21 @@ async def staff_stats_day(
     """The orders credited to one person on one Dhaka day — the ones behind
     their confirmed figure on the staff stats calendar — as they stand now."""
     start, end = _dhaka_day(day)
-    ce, final = _final_confirmations(ctx.store.id, start, end)
-    rows = await session.execute(
-        select(
-            Order.id,
-            Order.customer_name,
-            Order.source,
-            Order.status,
-            Order.pathao_status,
-            _DELIVERED.label("delivered"),
-            ce.created_at,
-        )
-        .select_from(ce)
-        .join(Order, Order.id == ce.order_id)
-        .where(final, ce.actor_id == user_id, Order.store_id == ctx.store.id, _NOT_MANUAL)
-        .order_by(ce.created_at.desc(), ce.id.desc())
-    )
-    return [
-        StaffDayOrder(
-            order_id=order_id,
-            order_no=f"{ctx.store.order_prefix}-{order_id}",
-            customer_name=customer_name,
-            source=source,
-            status=status,
-            pathao_status=pathao_status,
-            delivered=bool(delivered),
-            confirmed_at=confirmed_at,
-        )
-        for order_id, customer_name, source, status, pathao_status, delivered, confirmed_at in rows
-    ]
+    return await _credited_orders(session, ctx, user_id, start, end)
+
+
+@router.get("/staff-stats/in-transit", response_model=list[StaffDayOrder])
+async def staff_stats_in_transit(
+    user_id: int,
+    month: str | None = Query(None, pattern=r"^\d{4}-\d{2}$"),
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.super_admin_store),
+) -> list[StaffDayOrder]:
+    """The parcels behind one person's in-transit figure for a month: orders
+    they confirmed that are with Pathao and not yet delivered or returned.
+    A return or a paid return has finished its trip, so it never shows here."""
+    _, start, end = _staff_month(month)
+    return await _credited_orders(session, ctx, user_id, start, end, _IN_TRANSIT)
 
 
 # Which lists count as "this customer already has an order with us". Incomplete

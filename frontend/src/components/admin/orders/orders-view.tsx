@@ -169,10 +169,11 @@ export function OrdersView({
     [scopeKey]
   );
 
-  // The Shipping list filters by delivery status instead of order status.
-  // Pathao names its own statuses, so the options are whatever this page's
-  // orders currently carry, re-read whenever the list reloads.
-  const deliveryFilter = bulkActions === "ship";
+  // Shipping and History filter by delivery status instead of order status:
+  // each holds a single order status, so where the parcel is is the useful
+  // question. Pathao names its own statuses, so the options are whatever
+  // this page's orders currently carry, re-read whenever the list reloads.
+  const deliveryFilter = bulkActions === "ship" || bulkActions === "history";
   const [deliveryStatuses, setDeliveryStatuses] = React.useState<string[]>([]);
   React.useEffect(() => {
     if (!deliveryFilter) return;
@@ -690,8 +691,8 @@ export function OrdersView({
         searchColumnId="customerName"
         searchPlaceholder="Search by name, phone, or order ID..."
         facetedFilters={[
-          // Shipping holds one status, so a Status filter there has nothing
-          // to choose; it asks where each parcel is instead.
+          // Shipping and History hold one status each, so a Status filter
+          // there has nothing to choose; they ask where each parcel is instead.
           deliveryFilter
             ? {
                 columnId: "delivery",

@@ -18,7 +18,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getStaffStats, type StaffDayStats, type StaffStats } from "@/lib/api";
+import {
+  getStaffInTransit,
+  getStaffStats,
+  type StaffDayOrder,
+  type StaffDayStats,
+  type StaffStats,
+} from "@/lib/api";
 import {
   bdt,
   dhakaToday,
@@ -186,7 +192,7 @@ function IncentiveView() {
       ) : (
         <div className="grid items-start gap-6 lg:grid-cols-2">
           {sheets.map((s) => (
-            <SheetCard key={s.userId} sheet={s} />
+            <SheetCard key={s.userId} sheet={s} month={month} />
           ))}
         </div>
       )}
@@ -194,19 +200,47 @@ function IncentiveView() {
   );
 }
 
-function SheetCard({ sheet }: { sheet: Sheet }) {
+function SheetCard({ sheet, month }: { sheet: Sheet; month: string }) {
   const { total } = sheet;
   const [explain, setExplain] = React.useState(false);
+  const [transit, setTransit] = React.useState(false);
   return (
     <Card className="overflow-hidden">
       <BreakdownDialog sheet={sheet} open={explain} onOpenChange={setExplain} />
+      <InTransitDialog
+        sheet={sheet}
+        month={month}
+        open={transit}
+        onOpenChange={setTransit}
+      />
       <CardHeader className="flex flex-row items-start justify-between gap-3 border-b">
-        <div>
+        <div className="mr-auto">
           <CardTitle>{sheet.name}</CardTitle>
           <CardDescription className="mt-1">
             {sheet.days.length} {sheet.days.length === 1 ? "day" : "days"} worked
           </CardDescription>
         </div>
+        {/* Still with Pathao: some of these may yet come back and push the
+            return rate up, so it sits right next to the amount it threatens. */}
+        <button
+          type="button"
+          onClick={() => setTransit(true)}
+          disabled={total.in_transit === 0}
+          title="Parcels still with Pathao"
+          className="-m-1.5 rounded-md p-1.5 text-right transition-colors enabled:hover:bg-accent"
+        >
+          <div className="text-xs text-muted-foreground">In transit</div>
+          <div
+            className={cn(
+              "text-lg font-semibold tabular-nums",
+              total.in_transit > 0
+                ? "text-sky-700 underline decoration-dotted underline-offset-4 dark:text-sky-400"
+                : "text-muted-foreground/60"
+            )}
+          >
+            {total.in_transit}
+          </div>
+        </button>
         <button
           type="button"
           onClick={() => setExplain(true)}
@@ -430,6 +464,97 @@ function BreakdownDialog({
               </span>
             </div>
           </section>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** The parcels behind a person's in-transit figure, loaded when opened. */
+function InTransitDialog({
+  sheet,
+  month,
+  open,
+  onOpenChange,
+}: {
+  sheet: Sheet;
+  month: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [rows, setRows] = React.useState<StaffDayOrder[] | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setRows(null);
+    setError(null);
+    getStaffInTransit(sheet.userId, month)
+      .then((r) => {
+        if (!cancelled) setRows(r);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, sheet.userId, month]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{sheet.name} — in transit</DialogTitle>
+          <DialogDescription>
+            Orders they confirmed in {monthLabel(month)} that are still with
+            Pathao: not delivered, not returned.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="-mx-6 flex-1 overflow-y-auto px-6">
+          {error ? (
+            <p className="py-6 text-sm text-destructive">{error}</p>
+          ) : rows === null ? (
+            <Skeleton className="h-40 w-full" />
+          ) : rows.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              Nothing in transit.
+            </p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs text-muted-foreground">
+                  <th className="py-2 pr-3 font-medium">Confirmed</th>
+                  <th className="py-2 pr-3 font-medium">Order</th>
+                  <th className="py-2 pr-3 font-medium">Customer</th>
+                  <th className="py-2 pr-3 font-medium">Consignment</th>
+                  <th className="py-2 text-right font-medium">Pathao status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {rows.map((o) => (
+                  <tr key={o.order_id}>
+                    <td className="whitespace-nowrap py-2 pr-3 text-xs text-muted-foreground tabular-nums">
+                      {new Date(o.confirmed_at).toLocaleDateString("en-GB", {
+                        timeZone: "Asia/Dhaka",
+                        day: "numeric",
+                        month: "short",
+                      })}
+                    </td>
+                    <td className="py-2 pr-3 font-mono text-xs">{o.order_no}</td>
+                    <td className="max-w-40 truncate py-2 pr-3">{o.customer_name}</td>
+                    <td className="py-2 pr-3 font-mono text-xs text-muted-foreground">
+                      {o.consignment_id ?? "—"}
+                    </td>
+                    <td className="py-2 text-right text-xs text-sky-700 dark:text-sky-400">
+                      {o.pathao_status?.replace(/_/g, " ") || "Booked, no update yet"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </DialogContent>
     </Dialog>

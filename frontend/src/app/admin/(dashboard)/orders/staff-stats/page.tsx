@@ -1,8 +1,14 @@
 "use client";
 
 import * as React from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, ListChecks } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Card,
   CardContent,
@@ -120,6 +126,20 @@ function staffName(s: StaffMember | undefined): string {
 
 const ALL = "all";
 
+type Metric = keyof Figures;
+
+/** What a calendar cell can show, in the order it shows them. Delivered
+ *  leads and is drawn large: it is the figure this page exists for. */
+const CELL_METRICS: { key: Metric; label: string; short: string; className: string }[] = [
+  { key: "delivered", label: "Delivered", short: "del", className: "text-emerald-700 dark:text-emerald-400" },
+  { key: "confirmed", label: "Confirmed", short: "conf", className: "text-foreground" },
+  { key: "from_incomplete", label: "From Incomplete", short: "inc", className: "text-amber-700 dark:text-amber-400" },
+  { key: "returned", label: "Returned", short: "ret", className: "text-red-700 dark:text-red-400" },
+  { key: "no_response", label: "No response", short: "n/r", className: "text-muted-foreground" },
+  { key: "cancelled", label: "Cancelled", short: "can", className: "text-muted-foreground" },
+  { key: "handled", label: "Handled", short: "hdl", className: "text-muted-foreground" },
+];
+
 /**
  * Each person's work, a month at a time. "All staff" shows everyone side by
  * side and the team's days; picking a person shows their days, and a day
@@ -137,6 +157,7 @@ export default function StaffStatsPage() {
   const [data, setData] = React.useState<StaffStats | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [openDay, setOpenDay] = React.useState<string | null>(null);
+  const [shown, setShown] = React.useState<Metric[]>(["delivered"]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -175,6 +196,21 @@ export default function StaffStatsPage() {
   }, [rows]);
   const total = React.useMemo(() => sum(rows), [rows]);
 
+  // Shown at the top and again on the calendar; both drive the same state,
+  // so they always agree.
+  const controls = (
+    <Controls
+      month={month}
+      thisMonth={thisMonth}
+      onMonth={setMonth}
+      who={who}
+      onWho={setWho}
+      staff={data?.staff ?? []}
+      shown={shown}
+      onShown={setShown}
+    />
+  );
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -185,43 +221,7 @@ export default function StaffStatsPage() {
             as Pathao reports. Manual orders are not counted.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center rounded-lg border">
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Previous month"
-              onClick={() => setMonth((m) => shiftMonth(m, -1))}
-            >
-              <ChevronLeft className="size-4" />
-            </Button>
-            <span className="min-w-32 text-center text-sm font-medium">
-              {monthLabel(month)}
-            </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Next month"
-              disabled={month >= thisMonth}
-              onClick={() => setMonth((m) => shiftMonth(m, 1))}
-            >
-              <ChevronRight className="size-4" />
-            </Button>
-          </div>
-          <Select value={who} onValueChange={setWho}>
-            <SelectTrigger className="min-w-44">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>All staff</SelectItem>
-              {data?.staff.map((s) => (
-                <SelectItem key={s.user_id} value={String(s.user_id)}>
-                  {staffName(s)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {controls}
       </div>
 
       {error && (
@@ -274,14 +274,17 @@ export default function StaffStatsPage() {
 
       {/* --- The calendar --------------------------------------------- */}
       <Card>
-        <CardHeader>
-          <CardTitle>
-            {userId === null ? "The team, day by day" : staffName(staffById.get(userId))}
-          </CardTitle>
-          <CardDescription>
-            Click a day for{" "}
-            {userId === null ? "who did what" : "the orders they confirmed"}.
-          </CardDescription>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
+          <div>
+            <CardTitle>
+              {userId === null ? "The team, day by day" : staffName(staffById.get(userId))}
+            </CardTitle>
+            <CardDescription className="mt-1.5">
+              Click a day for{" "}
+              {userId === null ? "who did what" : "the orders they confirmed"}.
+            </CardDescription>
+          </div>
+          {controls}
         </CardHeader>
         <CardContent>
           {!data ? (
@@ -291,6 +294,7 @@ export default function StaffStatsPage() {
               month={month}
               today={today}
               byDay={byDay}
+              shown={shown}
               onPick={setOpenDay}
             />
           )}
@@ -308,6 +312,119 @@ export default function StaffStatsPage() {
 }
 
 // --- Pieces ------------------------------------------------------------------
+
+/** The figures picker, the month switcher and the staff picker. */
+function Controls({
+  month,
+  thisMonth,
+  onMonth,
+  who,
+  onWho,
+  staff,
+  shown,
+  onShown,
+}: {
+  month: string;
+  thisMonth: string;
+  onMonth: (month: string) => void;
+  who: string;
+  onWho: (who: string) => void;
+  staff: StaffMember[];
+  shown: Metric[];
+  onShown: (shown: Metric[]) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <MetricPicker shown={shown} onShown={onShown} />
+      <div className="flex items-center rounded-lg border">
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Previous month"
+          onClick={() => onMonth(shiftMonth(month, -1))}
+        >
+          <ChevronLeft className="size-4" />
+        </Button>
+        <span className="min-w-32 text-center text-sm font-medium">
+          {monthLabel(month)}
+        </span>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Next month"
+          disabled={month >= thisMonth}
+          onClick={() => onMonth(shiftMonth(month, 1))}
+        >
+          <ChevronRight className="size-4" />
+        </Button>
+      </div>
+      <Select value={who} onValueChange={onWho}>
+        <SelectTrigger className="min-w-44">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL}>All staff</SelectItem>
+          {staff.map((s) => (
+            <SelectItem key={s.user_id} value={String(s.user_id)}>
+              {staffName(s)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+/** Which figures the calendar cells show. At least one always stays on, so
+ *  the calendar never goes blank. */
+function MetricPicker({
+  shown,
+  onShown,
+}: {
+  shown: Metric[];
+  onShown: (shown: Metric[]) => void;
+}) {
+  const toggle = (key: Metric, on: boolean) => {
+    const next = on ? [...shown, key] : shown.filter((k) => k !== key);
+    if (next.length) onShown(next);
+  };
+  const label =
+    shown.length === 1
+      ? CELL_METRICS.find((m) => m.key === shown[0])?.label
+      : `${shown.length} figures`;
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" className="gap-2">
+          <ListChecks className="size-4" />
+          {label}
+          <ChevronDown className="size-4 opacity-60" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-56 p-2">
+        <p className="px-2 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Show on calendar
+        </p>
+        {CELL_METRICS.map((m) => {
+          const checked = shown.includes(m.key);
+          return (
+            <label
+              key={m.key}
+              className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm hover:bg-accent"
+            >
+              <Checkbox
+                checked={checked}
+                disabled={checked && shown.length === 1}
+                onCheckedChange={(v) => toggle(m.key, v === true)}
+              />
+              <span className={m.className}>{m.label}</span>
+            </label>
+          );
+        })}
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 function Tile({
   label,
@@ -366,7 +483,7 @@ function StaffTable({
     }))
     .sort((a, b) => b.f.confirmed - a.f.confirmed || b.f.handled - a.f.handled);
   return (
-    <table className="w-full min-w-[44rem] text-sm">
+    <table className="w-full min-w-176 text-sm">
       <thead>
         <tr className="border-b text-left text-xs text-muted-foreground">
           <th className="py-2 pr-3 font-medium">Staff</th>
@@ -414,13 +531,19 @@ function Calendar({
   month,
   today,
   byDay,
+  shown,
   onPick,
 }: {
   month: string;
   today: string;
   byDay: Map<string, Figures>;
+  shown: Metric[];
   onPick: (day: string) => void;
 }) {
+  const showDelivered = shown.includes("delivered");
+  const others = CELL_METRICS.filter(
+    (m) => m.key !== "delivered" && shown.includes(m.key)
+  );
   return (
     <div className="flex flex-col gap-1.5">
       <div className="grid grid-cols-7 gap-1.5 text-center text-[11px] font-medium text-muted-foreground">
@@ -444,6 +567,10 @@ function Calendar({
                   "flex min-h-20 flex-col rounded-md border p-1.5 text-left text-[11px] leading-tight transition-colors sm:min-h-24 sm:p-2 sm:text-xs",
                   f && !future ? "hover:bg-accent" : "cursor-default",
                   future && "opacity-40",
+                  showDelivered &&
+                    f &&
+                    f.delivered > 0 &&
+                    "border-emerald-200 bg-emerald-50/70 hover:bg-emerald-100/70 dark:border-emerald-900 dark:bg-emerald-950/40 dark:hover:bg-emerald-950/70",
                   day === today && "border-primary ring-1 ring-primary"
                 )}
               >
@@ -452,26 +579,33 @@ function Calendar({
                 </span>
                 {f && (
                   <span className="flex flex-col gap-0.5 tabular-nums">
-                    <span>
-                      <b className="font-semibold">{f.confirmed}</b>
-                      <span className="hidden sm:inline"> confirmed</span>
-                      <span className="sm:hidden"> ✓</span>
-                    </span>
-                    {f.from_incomplete > 0 && (
-                      <span className="text-amber-700 dark:text-amber-400">
-                        {f.from_incomplete}
-                        <span className="hidden sm:inline"> incomplete</span>
-                        <span className="sm:hidden"> inc</span>
+                    {showDelivered && (
+                      <span
+                        className={cn(
+                          "mb-0.5 flex items-baseline gap-1",
+                          f.delivered > 0
+                            ? "text-emerald-700 dark:text-emerald-400"
+                            : "text-muted-foreground/60"
+                        )}
+                      >
+                        <b className="text-lg font-bold leading-none sm:text-2xl">
+                          {f.delivered}
+                        </b>
+                        <span className="hidden text-xs font-medium sm:inline">
+                          delivered
+                        </span>
                       </span>
                     )}
-                    <span className="text-emerald-700 dark:text-emerald-400">
-                      {f.delivered}
-                      <span className="hidden sm:inline"> delivered</span>
-                      <span className="sm:hidden"> del</span>
-                    </span>
-                    <span className="hidden text-muted-foreground sm:inline">
-                      {f.handled} handled
-                    </span>
+                    {others.map((m) => (
+                      <span key={m.key} className={m.className}>
+                        <b className="font-semibold">{f[m.key]}</b>
+                        <span className="hidden sm:inline">
+                          {" "}
+                          {m.label.toLowerCase()}
+                        </span>
+                        <span className="sm:hidden"> {m.short}</span>
+                      </span>
+                    ))}
                   </span>
                 )}
               </button>

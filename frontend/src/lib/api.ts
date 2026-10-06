@@ -613,6 +613,8 @@ export type Dashboard = {
   last_month: DashboardTotals;
   period: DashboardPeriod;
   performers: Performer[];
+  /** Ranked over orders recovered from the Incomplete list only. */
+  lead_performers: Performer[];
 };
 
 /** The home page's figures for a range of Dhaka days and the month it ends in. */
@@ -636,10 +638,12 @@ export type Activity = {
 export async function getDashboardActivity(
   userId: number,
   from: string,
-  to: string
+  to: string,
+  leads = false
 ): Promise<Activity[]> {
   return request<Activity[]>(
-    `/api/orders/dashboard/activity?user_id=${userId}&from=${from}&to=${to}`
+    `/api/orders/dashboard/activity?user_id=${userId}&from=${from}&to=${to}` +
+      (leads ? "&leads=true" : "")
   );
 }
 

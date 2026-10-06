@@ -407,6 +407,8 @@ class DashboardOut(BaseModel):
     last_month: DashboardTotals
     period: DashboardPeriod
     performers: list[Performer]
+    # The same ranking over orders recovered from the Incomplete list only.
+    lead_performers: list[Performer] = []
 
 
 class ActivityOut(BaseModel):

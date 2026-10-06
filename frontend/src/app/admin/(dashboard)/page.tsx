@@ -7,6 +7,7 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
+  ClipboardCheck,
   Clock3,
   Minus,
   Trophy,
@@ -132,7 +133,7 @@ export default function AdminDashboardPage() {
   );
   const [data, setData] = React.useState<Dashboard | null>(null);
   const [error, setError] = React.useState<string | null>(null);
-  const [performer, setPerformer] = React.useState<Performer | null>(null);
+  const [performer, setPerformer] = React.useState<PerformerPick | null>(null);
   const { store } = useAuth();
 
   React.useEffect(() => {
@@ -253,31 +254,63 @@ export default function AdminDashboardPage() {
       </Card>
 
       {/* --- The people --------------------------------------------- */}
-      <Card className="w-full max-w-xl">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Trophy className="size-4 text-muted-foreground" />
-            Best performers
-          </CardTitle>
-          <CardDescription>
-            Top 5 by orders confirmed. Click a name for their history.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {!data ? (
-            <Skeleton className="h-40 w-full" />
-          ) : data.performers.length === 0 ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              No status changes in this period.
-            </p>
-          ) : (
-            <Leaderboard rows={data.performers} onPick={setPerformer} />
-          )}
-        </CardContent>
-      </Card>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Trophy className="size-4 text-muted-foreground" />
+              Best performers
+            </CardTitle>
+            <CardDescription>
+              Top 5 by orders confirmed. Click a name for their history.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {!data ? (
+              <Skeleton className="h-40 w-full" />
+            ) : data.performers.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                No status changes in this period.
+              </p>
+            ) : (
+              <Leaderboard
+                rows={data.performers}
+                onPick={(p) => setPerformer({ performer: p, leads: false })}
+              />
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ClipboardCheck className="size-4 text-amber-700 dark:text-amber-400" />
+              Incomplete order
+            </CardTitle>
+            <CardDescription>
+              Who confirmed orders from the Incomplete list. Click a name for
+              their history.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {!data ? (
+              <Skeleton className="h-40 w-full" />
+            ) : data.lead_performers.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                No incomplete orders worked in this period.
+              </p>
+            ) : (
+              <Leaderboard
+                rows={data.lead_performers}
+                onPick={(p) => setPerformer({ performer: p, leads: true })}
+                bar="var(--dash-lead)"
+              />
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       <ActivityDialog
-        performer={performer}
+        pick={performer}
         range={range}
         onClose={() => setPerformer(null)}
       />
@@ -512,13 +545,18 @@ function MiniTile({
 
 // --- People ------------------------------------------------------------------
 
+/** Whose history the dialog shows, and from which card it was opened. */
+type PerformerPick = { performer: Performer; leads: boolean };
+
 /** Ranked, with a bar that reads against the top score; names open history. */
 function Leaderboard({
   rows,
   onPick,
+  bar = "var(--dash-1)",
 }: {
   rows: Performer[];
   onPick: (p: Performer) => void;
+  bar?: string;
 }) {
   const top = Math.max(1, ...rows.map((r) => r.confirmed));
   return (
@@ -553,7 +591,7 @@ function Leaderboard({
               className="h-full rounded-full"
               style={{
                 width: `${(r.confirmed / top) * 100}%`,
-                background: "var(--dash-1)",
+                background: bar,
               }}
             />
           </div>
@@ -564,24 +602,25 @@ function Leaderboard({
 }
 
 function ActivityDialog({
-  performer,
+  pick,
   range,
   onClose,
 }: {
-  performer: Performer | null;
+  pick: PerformerPick | null;
   range: Range;
   onClose: () => void;
 }) {
   const [rows, setRows] = React.useState<Activity[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const multiDay = range.from !== range.to;
+  const performer = pick?.performer ?? null;
 
   React.useEffect(() => {
-    if (!performer) return;
+    if (!pick) return;
     let cancelled = false;
     setRows(null);
     setError(null);
-    getDashboardActivity(performer.user_id, range.from, range.to)
+    getDashboardActivity(pick.performer.user_id, range.from, range.to, pick.leads)
       .then((r) => {
         if (!cancelled) setRows(r);
       })
@@ -593,16 +632,16 @@ function ActivityDialog({
     return () => {
       cancelled = true;
     };
-  }, [performer, range]);
+  }, [pick, range]);
 
   return (
-    <Dialog open={performer !== null} onOpenChange={(o) => !o && onClose()}>
+    <Dialog open={pick !== null} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{performer?.nickname || performer?.name}</DialogTitle>
           <DialogDescription>
-            Orders they confirmed — {rangeLabel(range).toLowerCase()}, newest
-            first.
+            {pick?.leads ? "Incomplete orders" : "Orders"} they confirmed —{" "}
+            {rangeLabel(range).toLowerCase()}, newest first.
           </DialogDescription>
         </DialogHeader>
         <div className="-mx-6 flex-1 overflow-y-auto px-6">

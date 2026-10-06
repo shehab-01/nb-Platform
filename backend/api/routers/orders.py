@@ -848,6 +848,51 @@ def _range(
     return start_day, end_day, start, end
 
 
+async def _performers(
+    session: AsyncSession,
+    store_id: int,
+    start: datetime,
+    end: datetime,
+    leads_only: bool = False,
+) -> list[Performer]:
+    """The five most productive people over [start, end), from the audit
+    trail. Ranked by orders confirmed (one credit per order, however many
+    times it was moved), then by every status change made, so someone who
+    worked the lists without closing anything still shows up rather than
+    vanishing.
+
+    leads_only narrows it to orders that came off the Incomplete list. Leads
+    keep that source for life, so a lead moved to processing first and
+    confirmed later still counts — the event's old_status alone would miss it.
+    """
+    confirmed_by = func.count(distinct(OrderEvent.order_id)).filter(
+        OrderEvent.new_status == OrderStatus.confirmed.value
+    )
+    handled = func.count()
+    query = (
+        select(User.id, User.name, User.nickname, confirmed_by, handled)
+        .join(User, User.id == OrderEvent.actor_id)
+        .where(
+            OrderEvent.store_id == store_id,
+            OrderEvent.event_type == "status_changed",
+            OrderEvent.created_at >= start,
+            OrderEvent.created_at < end,
+        )
+        .group_by(User.id)
+        .order_by(confirmed_by.desc(), handled.desc(), User.name)
+        .limit(5)
+    )
+    if leads_only:
+        query = query.join(Order, Order.id == OrderEvent.order_id).where(
+            Order.store_id == store_id, _IS_LEAD
+        )
+    rows = await session.execute(query)
+    return [
+        Performer(user_id=uid, name=name, nickname=nickname, confirmed=n, handled=h)
+        for uid, name, nickname, n, h in rows
+    ]
+
+
 @router.get("/dashboard", response_model=DashboardOut)
 async def dashboard(
     date_from: date | None = Query(None, alias="from"),
@@ -871,31 +916,10 @@ async def dashboard(
     this_month = await _counts(session, ctx.store.id, month_start, month_end)
     last_month = await _counts(session, ctx.store.id, last_month_start, month_start)
 
-    # The five most productive people, from the audit trail. Ranked by orders
-    # confirmed (one credit per order, however many times it was moved), then
-    # by every status change made, so someone who worked the lists without
-    # closing anything still shows up rather than vanishing.
-    confirmed_by = func.count(distinct(OrderEvent.order_id)).filter(
-        OrderEvent.new_status == OrderStatus.confirmed.value
+    performers = await _performers(session, ctx.store.id, start, end)
+    lead_performers = await _performers(
+        session, ctx.store.id, start, end, leads_only=True
     )
-    handled = func.count()
-    performer_rows = await session.execute(
-        select(User.id, User.name, User.nickname, confirmed_by, handled)
-        .join(User, User.id == OrderEvent.actor_id)
-        .where(
-            OrderEvent.store_id == ctx.store.id,
-            OrderEvent.event_type == "status_changed",
-            OrderEvent.created_at >= start,
-            OrderEvent.created_at < end,
-        )
-        .group_by(User.id)
-        .order_by(confirmed_by.desc(), handled.desc(), User.name)
-        .limit(5)
-    )
-    performers = [
-        Performer(user_id=uid, name=name, nickname=nickname, confirmed=n, handled=h)
-        for uid, name, nickname, n, h in performer_rows
-    ]
 
     return DashboardOut(
         date_from=start_day,
@@ -915,6 +939,7 @@ async def dashboard(
             leads_confirmed=period["leads_confirmed"],
         ),
         performers=performers,
+        lead_performers=lead_performers,
     )
 
 
@@ -923,17 +948,20 @@ async def dashboard_activity(
     user_id: int,
     date_from: date | None = Query(None, alias="from"),
     date_to: date | None = Query(None, alias="to"),
+    leads: bool = False,
     session: AsyncSession = Depends(get_session),
     ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
 ) -> list[ActivityOut]:
     """The orders one staff member confirmed over the chosen days, newest
-    first: the list behind their number on the performers card."""
+    first: the list behind their number on a performers card. leads keeps
+    only orders recovered from the Incomplete list."""
     _, _, start, end = _range(date_from, date_to)
-    rows = await session.execute(
+    query = (
         select(OrderEvent, Order.customer_name)
         .join(Order, Order.id == OrderEvent.order_id)
         .where(
             OrderEvent.store_id == ctx.store.id,
+            Order.store_id == ctx.store.id,
             OrderEvent.actor_id == user_id,
             OrderEvent.event_type == "status_changed",
             OrderEvent.new_status == OrderStatus.confirmed.value,
@@ -943,6 +971,9 @@ async def dashboard_activity(
         .order_by(OrderEvent.created_at.desc(), OrderEvent.id.desc())
         .limit(300)
     )
+    if leads:
+        query = query.where(_IS_LEAD)
+    rows = await session.execute(query)
     return [
         ActivityOut(
             id=event.id,

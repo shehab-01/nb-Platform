@@ -140,10 +140,13 @@
 }
 
 /* Dashboard accent (the performers' bars): validated categorical slot 1,
-   with its own dark-surface step. */
+   with its own dark-surface step. --dash-lead is the Incomplete card's bar,
+   amber to match the leads group above it. */
 :root {
   --dash-1: #2a78d6;
+  --dash-lead: #d97706;
 }
 .dark {
   --dash-1: #3987e5;
+  --dash-lead: #f59e0b;
 }

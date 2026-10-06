@@ -133,23 +133,24 @@ function IncentiveView() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Incentive</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Per day, by orders delivered:{" "}
+          {/* The rule in Bangla, for the admins who settle the payouts. */}
+          <p lang="bn" className="mt-1 text-sm text-muted-foreground">
+            প্রতিদিনের ইনসেনটিভ, ডেলিভারি হওয়া অর্ডার অনুযায়ী:{" "}
             {[...INCENTIVE_TIERS]
               .reverse()
               .map((t) => `${t.delivered}+ → ${bdt(t.bdt)}`)
               .join(" · ")}
-            . Delivered counts on the day the order was confirmed, so recent
-            days keep rising as parcels arrive.
+            । অর্ডার যেদিন কনফার্ম হয়েছে, ডেলিভারি সেই দিনেই গোনা হয় — তাই
+            সাম্প্রতিক দিনগুলোর সংখ্যা পার্সেল পৌঁছানোর সাথে সাথে বাড়তে থাকবে।
           </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            The month&apos;s total is then cut by its return rate (returned ÷
-            confirmed, rounded up to a whole percent):{" "}
+          <p lang="bn" className="mt-1 text-sm text-muted-foreground">
+            এরপর মাসের মোট ইনসেনটিভ রিটার্ন রেট অনুযায়ী কাটা হয় (রিটার্ন ÷
+            কনফার্ম):{" "}
             {[...RETURN_PENALTY]
               .reverse()
-              .map((t) => `${t.label.toLowerCase()} → ${Math.round(t.share * 100)}%`)
+              .map((t) => `${t.labelBn} → ${Math.round(t.share * 100)}%`)
               .join(" · ")}
-            . Click an amount to see how it was worked out.
+            । কীভাবে হিসাব হয়েছে দেখতে টাকার অঙ্কে ক্লিক করুন।
           </p>
         </div>
         <div className="flex items-center gap-3">

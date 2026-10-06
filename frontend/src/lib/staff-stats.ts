@@ -80,11 +80,17 @@ export function returnRate(f: Figures): string {
 
 /** How much of the month's earned incentive is paid, by the month's return
  *  rate (rounded up, as above), strictest first. */
-export const RETURN_PENALTY: { label: string; from: number; share: number }[] = [
-  { label: "25% or more", from: 25, share: 0 },
-  { label: "20% to 24%", from: 20, share: 0.25 },
-  { label: "19%", from: 19, share: 0.5 },
-  { label: "Up to 18%", from: 0, share: 1 },
+export const RETURN_PENALTY: {
+  label: string;
+  /** The same, in Bangla, for the rule shown on the Incentive page. */
+  labelBn: string;
+  from: number;
+  share: number;
+}[] = [
+  { label: "25% or more", labelBn: "25% বা বেশি", from: 25, share: 0 },
+  { label: "20% to 24%", labelBn: "20% থেকে 24%", from: 20, share: 0.25 },
+  { label: "19%", labelBn: "19%", from: 19, share: 0.5 },
+  { label: "Up to 18%", labelBn: "18% পর্যন্ত", from: 0, share: 1 },
 ];
 
 export function returnTier(f: Figures) {

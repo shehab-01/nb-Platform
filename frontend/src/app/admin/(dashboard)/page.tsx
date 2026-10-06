@@ -134,6 +134,8 @@ export default function AdminDashboardPage() {
   const [data, setData] = React.useState<Dashboard | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [performer, setPerformer] = React.useState<PerformerPick | null>(null);
+  // The Incomplete card shows the top five until it is opened up.
+  const [allLeads, setAllLeads] = React.useState(false);
   const { store } = useAuth();
 
   React.useEffect(() => {
@@ -281,15 +283,36 @@ export default function AdminDashboardPage() {
           </CardContent>
         </Card>
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <ClipboardCheck className="size-4 text-amber-700 dark:text-amber-400" />
-              Incomplete order
-            </CardTitle>
-            <CardDescription>
-              Who confirmed orders from the Incomplete list. Click a name for
-              their history.
-            </CardDescription>
+          <CardHeader className="flex flex-row items-start justify-between gap-3">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <ClipboardCheck className="size-4 text-amber-700 dark:text-amber-400" />
+                Incomplete order
+              </CardTitle>
+              <CardDescription className="mt-1.5">
+                Who confirmed orders from the Incomplete list. Click a name for
+                their history.
+              </CardDescription>
+            </div>
+            {data && data.lead_performers.length > LEADS_SHOWN && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="-mr-2 -mt-1 shrink-0"
+                onClick={() => setAllLeads((v) => !v)}
+                aria-expanded={allLeads}
+                aria-label={allLeads ? "Show top 5 only" : "Show all staff"}
+                title={
+                  allLeads
+                    ? "Show top 5 only"
+                    : `Show all ${data.lead_performers.length} staff`
+                }
+              >
+                <ChevronDown
+                  className={cn("size-5 transition-transform", allLeads && "rotate-180")}
+                />
+              </Button>
+            )}
           </CardHeader>
           <CardContent>
             {!data ? (
@@ -300,7 +323,11 @@ export default function AdminDashboardPage() {
               </p>
             ) : (
               <Leaderboard
-                rows={data.lead_performers}
+                rows={
+                  allLeads
+                    ? data.lead_performers
+                    : data.lead_performers.slice(0, LEADS_SHOWN)
+                }
                 onPick={(p) => setPerformer({ performer: p, leads: true })}
                 bar="var(--dash-lead)"
               />
@@ -544,6 +571,9 @@ function MiniTile({
 }
 
 // --- People ------------------------------------------------------------------
+
+/** How many of the Incomplete card's staff show before it is expanded. */
+const LEADS_SHOWN = 5;
 
 /** Whose history the dialog shows, and from which card it was opened. */
 type PerformerPick = { performer: Performer; leads: boolean };

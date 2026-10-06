@@ -407,7 +407,8 @@ class DashboardOut(BaseModel):
     last_month: DashboardTotals
     period: DashboardPeriod
     performers: list[Performer]
-    # The same ranking over orders recovered from the Incomplete list only.
+    # The same ranking over orders recovered from the Incomplete list only,
+    # and everyone in it rather than the top five.
     lead_performers: list[Performer] = []
 
 
@@ -423,6 +424,52 @@ class ActivityOut(BaseModel):
     new_status: str | None = None
     note: str | None = None
     created_at: datetime
+
+
+class StaffDayStats(BaseModel):
+    """One person's work on one Dhaka day, for the staff stats page.
+
+    handled, no_response and cancelled count what they did that day.
+    confirmed and everything after it count the orders whose final
+    confirmation was theirs that day, judged by where those orders are now —
+    so delivered keeps filling in for a few days after the day it belongs to.
+    """
+
+    user_id: int
+    day: date
+    handled: int = 0
+    no_response: int = 0
+    cancelled: int = 0
+    confirmed: int = 0
+    from_incomplete: int = 0
+    delivered: int = 0
+    returned: int = 0
+
+
+class StaffMember(BaseModel):
+    user_id: int
+    name: str
+    nickname: str | None = None
+
+
+class StaffStatsOut(BaseModel):
+    # "2026-10"
+    month: str
+    staff: list[StaffMember]
+    days: list[StaffDayStats]
+
+
+class StaffDayOrder(BaseModel):
+    """An order credited to someone on a day, as it stands now."""
+
+    order_id: int
+    order_no: str
+    customer_name: str
+    source: str
+    status: str
+    pathao_status: str | None = None
+    delivered: bool
+    confirmed_at: datetime
 
 
 class OrderStatsOut(BaseModel):

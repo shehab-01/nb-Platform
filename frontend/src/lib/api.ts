@@ -622,6 +622,57 @@ export async function getDashboard(from: string, to: string): Promise<Dashboard>
   return request<Dashboard>(`/api/orders/dashboard?from=${from}&to=${to}`);
 }
 
+/**
+ * One person's work on one Dhaka day. handled / no_response / cancelled are
+ * what they did that day; confirmed onwards are the orders they confirmed
+ * that day, judged by where those orders are now (delivered fills in later).
+ */
+export type StaffDayStats = {
+  user_id: number;
+  day: string;
+  handled: number;
+  no_response: number;
+  cancelled: number;
+  confirmed: number;
+  from_incomplete: number;
+  delivered: number;
+  returned: number;
+};
+
+export type StaffMember = { user_id: number; name: string; nickname: string | null };
+
+export type StaffStats = {
+  month: string;
+  staff: StaffMember[];
+  days: StaffDayStats[];
+};
+
+/** Every person's figures for each day of a month ("2026-10"). */
+export async function getStaffStats(month: string): Promise<StaffStats> {
+  return request<StaffStats>(`/api/orders/staff-stats?month=${month}`);
+}
+
+export type StaffDayOrder = {
+  order_id: number;
+  order_no: string;
+  customer_name: string;
+  source: string;
+  status: string;
+  pathao_status: string | null;
+  delivered: boolean;
+  confirmed_at: string;
+};
+
+/** The orders credited to one person on one day, as they stand now. */
+export async function getStaffDayOrders(
+  userId: number,
+  day: string
+): Promise<StaffDayOrder[]> {
+  return request<StaffDayOrder[]>(
+    `/api/orders/staff-stats/day?user_id=${userId}&day=${day}`
+  );
+}
+
 export type Activity = {
   id: number;
   order_id: number;

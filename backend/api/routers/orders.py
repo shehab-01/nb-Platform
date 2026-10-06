@@ -4,8 +4,20 @@ import re
 from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import and_, delete, distinct, exists, func, or_, select, update
+from sqlalchemy import (
+    and_,
+    delete,
+    distinct,
+    exists,
+    func,
+    literal_column,
+    not_,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from api.auth import get_current_user
 from api.config import settings
@@ -20,6 +32,7 @@ from api.models import (
     OrderTag,
     Product,
     ProductVariant,
+    StoreUser,
     User,
     UserRole,
 )
@@ -49,6 +62,10 @@ from api.schemas import (
     OrderStatsOut,
     OrderUpdate,
     Performer,
+    StaffDayOrder,
+    StaffDayStats,
+    StaffMember,
+    StaffStatsOut,
     ManualOrderCreate,
     PhoneLookupOut,
     PathaoFailure,
@@ -854,16 +871,17 @@ async def _performers(
     start: datetime,
     end: datetime,
     leads_only: bool = False,
+    limit: int | None = 5,
 ) -> list[Performer]:
-    """The five most productive people over [start, end), from the audit
-    trail. Ranked by orders confirmed (one credit per order, however many
-    times it was moved), then by every status change made, so someone who
-    worked the lists without closing anything still shows up rather than
-    vanishing.
+    """The most productive people over [start, end), from the audit trail.
+    Ranked by orders confirmed (one credit per order, however many times it
+    was moved), then by every status change made, so someone who worked the
+    lists without closing anything still shows up rather than vanishing.
 
     leads_only narrows it to orders that came off the Incomplete list. Leads
     keep that source for life, so a lead moved to processing first and
     confirmed later still counts — the event's old_status alone would miss it.
+    limit None returns everyone: one row per staff member, so it stays small.
     """
     confirmed_by = func.count(distinct(OrderEvent.order_id)).filter(
         OrderEvent.new_status == OrderStatus.confirmed.value
@@ -880,7 +898,7 @@ async def _performers(
         )
         .group_by(User.id)
         .order_by(confirmed_by.desc(), handled.desc(), User.name)
-        .limit(5)
+        .limit(limit)
     )
     if leads_only:
         query = query.join(Order, Order.id == OrderEvent.order_id).where(
@@ -917,8 +935,10 @@ async def dashboard(
     last_month = await _counts(session, ctx.store.id, last_month_start, month_start)
 
     performers = await _performers(session, ctx.store.id, start, end)
+    # Everyone who worked a lead, not just the top five: the card shows five
+    # and expands to the rest.
     lead_performers = await _performers(
-        session, ctx.store.id, start, end, leads_only=True
+        session, ctx.store.id, start, end, leads_only=True, limit=None
     )
 
     return DashboardOut(
@@ -987,6 +1007,209 @@ async def dashboard_activity(
             created_at=event.created_at,
         )
         for event, customer_name in rows
+    ]
+
+
+# --- Staff stats -------------------------------------------------------------
+# Each person's work, day by day. Manual orders are left out entirely: they are
+# typed in already agreed, so counting them would credit taking dictation
+# rather than winning an order.
+_NOT_MANUAL = Order.source != OrderSource.manual.value
+# Returned is Pathao's word, and only for a parcel never reported delivered.
+_RETURNED = and_(
+    func.lower(Order.pathao_status).in_(("return", "paid_return")), not_(_DELIVERED)
+)
+
+
+def _dhaka_date(column):
+    """The Dhaka calendar day an instant falls on, worked out in SQL.
+
+    The zone is written into the SQL rather than bound: a bound value gets a
+    fresh parameter in SELECT and in GROUP BY, and Postgres then refuses to
+    see the two as the same expression."""
+    return func.date(func.timezone(literal_column("'Asia/Dhaka'"), column))
+
+
+def _final_confirmations(store_id: int, start: datetime, end: datetime):
+    """Confirmations made in [start, end) that are the last one their order
+    ever had, as (alias, condition).
+
+    An order moved back and confirmed again belongs to whoever confirmed it
+    last, on that day — one credit per order, so a person's confirmed count
+    and what became of those orders always describe the same orders. The
+    alias keeps these rows apart from the events _DELIVERED looks through.
+    """
+    ce = aliased(OrderEvent)
+    later = aliased(OrderEvent)
+    condition = and_(
+        ce.store_id == store_id,
+        ce.actor_id.is_not(None),
+        ce.event_type == "status_changed",
+        ce.new_status == OrderStatus.confirmed.value,
+        ce.created_at >= start,
+        ce.created_at < end,
+        ~exists().where(
+            later.order_id == ce.order_id,
+            later.event_type == "status_changed",
+            later.new_status == OrderStatus.confirmed.value,
+            or_(
+                later.created_at > ce.created_at,
+                and_(later.created_at == ce.created_at, later.id > ce.id),
+            ),
+        ),
+    )
+    return ce, condition
+
+
+@router.get("/staff-stats", response_model=StaffStatsOut)
+async def staff_stats(
+    month: str | None = Query(None, pattern=r"^\d{4}-\d{2}$"),
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
+) -> StaffStatsOut:
+    """Every person's figures for each Dhaka day of a month ("2026-10";
+    this month by default), and the people to choose between.
+
+    What someone did — handled, no response, cancelled — lands on the day
+    they did it. Confirmed and what became of those orders lands on the day
+    they confirmed: an order confirmed on the 3rd and delivered on the 8th
+    is the 3rd's delivery. Nothing is stored for this; every load reads the
+    audit trail and each order's Pathao status as they are now, so a day's
+    deliveries fill in by themselves as the courier sync reports them.
+    """
+    today = datetime.now(DHAKA).date()
+    if month:
+        year, mon = (int(part) for part in month.split("-"))
+        if not 1 <= mon <= 12:
+            raise HTTPException(status_code=400, detail="No such month")
+        first = date(year, mon, 1)
+    else:
+        first = today.replace(day=1)
+    if first > today:
+        raise HTTPException(status_code=400, detail="That month has not started yet")
+    start, end = _dhaka_month(first)
+    store_id = ctx.store.id
+
+    days: dict[tuple[int, date], StaffDayStats] = {}
+
+    def entry(user_id: int, day: date) -> StaffDayStats:
+        key = (user_id, day)
+        if key not in days:
+            days[key] = StaffDayStats(user_id=user_id, day=day)
+        return days[key]
+
+    # What each person did, on the day they did it.
+    acted_on = _dhaka_date(OrderEvent.created_at)
+
+    def orders_moved_to(status: str):
+        return func.count(distinct(OrderEvent.order_id)).filter(
+            OrderEvent.new_status == status
+        )
+
+    acted = await session.execute(
+        select(
+            OrderEvent.actor_id,
+            acted_on,
+            func.count(),
+            orders_moved_to(OrderStatus.no_response.value),
+            orders_moved_to(OrderStatus.cancelled.value),
+        )
+        .join(Order, Order.id == OrderEvent.order_id)
+        .where(
+            OrderEvent.store_id == store_id,
+            Order.store_id == store_id,
+            OrderEvent.actor_id.is_not(None),
+            OrderEvent.event_type == "status_changed",
+            OrderEvent.created_at >= start,
+            OrderEvent.created_at < end,
+            _NOT_MANUAL,
+        )
+        .group_by(OrderEvent.actor_id, acted_on)
+    )
+    for user_id, day, handled, no_response, cancelled in acted:
+        row = entry(user_id, day)
+        row.handled, row.no_response, row.cancelled = handled, no_response, cancelled
+
+    # What became of the orders each person confirmed, on the day they did.
+    ce, final = _final_confirmations(store_id, start, end)
+    confirmed_on = _dhaka_date(ce.created_at)
+    count = func.count()
+    credited = await session.execute(
+        select(
+            ce.actor_id,
+            confirmed_on,
+            count,
+            count.filter(Order.source == OrderSource.incomplete.value),
+            count.filter(_DELIVERED),
+            count.filter(_RETURNED),
+        )
+        .join(Order, Order.id == ce.order_id)
+        .where(final, Order.store_id == store_id, _NOT_MANUAL)
+        .group_by(ce.actor_id, confirmed_on)
+    )
+    for user_id, day, confirmed, from_incomplete, delivered, returned in credited:
+        row = entry(user_id, day)
+        row.confirmed, row.from_incomplete = confirmed, from_incomplete
+        row.delivered, row.returned = delivered, returned
+
+    # Everyone who belongs to the store, plus anyone who worked it without
+    # a membership (a super admin), so the picker never hides a row.
+    member_ids = select(StoreUser.user_id).where(StoreUser.store_id == store_id)
+    worked_ids = {user_id for user_id, _ in days}
+    people = await session.execute(
+        select(User.id, User.name, User.nickname)
+        .where(or_(User.id.in_(member_ids), User.id.in_(worked_ids)))
+        .order_by(func.coalesce(User.nickname, User.name))
+    )
+
+    return StaffStatsOut(
+        month=f"{first.year:04d}-{first.month:02d}",
+        staff=[
+            StaffMember(user_id=uid, name=name, nickname=nickname)
+            for uid, name, nickname in people
+        ],
+        days=sorted(days.values(), key=lambda r: (r.day, r.user_id)),
+    )
+
+
+@router.get("/staff-stats/day", response_model=list[StaffDayOrder])
+async def staff_stats_day(
+    user_id: int,
+    day: date,
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
+) -> list[StaffDayOrder]:
+    """The orders credited to one person on one Dhaka day — the ones behind
+    their confirmed figure on the staff stats calendar — as they stand now."""
+    start, end = _dhaka_day(day)
+    ce, final = _final_confirmations(ctx.store.id, start, end)
+    rows = await session.execute(
+        select(
+            Order.id,
+            Order.customer_name,
+            Order.source,
+            Order.status,
+            Order.pathao_status,
+            _DELIVERED.label("delivered"),
+            ce.created_at,
+        )
+        .select_from(ce)
+        .join(Order, Order.id == ce.order_id)
+        .where(final, ce.actor_id == user_id, Order.store_id == ctx.store.id, _NOT_MANUAL)
+        .order_by(ce.created_at.desc(), ce.id.desc())
+    )
+    return [
+        StaffDayOrder(
+            order_id=order_id,
+            order_no=f"{ctx.store.order_prefix}-{order_id}",
+            customer_name=customer_name,
+            source=source,
+            status=status,
+            pathao_status=pathao_status,
+            delivered=bool(delivered),
+            confirmed_at=confirmed_at,
+        )
+        for order_id, customer_name, source, status, pathao_status, delivered, confirmed_at in rows
     ]
 
 

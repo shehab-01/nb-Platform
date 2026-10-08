@@ -86,6 +86,7 @@ const storeNav: NavItem[] = [
       { title: "History", url: "/admin/orders/history" },
       { title: "Staff Stats", url: "/admin/orders/staff-stats", superAdmin: true },
       { title: "Incentive", url: "/admin/orders/incentive", superAdmin: true },
+      { title: "Delivery Team", url: "/admin/orders/delivery-team", superAdmin: true },
     ],
   },
   { title: "Products", url: "/admin/products", icon: Package, permission: "catalogue.read" },

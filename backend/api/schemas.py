@@ -461,6 +461,32 @@ class StaffStatsOut(BaseModel):
     days: list[StaffDayStats]
 
 
+class DeliveryTeamDay(BaseModel):
+    """The orders confirmed on one Dhaka day and where their parcels are now."""
+
+    day: date
+    # Handed to Pathao.
+    sent: int = 0
+    delivered: int = 0
+    returned: int = 0
+    # With Pathao, not yet delivered or returned.
+    in_transit: int = 0
+
+
+class DeliveryTeamOut(BaseModel):
+    """The whole store's parcels for a month, by the day each order was
+    confirmed: confirmed on 31 December and delivered on 10 January is
+    December's. Manual orders count — they are parcels like any other."""
+
+    # "2026-10"
+    month: str
+    sent: int
+    delivered: int
+    returned: int
+    in_transit: int
+    days: list[DeliveryTeamDay]
+
+
 class StaffDayOrder(BaseModel):
     """An order credited to someone on a day, as it stands now."""
 

@@ -64,13 +64,16 @@ export function incentiveFor(delivered: number): number {
   return INCENTIVE_TIERS.find((t) => delivered >= t.delivered)?.bdt ?? 0;
 }
 
-/** Returned out of everything confirmed, as a whole percentage rounded UP —
- *  18.1% is 19% — and that whole number is what the incentive tiers judge.
- *  returned × 100 ÷ confirmed divides two whole numbers, so a rate that is
- *  exactly whole (9 of 50 → 18) comes out exact and is never pushed up a
- *  point by float error. null with nothing confirmed. */
+/** Returned out of the parcels that finished their trip (delivered +
+ *  returned) — 80 delivered and 20 returned is 20% — as a whole percentage
+ *  rounded UP, 18.1% being 19%; that whole number is what the incentive
+ *  tiers judge. The same rule as the delivery team's, so orders cancelled
+ *  before shipping or still on the road neither help nor hurt. Whole-number
+ *  division, so an exactly whole rate (9 of 50 → 18) is never pushed up a
+ *  point by float error. null with nothing finished. */
 export function returnPct(f: Figures): number | null {
-  return f.confirmed ? Math.ceil((f.returned * 100) / f.confirmed) : null;
+  const finished = f.delivered + f.returned;
+  return finished ? Math.ceil((f.returned * 100) / finished) : null;
 }
 
 export function returnRate(f: Figures): string {

@@ -151,7 +151,7 @@ function IncentiveView() {
           </p>
           <p lang="bn" className="mt-1 text-sm text-muted-foreground">
             এরপর মাসের মোট ইনসেনটিভ রিটার্ন রেট অনুযায়ী কাটা হয় (রিটার্ন ÷
-            কনফার্ম):{" "}
+            (ডেলিভারি + রিটার্ন), যেমন 80 ডেলিভারি + 20 রিটার্ন = 20%):{" "}
             {[...RETURN_PENALTY]
               .reverse()
               .map((t) => `${t.labelBn} → ${Math.round(t.share * 100)}%`)
@@ -364,6 +364,7 @@ function BreakdownDialog({
 }) {
   const { total } = sheet;
   const tier = returnTier(total);
+  const finished = total.delivered + total.returned;
   const earning = sheet.days.filter((d) => incentiveFor(d.delivered) > 0);
   const short = sheet.days.length - earning.length;
   return (
@@ -413,16 +414,21 @@ function BreakdownDialog({
           <section>
             <h3 className="mb-2 font-medium">2. The month&apos;s return rate</h3>
             <p className="tabular-nums">
-              {total.returned} returned ÷ {total.confirmed} confirmed
-              {total.confirmed > 0 && (
+              {total.returned} returned ÷ ({total.delivered} delivered +{" "}
+              {total.returned} returned)
+              {finished > 0 && (
                 <>
                   {" "}
-                  = {((total.returned / total.confirmed) * 100).toFixed(2)}%
+                  = {((total.returned / finished) * 100).toFixed(2)}%
                   {", rounded up to "}
                 </>
               )}
-              {total.confirmed === 0 && " = "}
+              {finished === 0 && " = "}
               <b>{returnRate(total)}</b>
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Only parcels that finished their trip count. Orders cancelled
+              before shipping, or still with Pathao, are left out.
             </p>
             <ul className="mt-2 flex flex-col gap-1">
               {[...RETURN_PENALTY].reverse().map((t) => (

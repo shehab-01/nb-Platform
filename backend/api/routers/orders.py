@@ -62,6 +62,8 @@ from api.schemas import (
     OrderStatsOut,
     OrderUpdate,
     Performer,
+    DeliveryTeamDay,
+    DeliveryTeamOut,
     StaffDayOrder,
     StaffDayStats,
     StaffMember,
@@ -1040,6 +1042,10 @@ def _dhaka_date(column):
     return func.date(func.timezone(literal_column("'Asia/Dhaka'"), column))
 
 
+# The events that can move an order to confirmed.
+_CONFIRMING_EVENTS = ("status_changed", "manual_created")
+
+
 def _final_confirmations(store_id: int, start: datetime, end: datetime):
     """Confirmations made in [start, end) that are the last one their order
     ever had, as (alias, condition).
@@ -1048,19 +1054,23 @@ def _final_confirmations(store_id: int, start: datetime, end: datetime):
     last, on that day — one credit per order, so a person's confirmed count
     and what became of those orders always describe the same orders. The
     alias keeps these rows apart from the events _DELIVERED looks through.
+
+    A manual order typed in already agreed is confirmed by its
+    "manual_created" event, so that counts as a confirmation too. The staff
+    pages leave manual orders out anyway; the delivery team counts them.
     """
     ce = aliased(OrderEvent)
     later = aliased(OrderEvent)
     condition = and_(
         ce.store_id == store_id,
         ce.actor_id.is_not(None),
-        ce.event_type == "status_changed",
+        ce.event_type.in_(_CONFIRMING_EVENTS),
         ce.new_status == OrderStatus.confirmed.value,
         ce.created_at >= start,
         ce.created_at < end,
         ~exists().where(
             later.order_id == ce.order_id,
-            later.event_type == "status_changed",
+            later.event_type.in_(_CONFIRMING_EVENTS),
             later.new_status == OrderStatus.confirmed.value,
             or_(
                 later.created_at > ce.created_at,
@@ -1269,6 +1279,65 @@ async def staff_stats_in_transit(
     A return or a paid return has finished its trip, so it never shows here."""
     _, start, end = _staff_month(month)
     return await _credited_orders(session, ctx, user_id, start, end, _IN_TRANSIT)
+
+
+# --- Delivery team -----------------------------------------------------------
+
+
+@router.get("/delivery-team", response_model=DeliveryTeamOut)
+async def delivery_team(
+    month: str | None = Query(None, pattern=r"^\d{4}-\d{2}$"),
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.super_admin_store),
+) -> DeliveryTeamOut:
+    """The store's parcels for the delivery team's incentive: the orders
+    confirmed in a month ("2026-10"; this one by default), by confirmation
+    day, and where each parcel is now.
+
+    A parcel belongs to the month its order was confirmed, however long it
+    takes: confirmed on 31 December and delivered on 10 January is
+    December's, and until Pathao delivers or returns it, it is December's
+    in transit. Nothing is stored; a month's figures settle by themselves as
+    the courier sync reports in. Unlike the staff pages this is about
+    parcels, not people, so manual orders count.
+    """
+    first, start, end = _staff_month(month)
+    store_id = ctx.store.id
+    ce, final = _final_confirmations(store_id, start, end)
+    confirmed_on = _dhaka_date(ce.created_at)
+    count = func.count()
+    rows = await session.execute(
+        select(
+            confirmed_on,
+            count.filter(Order.pathao_consignment_id.is_not(None)),
+            count.filter(_DELIVERED),
+            count.filter(_RETURNED),
+            count.filter(_IN_TRANSIT),
+        )
+        .select_from(ce)
+        .join(Order, Order.id == ce.order_id)
+        .where(final, Order.store_id == store_id)
+        .group_by(confirmed_on)
+        .order_by(confirmed_on)
+    )
+    days = [
+        DeliveryTeamDay(
+            day=day,
+            sent=sent,
+            delivered=delivered,
+            returned=returned,
+            in_transit=in_transit,
+        )
+        for day, sent, delivered, returned, in_transit in rows
+    ]
+    return DeliveryTeamOut(
+        month=f"{first.year:04d}-{first.month:02d}",
+        sent=sum(d.sent for d in days),
+        delivered=sum(d.delivered for d in days),
+        returned=sum(d.returned for d in days),
+        in_transit=sum(d.in_transit for d in days),
+        days=days,
+    )
 
 
 # Which lists count as "this customer already has an order with us". Incomplete

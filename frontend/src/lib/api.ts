@@ -667,6 +667,32 @@ export type StaffDayOrder = {
   confirmed_at: string;
 };
 
+/** The orders confirmed on one day and where their parcels are now. */
+export type DeliveryTeamDay = {
+  day: string;
+  /** Handed to Pathao. */
+  sent: number;
+  delivered: number;
+  returned: number;
+  /** With Pathao, not yet delivered or returned. */
+  in_transit: number;
+};
+
+/** The store's parcels for a month, by the day each order was confirmed —
+ *  confirmed 31 December, delivered 10 January, is December's. */
+export type DeliveryTeam = {
+  month: string;
+  sent: number;
+  delivered: number;
+  returned: number;
+  in_transit: number;
+  days: DeliveryTeamDay[];
+};
+
+export async function getDeliveryTeam(month: string): Promise<DeliveryTeam> {
+  return request<DeliveryTeam>(`/api/orders/delivery-team?month=${month}`);
+}
+
 /** One person's parcels still with Pathao, from orders they confirmed in a
  *  month ("2026-10"). Returns and paid returns are finished, so never listed. */
 export async function getStaffInTransit(

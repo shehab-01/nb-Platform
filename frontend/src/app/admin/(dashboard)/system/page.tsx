@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/components/admin/auth-context";
+import { DriveCard } from "@/components/admin/system/drive-card";
 import { MinuteBars } from "@/components/admin/system/minute-bars";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -311,6 +312,8 @@ export default function SystemPage() {
           Refresh
         </Button>
       </div>
+
+      <DriveCard />
 
       {error && (
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-2 text-sm text-destructive">

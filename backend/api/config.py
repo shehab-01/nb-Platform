@@ -79,6 +79,21 @@ class Settings:
         "PATHAO_PARSER_URL", "https://merchant.pathao.com/api/v1/address-parser"
     ).strip()
 
+    # Google Drive, where expense proofs are kept (api.services.gdrive). One
+    # Google account for the whole platform, connected once by a super admin
+    # from Platform → System; its refresh token is stored encrypted in the
+    # database, not here. These name the OAuth "Web application" client and
+    # where Google sends the browser back (must match the console exactly).
+    # Unset: the feature is off and uploads say so.
+    google_drive_client_id: str = os.getenv("GOOGLE_DRIVE_CLIENT_ID", "").strip()
+    google_drive_client_secret: str = os.getenv("GOOGLE_DRIVE_CLIENT_SECRET", "").strip()
+    google_drive_redirect_uri: str = os.getenv("GOOGLE_DRIVE_REDIRECT_URI", "").strip()
+    # The top folder the app creates in that Drive. Dev uses its own
+    # ("nbPlatform-dev", compose.dev.yaml) so it never writes into production's.
+    google_drive_root_name: str = os.getenv("GOOGLE_DRIVE_ROOT_NAME", "nbPlatform").strip()
+    # Largest proof file accepted, in bytes (default 10 MB).
+    max_proof_bytes: int = int(os.getenv("MAX_PROOF_BYTES", str(10 * 1024 * 1024)))
+
     # Auth
     google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "")
     session_secret: str = os.getenv("SESSION_SECRET", "")

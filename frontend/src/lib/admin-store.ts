@@ -12,6 +12,9 @@ export type StoreAccess = {
   role: string;
   /** The storefront template the store renders (see templates/catalog). */
   template: string;
+  /** May open this store's CRM: always for a super admin, else as a super
+   *  admin chose (Users → Assign CRM). */
+  crm: boolean;
 };
 
 const STORAGE_KEY = "nb_admin_store";

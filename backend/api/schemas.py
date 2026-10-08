@@ -891,6 +891,8 @@ class StoreAccessOut(BaseModel):
     subtitle: str | None = None
     role: str
     template: str
+    # May open this store's CRM (always true for a super admin).
+    crm: bool = False
 
 
 class StoreOut(BaseModel):
@@ -1015,6 +1017,15 @@ class MembershipOut(BaseModel):
     # So the admin can say "Nature Bazar — Ecotine" where two stores share a name.
     subtitle: str | None = None
     role: str
+    # May open this store's CRM; set with PUT /users/{id}/crm.
+    crm: bool = False
+
+
+class CrmAccessUpdate(BaseModel):
+    """The stores whose CRM this person may open — all of them among the
+    stores they belong to. Stores left out lose it."""
+
+    store_ids: list[int] = Field(max_length=200)
 
 
 class MembershipsUpdate(BaseModel):
@@ -1028,3 +1039,107 @@ class MembershipsUpdate(BaseModel):
         if len(ids) != len(set(ids)):
             raise ValueError("A store is listed twice")
         return self
+
+
+# --- Expenses (CRM) ------------------------------------------------------------
+
+PaymentMethod = Literal["cash", "bkash", "nagad", "bank_transfer", "card", "other"]
+
+
+class ExpenseIn(BaseModel):
+    """What the Add Expense drawer sends. No date or time: the server stamps
+    the moment it is saved."""
+
+    category: str = Field(min_length=1, max_length=60)
+    item: str = Field(min_length=1, max_length=200)
+    amount: int = Field(gt=0, le=100_000_000)
+    payment_method: PaymentMethod
+    note: str | None = Field(default=None, max_length=1000)
+    # Honoured for a super admin only; everyone else is always the expense's
+    # own "added by".
+    added_by_name: str | None = Field(default=None, max_length=120)
+
+    @field_validator("category", "item", "note", "added_by_name")
+    @classmethod
+    def _strip(cls, v: str | None) -> str | None:
+        return v.strip() if isinstance(v, str) else v
+
+
+class ExpenseOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    spent_at: datetime
+    category: str
+    item: str
+    amount: int
+    payment_method: str
+    note: str | None = None
+    added_by_name: str
+    added_by_id: int | None = None
+    # How many proofs (receipts, screenshots) are attached, kept in Drive.
+    proof_count: int = 0
+    # Which ones, oldest first, so the table can show a thumbnail.
+    proofs: list["ExpenseProofRef"] = []
+
+
+class ExpenseProofRef(BaseModel):
+    id: int
+    mime_type: str
+
+
+class ExpenseProofOut(BaseModel):
+    """A proof attached to an expense. The file itself is fetched through
+    GET /expenses/proofs/{id}/file; Drive ids never reach the browser."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    filename: str
+    mime_type: str
+    size: int
+    created_at: datetime
+
+
+class ExpenseCategoryIn(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    # A Lucide icon key from the admin's picker. The list lives with the
+    # icons in the frontend; here only the shape is checked, and an unknown
+    # key simply shows as the plain tag.
+    icon: str = Field(default="tag", pattern=r"^[a-z][a-z0-9-]{0,39}$")
+
+    @field_validator("name")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        v = " ".join(v.split())
+        if not v:
+            raise ValueError("Name is empty")
+        return v
+
+
+class ExpenseCategoryOut(BaseModel):
+    # None for the defaults, which live in code and cannot be removed.
+    id: int | None = None
+    name: str
+    icon: str
+    # One of the categories every store starts with, which cannot be removed.
+    default: bool
+
+
+class ExpenseAmount(BaseModel):
+    label: str
+    amount: int
+
+
+class ExpenseSummaryOut(BaseModel):
+    """The Expenses page's figures for one Dhaka day and the month it is in."""
+
+    day: date
+    day_total: int
+    day_count: int
+    previous_day_total: int
+    # From the 1st of the month to the end of `day`, and the same days of the
+    # month before, so the two are a fair comparison mid-month.
+    month_total: int
+    previous_month_total: int
+    by_category: list[ExpenseAmount]

@@ -43,6 +43,7 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "members.read": frozenset({"owner", "manager"}),
     "members.write": frozenset({"owner"}),
 }
+# The CRM is not on this table: no store role carries it. See require_crm.
 
 ROLE_ORDER = (StoreRole.owner.value, StoreRole.manager.value, StoreRole.staff.value)
 
@@ -63,6 +64,9 @@ class StoreAccess:
     template: str = "classic"
     # Admin-only qualifier shown after the name ("Nature Bazar — Ecotine").
     subtitle: str | None = None
+    # May open this store's CRM: always for a super admin, else as a super
+    # admin set it on the membership (store_users.crm_access).
+    crm: bool = False
 
 
 @dataclass(frozen=True)
@@ -99,6 +103,7 @@ def accessible(user: User, memberships: list[StoreAccess], all_stores: list[Stor
                 s.is_active,
                 s.template,
                 s.subtitle,
+                True,
             )
             for s in all_stores
             if s.is_active
@@ -116,6 +121,7 @@ async def load_memberships(session: AsyncSession, user_id: int) -> list[StoreAcc
             Store.is_active,
             Store.template,
             Store.subtitle,
+            StoreUser.crm_access,
         )
         .join(Store, Store.id == StoreUser.store_id)
         .where(StoreUser.user_id == user_id)
@@ -205,3 +211,25 @@ def require(permission: str):
         return ctx
 
     return _check
+
+
+async def require_crm(
+    ctx: StoreContext = Depends(admin_store),
+    session: AsyncSession = Depends(get_session),
+) -> StoreContext:
+    """The StoreContext for the store's CRM, or 403. A super admin always
+    passes; anyone else needs crm_access on their membership of this store,
+    which only a super admin can set (Users → Assign CRM). Looked up here,
+    not in admin_store, so the rest of the admin pays nothing for it."""
+    if ctx.is_super_admin:
+        return ctx
+    allowed = await session.scalar(
+        select(StoreUser.crm_access).where(
+            StoreUser.user_id == ctx.user.id, StoreUser.store_id == ctx.store.id
+        )
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=403, detail="The CRM is open only to people a super admin chose"
+        )
+    return ctx

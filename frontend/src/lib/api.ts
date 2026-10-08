@@ -1,4 +1,4 @@
-import { request, requestForm, requestVoid } from "@/lib/http";
+import { request, requestBlob, requestForm, requestVoid } from "@/lib/http";
 import type {
   FraudCheck,
   Order,
@@ -773,10 +773,18 @@ type ApiMembership = {
   name: string;
   subtitle?: string | null;
   role: StoreRole;
+  crm?: boolean;
 };
 
 function mapMembership(m: ApiMembership): Membership {
-  return { storeId: m.store_id, slug: m.slug, name: m.name, subtitle: m.subtitle ?? null, role: m.role };
+  return {
+    storeId: m.store_id,
+    slug: m.slug,
+    name: m.name,
+    subtitle: m.subtitle ?? null,
+    role: m.role,
+    crm: m.crm ?? false,
+  };
 }
 
 function mapAuthUser(user: ApiUser): AuthUser {
@@ -801,6 +809,16 @@ function mapTeamMember(user: ApiUser): TeamMember {
     pinned: user.pinned ?? false,
     memberships: (user.memberships ?? []).map(mapMembership),
   };
+}
+
+/** Choose which of a user's stores they may open the CRM in (super admin):
+ *  exactly these, all among the stores they belong to. */
+export async function setUserCrm(userId: number, storeIds: number[]): Promise<TeamMember> {
+  const user = await request<ApiUser>(`/api/users/${userId}/crm`, {
+    method: "PUT",
+    body: JSON.stringify({ store_ids: storeIds }),
+  });
+  return mapTeamMember(user);
 }
 
 /** Replace a user's store memberships (super admin). */
@@ -829,6 +847,7 @@ export async function getMyStores(): Promise<StoreAccess[]> {
       subtitle: string | null;
       role: string;
       template: string;
+      crm?: boolean;
     }[]
   >("/api/me/stores");
   return rows.map((r) => ({
@@ -838,6 +857,7 @@ export async function getMyStores(): Promise<StoreAccess[]> {
     subtitle: r.subtitle ?? null,
     role: r.role,
     template: r.template,
+    crm: r.crm ?? false,
   }));
 }
 
@@ -1638,3 +1658,221 @@ export async function recheckOrderFraud(
     )
   );
 }
+
+// ---- Expenses (CRM) ----
+
+export type PaymentMethod = "cash" | "bkash" | "nagad" | "bank_transfer" | "card" | "other";
+
+export const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
+  { value: "cash", label: "Cash" },
+  { value: "bkash", label: "bKash" },
+  { value: "nagad", label: "Nagad" },
+  { value: "bank_transfer", label: "Bank transfer" },
+  { value: "card", label: "Card" },
+  { value: "other", label: "Other" },
+];
+
+export type Expense = {
+  id: number;
+  /** Stamped by the server when the expense was added. */
+  spent_at: string;
+  category: string;
+  item: string;
+  amount: number;
+  payment_method: PaymentMethod;
+  note: string | null;
+  added_by_name: string;
+  added_by_id: number | null;
+  /** Receipts or screenshots attached, kept in Google Drive. */
+  proof_count: number;
+  /** Which ones, oldest first (the table shows the first as a thumbnail). */
+  proofs: { id: number; mime_type: string }[];
+};
+
+/** What the drawer sends. No date: the server stamps it. added_by_name is
+ *  honoured for a super admin only. */
+export type ExpenseInput = {
+  category: string;
+  item: string;
+  amount: number;
+  payment_method: PaymentMethod;
+  note?: string | null;
+  added_by_name?: string | null;
+};
+
+/** icon is a key from components/admin/expense-icons.tsx. id is null for
+ *  the defaults, which cannot be removed. */
+export type ExpenseCategory = {
+  id: number | null;
+  name: string;
+  icon: string;
+  default: boolean;
+};
+
+/** Removes one of the store's own categories; returns the whole list. */
+export async function deleteExpenseCategory(id: number): Promise<ExpenseCategory[]> {
+  return request<ExpenseCategory[]>(`/api/expenses/categories/${id}`, { method: "DELETE" });
+}
+
+export type ExpenseAmount = { label: string; amount: number };
+
+export type ExpenseSummary = {
+  day: string;
+  day_total: number;
+  day_count: number;
+  previous_day_total: number;
+  /** 1st of the month to the end of `day`, against the same days of last month. */
+  month_total: number;
+  previous_month_total: number;
+  by_category: ExpenseAmount[];
+};
+
+/** Total spent each of the `days` days ending on `day`, oldest first, empty
+ *  days included as 0; label is the date. */
+export async function getExpenseTrend(day: string, days: number): Promise<ExpenseAmount[]> {
+  return request<ExpenseAmount[]>(`/api/expenses/trend?day=${day}&days=${days}`);
+}
+
+export async function listExpenses(day: string): Promise<Expense[]> {
+  return request<Expense[]>(`/api/expenses?day=${day}`);
+}
+
+export async function getExpenseSummary(day: string): Promise<ExpenseSummary> {
+  return request<ExpenseSummary>(`/api/expenses/summary?day=${day}`);
+}
+
+export async function addExpense(input: ExpenseInput): Promise<Expense> {
+  return request<Expense>("/api/expenses", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function editExpense(id: number, input: ExpenseInput): Promise<Expense> {
+  return request<Expense>(`/api/expenses/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteExpense(id: number): Promise<void> {
+  await requestVoid(`/api/expenses/${id}`, { method: "DELETE" });
+}
+
+export async function listExpenseCategories(): Promise<ExpenseCategory[]> {
+  return request<ExpenseCategory[]>("/api/expenses/categories");
+}
+
+/** Adds a category; returns the store's whole list. */
+export async function addExpenseCategory(
+  name: string,
+  icon: string
+): Promise<ExpenseCategory[]> {
+  return request<ExpenseCategory[]>("/api/expenses/categories", {
+    method: "POST",
+    body: JSON.stringify({ name, icon }),
+  });
+}
+
+// ---- Expense proofs (Google Drive) ----
+
+export type ExpenseProof = {
+  id: number;
+  filename: string;
+  mime_type: string;
+  size: number;
+  created_at: string;
+};
+
+export async function listExpenseProofs(expenseId: number): Promise<ExpenseProof[]> {
+  return request<ExpenseProof[]>(`/api/expenses/${expenseId}/proofs`);
+}
+
+/** Attaches files to an expense (stored in Drive); returns all its proofs. */
+export async function uploadExpenseProofs(
+  expenseId: number,
+  files: File[]
+): Promise<ExpenseProof[]> {
+  const body = new FormData();
+  for (const f of files) body.append("files", f);
+  return requestForm<ExpenseProof[]>(`/api/expenses/${expenseId}/proofs`, body);
+}
+
+export async function deleteExpenseProof(proofId: number): Promise<void> {
+  await requestVoid(`/api/expenses/proofs/${proofId}`, { method: "DELETE" });
+}
+
+/** The proof file itself, for showing in the admin only (see requestBlob). */
+export async function getExpenseProofFile(proofId: number): Promise<Blob> {
+  return requestBlob(`/api/expenses/proofs/${proofId}/file`);
+}
+
+/** A small preview of a proof (photos and PDFs), for the table. */
+export async function getExpenseProofThumb(proofId: number): Promise<Blob> {
+  return requestBlob(`/api/expenses/proofs/${proofId}/thumb`);
+}
+
+// ---- Google Drive connection (super admin) ----
+
+export type DriveStatus = {
+  /** The OAuth client is set in the server's environment. */
+  configured: boolean;
+  connected: boolean;
+  account_email: string | null;
+  root_folder: string;
+  connected_at: string | null;
+};
+
+export async function getDriveStatus(): Promise<DriveStatus> {
+  return request<DriveStatus>("/api/drive/status");
+}
+
+/** Google's consent page to send the browser to. */
+export async function connectDrive(): Promise<string> {
+  return (await request<{ url: string }>("/api/drive/connect", { method: "POST" })).url;
+}
+
+export async function disconnectDrive(): Promise<void> {
+  await requestVoid("/api/drive/disconnect", { method: "POST" });
+}
+
+// ---- Sending a proof from a phone (QR code) ----
+
+export type DropFile = { id: number; filename: string; mime_type: string; size: number };
+
+export type ProofDrop = { id: number; expires_at: string; files: DropFile[] };
+
+/** A new phone-upload link; `token` is the secret for the QR code, given
+ *  only here. */
+export async function createProofDrop(): Promise<ProofDrop & { token: string }> {
+  return request<ProofDrop & { token: string }>("/api/proof-drops", { method: "POST" });
+}
+
+export async function getProofDrop(dropId: number): Promise<ProofDrop> {
+  return request<ProofDrop>(`/api/proof-drops/${dropId}`);
+}
+
+export async function getProofDropThumb(dropId: number, fileId: number): Promise<Blob> {
+  return requestBlob(`/api/proof-drops/${dropId}/files/${fileId}/thumb`);
+}
+
+export async function removeProofDropFile(dropId: number, fileId: number): Promise<void> {
+  await requestVoid(`/api/proof-drops/${dropId}/files/${fileId}`, { method: "DELETE" });
+}
+
+/** Files the phone's pictures with a saved expense. */
+export async function attachProofDrop(dropId: number, expenseId: number): Promise<ExpenseProof[]> {
+  return request<ExpenseProof[]>(`/api/proof-drops/${dropId}/attach/${expenseId}`, {
+    method: "POST",
+  });
+}
+
+export async function discardProofDrop(dropId: number): Promise<void> {
+  await requestVoid(`/api/proof-drops/${dropId}`, { method: "DELETE" });
+}
+
+/** The phone page's view of a drop (no sign-in; the link is the key). */
+export type DropInfo = {
+  store_name: string;
+  expires_at: string;
+  received: number;
+  max_files: number;
+  max_bytes: number;
+};

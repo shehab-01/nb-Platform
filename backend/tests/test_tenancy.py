@@ -169,7 +169,7 @@ def test_my_stores_lists_only_memberships(app):
     res = get(app, "/api/me/stores")
     assert res.status_code == 200
     assert res.json() == [
-        {"store_id": 2, "slug": "b", "name": "B", "subtitle": None, "role": "manager", "template": "classic"}
+        {"store_id": 2, "slug": "b", "name": "B", "subtitle": None, "role": "manager", "template": "classic", "crm": False}
     ]
 
 
@@ -190,6 +190,8 @@ def test_super_admin_sees_every_active_store(app):
         (1, "super_admin"),
         (2, "super_admin"),
     ]
+    # A super admin may open every store's CRM.
+    assert all(s["crm"] for s in rows)
 
 
 # --- the pure rule -------------------------------------------------------------

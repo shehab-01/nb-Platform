@@ -639,6 +639,11 @@ class StoreUser(Base):
         ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True
     )
     role: Mapped[str] = mapped_column(String(20))
+    # May open this store's CRM. Given by a super admin on the Users page,
+    # independent of the role: an owner does not get it by being one.
+    crm_access: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -710,3 +715,192 @@ class FraudCheck(Base):
     __table_args__ = (
         Index("ix_fraud_checks_store_phone_checked", "store_id", "phone_key", "checked_at"),
     )
+
+
+class Expense(Base):
+    """
+    Money a store spent: one purchase, bill or payment, recorded by its owner
+    (or a super admin) on the CRM's Expenses page.
+
+    spent_at is stamped by the server when the expense is added, never sent by
+    the browser. added_by_name is who the expense is put down to: the person
+    who typed it, or — for a super admin only — any name they enter, such as
+    a staff member who paid in cash. added_by_id is set when that person is the
+    signed-in user; created_by_id always records who actually typed it.
+    """
+
+    __tablename__ = "expenses"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
+    spent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    # A default category name or one of the store's own (expense_categories).
+    # Stored as text so renaming or removing a category never rewrites history.
+    category: Mapped[str] = mapped_column(String(60))
+    item: Mapped[str] = mapped_column(String(200))
+    # Whole taka.
+    amount: Mapped[int] = mapped_column(Integer)
+    payment_method: Mapped[str] = mapped_column(String(20))
+    note: Mapped[str | None] = mapped_column(Text)
+    added_by_name: Mapped[str] = mapped_column(String(120))
+    added_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (Index("ix_expenses_store_spent_at", "store_id", "spent_at"),)
+
+
+class ExpenseCategory(Base):
+    """A category a store added to the defaults every store starts with
+    (api.routers.expenses.DEFAULT_CATEGORIES, which live in code, not here)."""
+
+    __tablename__ = "expense_categories"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
+    name: Mapped[str] = mapped_column(String(60))
+    # A Lucide icon key from the admin's picker, e.g. "shopping-basket".
+    icon: Mapped[str] = mapped_column(String(40), default="tag")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_expense_categories_store_name", "store_id", "name", unique=True),
+    )
+
+
+class DriveConnection(Base):
+    """
+    The one Google account whose Drive holds the platform's files (expense
+    proofs). A single row, id 1, written when a super admin connects it from
+    Platform → System and deleted on disconnect.
+
+    The refresh token is Fernet ciphertext (api.crypto) and never leaves the
+    API: the admin only ever learns which account is connected. root_folder_id
+    is the "nbPlatform" folder the app created there — with the drive.file
+    scope the app sees only folders it made itself, so it creates its own.
+    """
+
+    __tablename__ = "drive_connection"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    refresh_token_enc: Mapped[bytes] = mapped_column(LargeBinary)
+    account_email: Mapped[str | None] = mapped_column(String(255))
+    root_folder_id: Mapped[str | None] = mapped_column(String(100))
+    connected_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    connected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class DriveFolder(Base):
+    """
+    Where a store's folders are in Drive, so each is looked up once: path ""
+    is the store's own folder, "expenses" the Expenses folder inside it,
+    "expenses/2026-10-09" a day. Keyed by store id, not name, so renaming a
+    store keeps its folder.
+    """
+
+    __tablename__ = "drive_folders"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
+    path: Mapped[str] = mapped_column(String(200))
+    folder_id: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_drive_folders_store_path", "store_id", "path", unique=True),
+    )
+
+
+class ExpenseProof(Base):
+    """A receipt or screenshot backing an expense, kept in Google Drive under
+    the store's Expenses folder, in the folder of the day it was spent. Only
+    the Drive file id is here; the file is private and the admin fetches it
+    through the API."""
+
+    __tablename__ = "expense_proofs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
+    expense_id: Mapped[int] = mapped_column(ForeignKey("expenses.id", ondelete="CASCADE"))
+    drive_file_id: Mapped[str] = mapped_column(String(100))
+    filename: Mapped[str] = mapped_column(String(255))
+    mime_type: Mapped[str] = mapped_column(String(100))
+    size: Mapped[int] = mapped_column(Integer)
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (Index("ix_expense_proofs_store_expense", "store_id", "expense_id"),)
+
+
+class ProofDrop(Base):
+    """
+    A short-lived "send from phone" link, opened from the expense drawer as a
+    QR code. Whoever holds the link may add pictures to it for 15 minutes —
+    nothing else. Only a hash of its secret is stored, so the database alone
+    cannot be used to forge one.
+
+    The pictures go straight to Google Drive (the store's Expenses/Incoming
+    folder); proof_drop_files only points at them. Saving the expense moves
+    them into that day's folder and attaches them; an abandoned drop is
+    binned once it expires.
+    """
+
+    __tablename__ = "proof_drops"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
+    token_hash: Mapped[str] = mapped_column(String(64))
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_proof_drops_token_hash", "token_hash", unique=True),
+        Index("ix_proof_drops_store_expires", "store_id", "expires_at"),
+    )
+
+
+class ProofDropFile(Base):
+    """A picture sent to a drop from a phone, waiting in Drive to be filed."""
+
+    __tablename__ = "proof_drop_files"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
+    drop_id: Mapped[int] = mapped_column(ForeignKey("proof_drops.id", ondelete="CASCADE"))
+    drive_file_id: Mapped[str] = mapped_column(String(100))
+    filename: Mapped[str] = mapped_column(String(255))
+    mime_type: Mapped[str] = mapped_column(String(100))
+    size: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (Index("ix_proof_drop_files_store_drop", "store_id", "drop_id"),)

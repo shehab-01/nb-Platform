@@ -8,6 +8,15 @@ from api.services import pathao, pathao_address
 from api.services.pathao_address import ParseResult
 from api.stores import PathaoConfig
 
+
+@pytest.fixture(autouse=True)
+def _parser_switched_on(monkeypatch):
+    # The parser is on wherever PATHAO_PARSER_URL is set, and dev machines
+    # switch it off (compose.dev.yaml). These tests stub the call itself, so
+    # a dummy URL is enough and no request ever leaves the process.
+    monkeypatch.setattr(pathao_address.settings, "pathao_parser_url", "https://parser.test")
+
+
 CFG = PathaoConfig(client_id="c", client_secret="s", username="u", password="p", store_id=1)
 
 ENGLISH = {

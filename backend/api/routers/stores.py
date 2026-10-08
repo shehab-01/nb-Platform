@@ -7,6 +7,7 @@ Five routers, five gates. `router` (/storefront) and `check_router`
 the platform's business, no store role reaches it. `health_router` (/stores)
 is the one read a store's own staff share with a super admin, so it carries
 its own membership gate instead."""
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -31,7 +32,9 @@ from api.schemas import (
     StoreUpdate,
 )
 from api.media import describe as describe_image
-from api.services import domain_health
+from api.services import domain_health, gdrive
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/storefront", tags=["Storefront"])
 # No prefix: the domain check has to sit at the same path on every storefront
@@ -155,6 +158,7 @@ async def my_stores(
             subtitle=a.subtitle,
             role=a.role,
             template=a.template,
+            crm=a.crm,
         )
         for a in await tenancy.accessible_stores(session, user)
     ]
@@ -286,7 +290,25 @@ async def create_store(
     await _set_domains(session, store, payload.domains)
     await session.commit()
     stores.invalidate()
+    await _drive_folder(session, store.id)
     return _out(await _reload(session, store.id))
+
+
+async def _drive_folder(session: AsyncSession, store_id: int, *, rename: bool = False) -> None:
+    """Make (or, after a rename, retitle) the store's folder in Google Drive.
+    Best effort: a store is never held up by Drive — not connected, or
+    unreachable, the folder is simply made on the store's first upload."""
+    store = await session.get(Store, store_id)
+    if store is None:
+        return
+    try:
+        if await gdrive.connection(session) is None:
+            return
+        folder = await gdrive.store_folder(session, store)
+        if rename:
+            await gdrive.rename(session, folder, gdrive.store_folder_name(store))
+    except gdrive.DriveError as err:
+        log.warning("Drive: no folder for store %s yet: %s", store_id, err.message)
 
 
 @admin_router.patch("/{store_id}", response_model=StoreOut)
@@ -294,6 +316,7 @@ async def update_store(
     store_id: int, payload: StoreUpdate, session: AsyncSession = Depends(get_session)
 ) -> StoreOut:
     store = await _get_or_404(session, store_id)
+    title_before = (store.name, store.subtitle)
     if payload.name is not None:
         store.name = payload.name
     if "subtitle" in payload.model_fields_set:
@@ -316,8 +339,11 @@ async def update_store(
         store.is_active = payload.is_active
     if payload.domains is not None:
         await _set_domains(session, store, payload.domains)
+    retitled = (store.name, store.subtitle) != title_before
     await session.commit()
     stores.invalidate()
+    if retitled:
+        await _drive_folder(session, store_id, rename=True)
     return _out(await _reload(session, store_id))
 
 

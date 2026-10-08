@@ -57,7 +57,7 @@ are), `docs/ARCHITECTURE-V1.md` (what we inherited), `DEV.md` (running it),
 ```
 backend/   FastAPI. api/models.py, api/routers/*, api/services/* (meta_capi,
            pathao, pathao_address), api/stores.py (host → store), api/tenancy.py
-           (memberships, X-Admin-Store), alembic/versions (0001–0028), scripts/seed_dev.py,
+           (memberships, X-Admin-Store), alembic/versions (0001–0033), scripts/seed_dev.py,
            tests/ (pytest, no DB)
 frontend/  Next.js 16 App Router. src/proxy.ts (host routing), src/lib/store.ts
            (server-side store config), src/lib/admin-store.ts (+ lib/http.ts:

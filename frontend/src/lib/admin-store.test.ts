@@ -9,6 +9,7 @@ const a: StoreAccess = {
   subtitle: null,
   role: "staff",
   template: "classic",
+  crm: false,
 };
 const b: StoreAccess = {
   storeId: 2,
@@ -17,6 +18,7 @@ const b: StoreAccess = {
   subtitle: "Ecotine",
   role: "owner",
   template: "classic",
+  crm: false,
 };
 
 describe("storeTitle", () => {

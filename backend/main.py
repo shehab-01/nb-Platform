@@ -9,6 +9,10 @@ from api import media, monitoring
 from api.config import settings
 from api.db import engine
 from api.routers.auth import router as auth_router
+from api.routers.drive import router as drive_router
+from api.routers.expenses import router as expenses_router
+from api.routers.proof_drops import admin_router as proof_drops_router
+from api.routers.proof_drops import public_router as proof_drop_public_router
 from api.routers.orders import router as orders_router
 from api.routers.products import public_router as storefront_router
 from api.routers.products import router as products_router
@@ -58,6 +62,10 @@ app.add_middleware(monitoring.TrafficMiddleware)
 
 app.include_router(auth_router, prefix="/api")
 app.include_router(orders_router, prefix="/api")
+app.include_router(expenses_router, prefix="/api")
+app.include_router(drive_router, prefix="/api")
+app.include_router(proof_drops_router, prefix="/api")
+app.include_router(proof_drop_public_router, prefix="/api")
 app.include_router(users_router, prefix="/api")
 app.include_router(system_router, prefix="/api")
 app.include_router(products_router, prefix="/api")

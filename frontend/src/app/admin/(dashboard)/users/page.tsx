@@ -5,6 +5,7 @@ import * as React from "react";
 import { useAuth } from "@/components/admin/auth-context";
 import { DataTable } from "@/components/admin/data-table/data-table";
 import { getTeamColumns } from "@/components/admin/users/columns";
+import { CrmDialog } from "@/components/admin/users/crm-dialog";
 import { MembershipsDialog } from "@/components/admin/users/memberships-dialog";
 import { NicknameDialog } from "@/components/admin/users/nickname-dialog";
 import { PendingRequests } from "@/components/admin/users/pending-requests";
@@ -12,6 +13,7 @@ import {
   deleteUser,
   listStores,
   listUsers,
+  setUserCrm,
   setUserMemberships,
   updateUser,
   type Store,
@@ -99,6 +101,15 @@ export default function UsersPage() {
 
   const [nicknameFor, setNicknameFor] = React.useState<TeamMember | null>(null);
   const [membershipsFor, setMembershipsFor] = React.useState<TeamMember | null>(null);
+  const [crmFor, setCrmFor] = React.useState<TeamMember | null>(null);
+
+  const handleCrm = React.useCallback(
+    async (id: number, storeIds: number[]) => {
+      await setUserCrm(id, storeIds);
+      await refresh();
+    },
+    [refresh]
+  );
 
   const handleMemberships = React.useCallback(
     async (id: number, memberships: { storeId: number; role: StoreRole }[]) => {
@@ -128,6 +139,7 @@ export default function UsersPage() {
         onRoleChange: handleRoleChange,
         onEditNickname: setNicknameFor,
         onEditMemberships: setMembershipsFor,
+        onEditCrm: setCrmFor,
       }),
     [currentUser.id, handleStatusChange, handleRoleChange]
   );
@@ -184,6 +196,11 @@ export default function UsersPage() {
         stores={stores.filter((s) => !s.archivedAt)}
         onOpenChange={(open) => !open && setMembershipsFor(null)}
         onSave={handleMemberships}
+      />
+      <CrmDialog
+        member={crmFor}
+        onOpenChange={(open) => !open && setCrmFor(null)}
+        onSave={handleCrm}
       />
     </div>
   );

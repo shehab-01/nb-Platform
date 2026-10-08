@@ -38,3 +38,6 @@ npm-debug.log*
 # -----------------
 .DS_Store
 Thumbs.db
+# Google OAuth files, should any ever be downloaded into the repo
+client_secret*.json
+token.json

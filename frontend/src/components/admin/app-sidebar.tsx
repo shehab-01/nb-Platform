@@ -16,6 +16,7 @@ import {
   ShoppingCart,
   Store,
   Users,
+  Wallet,
 } from "lucide-react";
 
 import { useAuth, type Permission } from "@/components/admin/auth-context";
@@ -101,6 +102,12 @@ const platformNav: NavItem[] = [
   { title: "System", url: "/admin/system", icon: Activity },
 ];
 
+/** Running the business behind the store being worked in: per store, each
+ *  item gated by its own permission. */
+const crmNav: NavItem[] = [
+  { title: "Expenses", url: "/admin/crm/expenses", icon: Wallet, permission: "crm" },
+];
+
 function roleLabel(role: string): string {
   return role === "super_admin"
     ? ROLE_LABELS.super_admin
@@ -114,6 +121,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
   const items = store
     ? storeNav.filter((item) => !item.permission || can(item.permission))
+    : [];
+  const crmItems = store
+    ? crmNav.filter((item) => !item.permission || can(item.permission))
     : [];
 
   return (
@@ -267,6 +277,29 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                     <SidebarMenuButton
                       asChild
                       isActive={pathname === item.url}
+                      tooltip={item.title}
+                    >
+                      <Link href={item.url}>
+                        <item.icon />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+        {crmItems.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>CRM</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {crmItems.map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={pathname.startsWith(item.url)}
                       tooltip={item.title}
                     >
                       <Link href={item.url}>

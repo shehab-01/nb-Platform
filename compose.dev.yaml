@@ -1,0 +1,58 @@
+# Hot-reload development on top of compose.yaml — never used in production.
+#
+#   docker compose -f compose.yaml -f compose.dev.yaml up -d
+#
+# The api and web containers run the code straight from this checkout (bind
+# mounts) instead of baking it into an image, and restart on save: uvicorn
+# --reload for the API, `next dev` for the web app. Postgres is unchanged.
+#
+# Polling is on because file-change events do not cross from a Windows
+# folder into Docker's Linux VM; with the checkout inside WSL instead, it is
+# harmless.
+services:
+  api:
+    # pytest and friends on top of the production packages, so
+    # `docker compose exec api python -m pytest tests -q` works.
+    command: >
+      sh -c "pip install -q --root-user-action=ignore -r requirements-dev.txt &&
+             alembic upgrade head &&
+             exec uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+    environment:
+      WATCHFILES_FORCE_POLLING: "true"
+      # Never a production API from a dev machine, whatever .env says:
+      # Pathao's sandbox only, and its address parser (live-only, see
+      # docs/PATHAO-ADDRESS-PARSER.md) off. compose.yaml's own default for
+      # the parser is the live URL, which an empty .env value cannot undo.
+      PATHAO_BASE_URL: https://courier-api-sandbox.pathao.com
+      PATHAO_PARSER_URL: ""
+      # Dev may share the Google account, never production's folders: its
+      # own top folder in that Drive, and its own token in its own database.
+      GOOGLE_DRIVE_ROOT_NAME: nbPlatform-dev
+    volumes:
+      - ./backend:/app
+      # Uploads stay in their named volume, mounted over the code.
+      - media:/app/media
+
+  web:
+    # Plain Node instead of the production image: `next dev` serves the
+    # source as it changes.
+    build: !reset null
+    image: node:22-alpine
+    working_dir: /app
+    # --webpack: Turbopack, next dev's default, ignores WATCHPACK_POLLING
+    # and never sees edits made in a Windows folder; webpack polls them.
+    # Production builds are unaffected (next build in the Dockerfile).
+    command: sh -c "npm ci && exec npm run dev -- -H 0.0.0.0 --webpack"
+    environment:
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - ./frontend:/app
+      # Linux node_modules and the build cache live in volumes, never in the
+      # Windows folder: faster, and no clash with a node_modules on the host.
+      - web-node-modules:/app/node_modules
+      - web-next:/app/.next
+
+volumes:
+  web-node-modules:
+  web-next:

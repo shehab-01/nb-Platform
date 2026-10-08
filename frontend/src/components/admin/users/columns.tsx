@@ -31,12 +31,14 @@ export function getTeamColumns({
   onRoleChange,
   onEditNickname,
   onEditMemberships,
+  onEditCrm,
 }: {
   currentUserId: number;
   onStatusChange: (id: number, status: UserStatus) => void;
   onRoleChange: (id: number, role: UserRole) => void;
   onEditNickname: (member: TeamMember) => void;
   onEditMemberships: (member: TeamMember) => void;
+  onEditCrm: (member: TeamMember) => void;
 }): ColumnDef<TeamMember>[] {
   return [
     {
@@ -116,6 +118,11 @@ export function getTeamColumns({
               <Badge key={x.storeId} variant="outline" title={STORE_ROLE_LABELS[x.role]}>
                 {storeTitle(x)}
                 <span className="ml-1 text-muted-foreground">{STORE_ROLE_LABELS[x.role].toLowerCase()}</span>
+                {x.crm && (
+                  <span className="ml-1 rounded bg-primary/10 px-1 text-[10px] font-medium text-primary">
+                    CRM
+                  </span>
+                )}
               </Badge>
             ))}
           </div>
@@ -211,6 +218,9 @@ export function getTeamColumns({
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => onEditMemberships(row.original)}>
                 Assign stores
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onEditCrm(row.original)}>
+                Assign CRM
               </DropdownMenuItem>
               {canChangeRole && <DropdownMenuSeparator />}
               {canChangeRole &&

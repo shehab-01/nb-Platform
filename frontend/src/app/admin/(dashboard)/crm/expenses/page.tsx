@@ -766,9 +766,8 @@ function slotColor(slot: number): string {
 }
 
 
-/** The day's spend in every category, one tile each, icon tinted with the
- *  category's colour. Categories with nothing that day stay, dimmed, so the
- *  row reads the same every day. */
+/** The day's spend by category, one tile for each category that had any,
+ *  its icon tinted with the category's colour. */
 function CategoryTiles({
   rows,
   total,
@@ -784,19 +783,24 @@ function CategoryTiles({
     ...categories.map((c) => c.name),
     ...rows.map((r) => r.label).filter((l) => !categories.some((c) => c.name === l)),
   ];
+  // Only what had spending that day. The colour slot is taken from the full
+  // list first, so a category keeps its donut colour whatever else is shown.
+  const shown = names
+    .map((name, slot) => ({ name, slot }))
+    .filter(({ name }) => (spent.get(name) ?? 0) > 0);
+  if (shown.length === 0) {
+    return <p className="py-6 text-center text-sm text-muted-foreground">Nothing spent.</p>;
+  }
   return (
     <div className="grid grid-cols-2 gap-3 @xl:grid-cols-3 @4xl:grid-cols-4 @6xl:grid-cols-7">
-      {names.map((name, i) => {
+      {shown.map(({ name, slot: i }) => {
         const amount = spent.get(name) ?? 0;
         const iconKey = categories.find((c) => c.name === name)?.icon;
         const color = slotColor(i);
         return (
           <div
             key={name}
-            className={cn(
-              "flex items-start gap-3 rounded-lg border p-3",
-              amount === 0 && "opacity-60"
-            )}
+            className="flex items-start gap-3 rounded-lg border p-3"
           >
             <span
               className="flex size-9 shrink-0 items-center justify-center rounded-full"

@@ -516,11 +516,15 @@ async def summary(
         )
 
     day_start, day_end = _day_bounds(d)
-    month_start = datetime(d.year, d.month, 1, tzinfo=DHAKA)
+    # The month figures are always this month so far, whichever day the page
+    # is looking at: going back to an earlier day must not change them.
+    today = _today()
+    _, month_end = _day_bounds(today)
+    month_start = datetime(today.year, today.month, 1, tzinfo=DHAKA)
     # The same days of last month: 1st to the same date, or its last day if
     # last month is shorter (31 March compares with 1–28/29 February).
     prev_first = (month_start - timedelta(days=1)).replace(day=1)
-    prev_end = min(prev_first + timedelta(days=d.day), month_start)
+    prev_end = min(prev_first + timedelta(days=today.day), month_start)
 
     day_count = await session.scalar(
         select(func.count()).where(
@@ -546,7 +550,7 @@ async def summary(
         day_total=await total(day_start, day_end),
         day_count=day_count or 0,
         previous_day_total=await total(day_start - timedelta(days=1), day_start),
-        month_total=await total(month_start, day_end),
+        month_total=await total(month_start, month_end),
         previous_month_total=await total(prev_first, prev_end),
         by_category=[ExpenseAmount(label=c, amount=a) for c, a in by_category],
     )

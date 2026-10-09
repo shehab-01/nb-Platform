@@ -1721,7 +1721,7 @@ export type ExpenseSummary = {
   day_total: number;
   day_count: number;
   previous_day_total: number;
-  /** 1st of the month to the end of `day`, against the same days of last month. */
+  /** This month, 1st to today — whatever `day` is — against the same days of last month. */
   month_total: number;
   previous_month_total: number;
   by_category: ExpenseAmount[];

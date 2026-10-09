@@ -1,0 +1,9 @@
+docker compose -f compose.yaml -f compose.dev.yaml up -d    # start (Docker Desktop must be open)
+docker compose logs -f api web                                # watch logs
+docker compose exec api python -m pytest tests -q             # backend tests
+docker compose exec web npm test                              # frontend tests
+docker compose down                                           # stop, keeps the database
+
+
+http://admin.nb.local:8090 and click Dev sign-in. You're super admin and owner of both stores.
+http://store1.nb.local:8090 and http://store2.nb.local:8090 for the storefronts.

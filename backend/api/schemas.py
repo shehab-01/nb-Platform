@@ -1138,8 +1138,8 @@ class ExpenseSummaryOut(BaseModel):
     day_total: int
     day_count: int
     previous_day_total: int
-    # From the 1st of the month to the end of `day`, and the same days of the
-    # month before, so the two are a fair comparison mid-month.
+    # This month from the 1st to the end of today — whichever day was asked
+    # for — and the same days of the month before, a fair comparison mid-month.
     month_total: int
     previous_month_total: int
     by_category: list[ExpenseAmount]

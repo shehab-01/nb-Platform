@@ -1,13 +1,17 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
+  ArrowLeft,
   CalendarDays,
   Copy,
   Flame,
   Package,
   Pencil,
   Plus,
+  RotateCcw,
   Shapes,
   ShoppingBasket,
   Trash2,
@@ -15,6 +19,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
+import { useAuth } from "@/components/admin/auth-context";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -35,18 +40,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import {
   deleteProductionDay,
   deleteProductionItem,
   deleteProductionProduct,
+  getProductionDay,
   PRODUCTION_UNITS,
   saveProductionDay,
   saveProductionItem,
@@ -61,8 +60,8 @@ import {
   unitLabel,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { dayLabel, dhakaToday, taka, takaPaisa } from "./format";
 import { PRODUCT_ICONS, ProductIcon } from "./product-icons";
-import { dayLabel, taka, takaPaisa } from "./format";
 
 // --- Form rows -------------------------------------------------------------------
 
@@ -109,18 +108,33 @@ const isBlankMisc = (m: MiscRow) => !m.purpose.trim() && !m.amount && !m.note.tr
 
 const NEW = "__new";
 
-// --- The sheet -------------------------------------------------------------------
+type FormProps = {
+  /** The production as saved, when correcting it. */
+  editing: ProductionDay | null;
+  /** The latest production, to start a new one from. */
+  template: ProductionDay | null;
+  products: ProductionProduct[];
+  items: ProductionItem[];
+  suggestions: ProductionSuggestions;
+  onProducts: (p: ProductionProduct[]) => void;
+  onItems: (i: ProductionItem[]) => void;
+};
 
 /**
- * Making a day a production day, or correcting one. Wide, on the right, over
- * the page, in numbered cards. When the day is new, the time, shifts, team
- * and products of the latest production day are filled in (`template`), and
- * its bazar list is one click away. Raw materials and products are picked
- * from the store's own lists, managed from here. Every figure shown is a
- * preview; the server works out what is saved.
+ * Adding a production, or correcting one, as a page of numbered cards laid
+ * out like the dashboard it becomes. The date is today; a super admin may
+ * pick an earlier one (or move a saved production). A new production starts
+ * from the latest one's time, shifts, team and products, with its bazar list
+ * one click away. Every figure shown is a preview: the server works out
+ * what is saved. Saving goes back to the list.
  */
-export function ProductionSheet({
-  day,
+export function ProductionForm(props: FormProps) {
+  // Reset starts the form over from what it opened with.
+  const [round, setRound] = React.useState(0);
+  return <FormBody key={round} {...props} onReset={() => setRound((r) => r + 1)} />;
+}
+
+function FormBody({
   editing,
   template,
   products,
@@ -128,25 +142,14 @@ export function ProductionSheet({
   suggestions,
   onProducts,
   onItems,
-  onClose,
-  onSaved,
-  onDeleted,
-}: {
-  day: string;
-  /** The day as saved, when correcting it. */
-  editing: ProductionDay | null;
-  /** The latest production day, to start a new one from. */
-  template: ProductionDay | null;
-  products: ProductionProduct[];
-  items: ProductionItem[];
-  suggestions: ProductionSuggestions;
-  onProducts: (p: ProductionProduct[]) => void;
-  onItems: (i: ProductionItem[]) => void;
-  onClose: () => void;
-  onSaved: () => void;
-  onDeleted: () => void;
-}) {
+  onReset,
+}: FormProps & { onReset: () => void }) {
+  const router = useRouter();
+  const { isSuperAdmin } = useAuth();
+  const today = dhakaToday();
   const start = editing ?? template;
+
+  const [day, setDay] = React.useState(editing?.day ?? today);
   const [startsAt, setStartsAt] = React.useState(hm(start?.starts_at));
   const [endsAt, setEndsAt] = React.useState(hm(start?.ends_at));
   const [shifts, setShifts] = React.useState<ShiftRow[]>(
@@ -203,8 +206,22 @@ export function ProductionSheet({
   );
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
 
-  // Offered in the dropdowns: the store's lists, plus anything this day
-  // already has that was since removed (the server accepts those here).
+  // One production per date: is the picked date already taken (by another)?
+  const [taken, setTaken] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (day === editing?.day) return;
+    let cancelled = false;
+    getProductionDay(day)
+      .then((r) => !cancelled && setTaken(r ? day : null))
+      .catch(() => !cancelled && setTaken(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [day, editing]);
+  const dateTaken = taken === day && day !== editing?.day;
+
+  // Offered in the dropdowns: the store's lists, plus anything this
+  // production already has that was since removed (the server accepts those).
   const savedUnits = React.useMemo(
     () => new Map((editing?.materials ?? []).map((m) => [m.item, m.unit])),
     [editing]
@@ -232,6 +249,7 @@ export function ProductionSheet({
 
   // --- What is wrong, if anything ---
   const problems: string[] = [];
+  if (dateTaken) problems.push("এই তারিখে আগেই একটি প্রোডাকশন আছে।");
   const filledBatches = batches.filter((b) => b.product || b.jarsPerPatil);
   if (filledBatches.length === 0) problems.push("অন্তত একটি রান্না করা পণ্য যোগ করুন।");
   if (filledBatches.some((b) => !b.product || int(b.patils) < 1 || int(b.jarsPerPatil) < 1))
@@ -244,6 +262,8 @@ export function ProductionSheet({
   if (filledMisc.some((m) => !m.purpose.trim() || int(m.amount) < 1))
     problems.push("প্রতিটি অন্যান্য খরচের কারণ ও টাকার পরিমাণ দিন।");
   if (shifts.some((s) => !s.starts || !s.ends)) problems.push("প্রতিটি শিফটের শুরু ও শেষের সময় দিন।");
+
+  const backTo = editing ? `/admin/crm/production/${editing.day}` : "/admin/crm/production";
 
   const save = async () => {
     if (saving) return;
@@ -290,8 +310,9 @@ export function ProductionSheet({
       note: note.trim() || null,
     };
     try {
-      await saveProductionDay(day, input);
-      onSaved();
+      await saveProductionDay(day, input, editing?.day);
+      // Back to the list, on the saved production's month.
+      router.push(`/admin/crm/production?month=${day.slice(0, 7)}&saved=${day}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save");
       setSaving(false);
@@ -323,421 +344,475 @@ export function ProductionSheet({
     setShifts((rows) => rows.map((r) => (r.key === k ? { ...r, ...patch } : r)));
 
   const canCopy = !editing && template !== null && template.materials.length > 0;
+  const canPickDate = isSuperAdmin;
 
   return (
-    <Sheet open onOpenChange={(o) => !o && !saving && onClose()}>
-      <SheetContent className="w-full gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-3xl">
-        <SheetHeader className="border-b px-5 py-4">
-          <SheetTitle className="text-lg font-semibold">
-            {editing ? "Edit production day" : "Start production day"}
-          </SheetTitle>
-          <SheetDescription>
-            এই দিনের রান্নার সব খরচ। সেভ করলে মোট হিসাব করা হবে।
-          </SheetDescription>
-        </SheetHeader>
+    <div className="@container">
+      {/* --- Heading --- */}
+      <Link
+        href={backTo}
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="size-4" />
+        {editing ? "Back to the production" : "Back to productions"}
+      </Link>
+      <h1 className="mt-3 text-2xl font-bold tracking-tight">
+        {editing ? "Edit production" : "Add production"}
+      </h1>
+      <p className="mt-1 text-sm text-muted-foreground">
+        এই দিনের রান্নার সব খরচ লিখুন। সেভ করলে মোট হিসাব হবে আর তালিকায় যোগ হবে।
+      </p>
 
-        <form
-          className="flex flex-1 flex-col gap-4 overflow-y-auto bg-muted/40 p-4 sm:p-5"
-          onSubmit={(e) => {
-            e.preventDefault();
-            save();
-          }}
-        >
-          {/* --- 1. Date and time --- */}
-          <Step n={1} title="Date & time">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <Field label="Date" className="col-span-2 sm:col-span-1">
+      <form
+        className="mt-6 grid gap-4 @4xl:grid-cols-12"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save();
+        }}
+      >
+        {/* --- 1. Date and time --- */}
+        <Step n={1} title="Date & basic info" className="@4xl:col-span-6">
+          <div className="grid gap-3 @md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)]">
+            <Field label="Date">
+              {canPickDate ? (
+                <Input
+                  type="date"
+                  value={day}
+                  max={today}
+                  onChange={(e) => e.target.value && setDay(e.target.value)}
+                />
+              ) : (
                 <div className="flex h-9 items-center gap-2 rounded-md border bg-muted/40 px-3 text-sm">
                   <CalendarDays className="size-4 text-muted-foreground" />
                   {dayLabel(day, { weekday: true })}
                 </div>
-              </Field>
-              <Field label="Starts">
-                <Input type="time" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} />
-              </Field>
-              <Field label="Ends">
-                <Input type="time" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} />
-              </Field>
-            </div>
-            {shifts.length > 0 && (
-              <div className="grid gap-2">
-                <RowHead cols="grid-cols-[4rem_1fr_1fr_5rem_2rem]" labels={["", "Starts", "Ends", "Cooks", ""]} />
-                {shifts.map((s, i) => (
-                  <div key={s.key} className="grid grid-cols-[4rem_1fr_1fr_5rem_2rem] items-center gap-2">
-                    <span className="text-sm text-muted-foreground">Shift {i + 1}</span>
-                    <Input
-                      type="time"
-                      aria-label={`Shift ${i + 1} starts`}
-                      value={s.starts}
-                      onChange={(e) => setShift(s.key, { starts: e.target.value })}
-                    />
-                    <Input
-                      type="time"
-                      aria-label={`Shift ${i + 1} ends`}
-                      value={s.ends}
-                      onChange={(e) => setShift(s.key, { ends: e.target.value })}
-                    />
-                    <Input
-                      inputMode="numeric"
-                      aria-label={`Shift ${i + 1} cooks`}
-                      placeholder="0"
-                      value={s.cooks}
-                      onChange={(e) => setShift(s.key, { cooks: digits(e.target.value) })}
-                      className="tabular-nums"
-                    />
-                    <RemoveButton
-                      label={`Remove shift ${i + 1}`}
-                      onClick={() => setShifts((rows) => rows.filter((r) => r.key !== s.key))}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-            {shifts.length < 6 && (
-              <AddButton
-                onClick={() =>
-                  setShifts((rows) => [...rows, { key: key(), starts: "", ends: "", cooks: "" }])
-                }
+              )}
+            </Field>
+            <Field label="Starts">
+              <Input type="time" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} />
+            </Field>
+            <Field label="Ends">
+              <Input type="time" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} />
+            </Field>
+          </div>
+          <p className="-mt-1 text-xs text-muted-foreground">
+            {canPickDate
+              ? "তারিখ আজকের; আগের কোনো দিনের প্রোডাকশন লিখতে তারিখ বদলান।"
+              : "তারিখ নিজে থেকেই আজকের। শুধু সুপার অ্যাডমিন অন্য তারিখ দিতে পারেন।"}
+          </p>
+          {dateTaken && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm">
+              {dayLabel(day, { weekday: true })}-এ আগেই একটি প্রোডাকশন আছে।{" "}
+              <Link
+                href={`/admin/crm/production/${day}`}
+                className="font-medium text-primary hover:underline"
               >
-                Add shift
-              </AddButton>
-            )}
-          </Step>
+                সেটি খুলুন →
+              </Link>
+            </div>
+          )}
+        </Step>
 
-          {/* --- 2. The team and its pay --- */}
-          <Step n={2} title="Workforce & pay" hint="প্রত্যেক রাঁধুনির এক দিনের মজুরি।">
+        {/* --- 2. Shifts --- */}
+        <Step n={2} title="Shift information" hint="শুধু তথ্যের জন্য; মজুরি রাঁধুনি × দৈনিক মজুরি থেকে হিসাব হয়।" className="@4xl:col-span-6">
+          {shifts.length > 0 && (
             <div className="grid gap-2">
-              <RowHead cols="grid-cols-[6.5rem_1fr_1fr_6rem]" labels={["", "Cooks", "Pay each (৳)", "Total"]} />
-              {(
-                [
-                  ["Male", maleCooks, setMaleCooks, maleRate, setMaleRate],
-                  ["Female", femaleCooks, setFemaleCooks, femaleRate, setFemaleRate],
-                ] as const
-              ).map(([label, cooks, setCooks, rate, setRate]) => (
-                <div key={label} className="grid grid-cols-[6.5rem_1fr_1fr_6rem] items-center gap-2">
-                  <span className="text-sm">{label} cooks</span>
+              <RowHead cols="grid-cols-[4rem_1fr_1fr_4.5rem_2rem]" labels={["", "Starts", "Ends", "Cooks", ""]} />
+              {shifts.map((s, i) => (
+                <div key={s.key} className="grid grid-cols-[4rem_1fr_1fr_4.5rem_2rem] items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Shift {i + 1}</span>
                   <Input
-                    inputMode="numeric"
-                    aria-label={`${label} cooks`}
-                    placeholder="0"
-                    value={cooks}
-                    onChange={(e) => setCooks(digits(e.target.value))}
-                    className="tabular-nums"
+                    type="time"
+                    aria-label={`Shift ${i + 1} starts`}
+                    value={s.starts}
+                    onChange={(e) => setShift(s.key, { starts: e.target.value })}
+                  />
+                  <Input
+                    type="time"
+                    aria-label={`Shift ${i + 1} ends`}
+                    value={s.ends}
+                    onChange={(e) => setShift(s.key, { ends: e.target.value })}
                   />
                   <Input
                     inputMode="numeric"
-                    aria-label={`${label} pay each`}
+                    aria-label={`Shift ${i + 1} cooks`}
                     placeholder="0"
-                    value={rate}
-                    onChange={(e) => setRate(digits(e.target.value))}
+                    value={s.cooks}
+                    onChange={(e) => setShift(s.key, { cooks: digits(e.target.value) })}
                     className="tabular-nums"
                   />
-                  <span className="text-right text-sm tabular-nums">
-                    {taka(int(cooks) * int(rate))}
-                  </span>
+                  <RemoveButton
+                    label={`Remove shift ${i + 1}`}
+                    onClick={() => setShifts((rows) => rows.filter((r) => r.key !== s.key))}
+                  />
                 </div>
               ))}
             </div>
-            <Subtotal label={`Total labour · ${int(maleCooks) + int(femaleCooks)} cooks`}>
-              {taka(labourCost)}
-            </Subtotal>
-          </Step>
+          )}
+          {shifts.length < 6 && (
+            <AddButton
+              onClick={() =>
+                setShifts((rows) => [...rows, { key: key(), starts: "", ends: "", cooks: "" }])
+              }
+            >
+              Add shift
+            </AddButton>
+          )}
+        </Step>
 
-          {/* --- 3. The bazar list --- */}
-          <Step
-            n={3}
-            title="Raw materials"
-            hint="আইটেম বাছুন, তারপর আজ কতটুকু কেনা হলো আর একক দাম কত। পরিমাণ ও দাম না থাকলে মোট টাকা লিখুন।"
-            action={<LinkButton onClick={() => setManaging({ kind: "items" })}>Manage items</LinkButton>}
-          >
-            <div className="grid gap-3 sm:gap-2">
-              <RowHead
-                cols="grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1fr)_minmax(0,1fr)_2rem]"
-                labels={["Item", "Quantity", "Unit", "Unit price (৳)", "Total (৳)", ""]}
-              />
-              {materials.map((m, i) => {
-                const priced = m.quantity !== "" && m.unitPrice !== "";
-                const unit = m.item ? unitOf(m.item) : null;
-                return (
-                  <div key={m.key} className="flex items-start gap-2">
-                    <div className="grid flex-1 grid-cols-[minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1fr)_minmax(0,1fr)] gap-2 sm:grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1fr)_minmax(0,1fr)]">
-                      <Select
-                        value={m.item}
-                        onValueChange={(v) =>
-                          v === NEW
-                            ? setManaging({ kind: "items", row: m.key })
-                            : setMaterial(m.key, { item: v })
-                        }
-                      >
-                        <SelectTrigger
-                          className="col-span-4 w-full sm:col-span-1"
-                          aria-label={`Item ${i + 1}`}
-                        >
-                          <SelectValue placeholder="আইটেম বাছুন" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {itemOptions.map((o) => (
-                            <SelectItem key={o.name} value={o.name}>
-                              {o.name}
-                              {o.unit && (
-                                <span className="text-xs text-muted-foreground">({unitLabel(o.unit)})</span>
-                              )}
-                            </SelectItem>
-                          ))}
-                          {itemOptions.length > 0 && <SelectSeparator />}
-                          <SelectItem value={NEW} className="text-primary">
-                            <Plus className="size-4" />
-                            New item…
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Input
-                        inputMode="decimal"
-                        aria-label={`Item ${i + 1} quantity`}
-                        placeholder="পরিমাণ"
-                        value={m.quantity}
-                        onChange={(e) => setMaterial(m.key, { quantity: decimal(e.target.value) })}
-                        className="tabular-nums"
-                      />
-                      <div
-                        aria-label={`Item ${i + 1} unit`}
-                        className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm text-muted-foreground"
-                      >
-                        {unit ? unitLabel(unit) : "—"}
-                      </div>
-                      <Input
-                        inputMode="numeric"
-                        aria-label={`Item ${i + 1} unit price`}
-                        placeholder={unit ? `প্রতি ${unitLabel(unit)}` : "দাম"}
-                        value={m.unitPrice}
-                        onChange={(e) => setMaterial(m.key, { unitPrice: digits(e.target.value) })}
-                        className="tabular-nums"
-                      />
-                      <Input
-                        inputMode="numeric"
-                        aria-label={`Item ${i + 1} total`}
-                        placeholder="মোট"
-                        disabled={priced}
-                        value={priced ? String(lineTotal(m) ?? "") : m.amount}
-                        onChange={(e) => setMaterial(m.key, { amount: digits(e.target.value) })}
-                        className="tabular-nums disabled:bg-muted/40 disabled:opacity-100"
-                      />
-                    </div>
-                    <RemoveButton
-                      label={`Remove item ${i + 1}`}
-                      onClick={() =>
-                        setMaterials((rows) =>
-                          rows.length > 1 ? rows.filter((r) => r.key !== m.key) : [emptyMaterial()]
-                        )
+        {/* --- 3. The team --- */}
+        <Step n={3} title="Workforce" hint="আজ কতজন রাঁধুনি কাজ করেছেন।" className="@4xl:col-span-5">
+          <div className="grid grid-cols-3 gap-3">
+            {(
+              [
+                ["Male cooks", maleCooks, setMaleCooks],
+                ["Female cooks", femaleCooks, setFemaleCooks],
+              ] as const
+            ).map(([label, value, set]) => (
+              <label key={label} className="grid gap-1.5 rounded-lg border p-3">
+                <span className="text-xs text-muted-foreground">{label}</span>
+                <Input
+                  inputMode="numeric"
+                  placeholder="0"
+                  value={value}
+                  onChange={(e) => set(digits(e.target.value))}
+                  className="h-10 text-lg font-semibold tabular-nums"
+                />
+              </label>
+            ))}
+            <div className="grid gap-1.5 rounded-lg border border-primary/30 bg-primary/5 p-3">
+              <span className="text-xs text-muted-foreground">Total cooks</span>
+              <span className="flex h-10 items-center text-lg font-semibold tabular-nums">
+                {int(maleCooks) + int(femaleCooks)}
+              </span>
+            </div>
+          </div>
+        </Step>
+
+        {/* --- 4. Their pay --- */}
+        <Step n={4} title="Cook pay" hint="প্রত্যেক রাঁধুনির এক দিনের মজুরি।" className="@4xl:col-span-7">
+          <div className="grid gap-2">
+            {(
+              [
+                ["Male cooks", maleCooks, maleRate, setMaleRate],
+                ["Female cooks", femaleCooks, femaleRate, setFemaleRate],
+              ] as const
+            ).map(([label, cooks, rate, setRate]) => (
+              <div key={label} className="grid grid-cols-[minmax(0,1fr)_auto_7rem_6rem] items-center gap-2">
+                <span className="truncate text-sm">{label}</span>
+                <span className="text-sm text-muted-foreground tabular-nums">{int(cooks)} ×</span>
+                <Input
+                  inputMode="numeric"
+                  aria-label={`${label} pay each`}
+                  placeholder="৳ 0"
+                  value={rate}
+                  onChange={(e) => setRate(digits(e.target.value))}
+                  className="tabular-nums"
+                />
+                <span className="text-right text-sm font-medium tabular-nums">
+                  {taka(int(cooks) * int(rate))}
+                </span>
+              </div>
+            ))}
+          </div>
+          <Subtotal label="Total labour cost">{taka(labourCost)}</Subtotal>
+        </Step>
+
+        {/* --- 5. The bazar list --- */}
+        <Step
+          n={5}
+          title="Raw materials"
+          hint="আইটেম বাছুন, তারপর আজ কতটুকু কেনা হলো আর একক দাম কত। পরিমাণ ও দাম না থাকলে মোট টাকা লিখুন।"
+          action={<LinkButton onClick={() => setManaging({ kind: "items" })}>Manage items</LinkButton>}
+          className="@4xl:col-span-12 @7xl:col-span-7"
+        >
+          <div className="grid gap-3 @2xl:gap-2">
+            <RowHead
+              cols="grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1fr)_2rem]"
+              labels={["Item", "Quantity", "Unit", "Unit price (৳)", "Total (৳)", ""]}
+            />
+            {materials.map((m, i) => {
+              const priced = m.quantity !== "" && m.unitPrice !== "";
+              const unit = m.item ? unitOf(m.item) : null;
+              return (
+                <div key={m.key} className="flex items-start gap-2">
+                  <div className="grid flex-1 grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1fr)] gap-2 @2xl:grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1fr)]">
+                    <Select
+                      value={m.item}
+                      onValueChange={(v) =>
+                        v === NEW
+                          ? setManaging({ kind: "items", row: m.key })
+                          : setMaterial(m.key, { item: v })
                       }
+                    >
+                      <SelectTrigger
+                        className="col-span-4 w-full @2xl:col-span-1"
+                        aria-label={`Item ${i + 1}`}
+                      >
+                        <SelectValue placeholder="আইটেম বাছুন" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {itemOptions.map((o) => (
+                          <SelectItem key={o.name} value={o.name}>
+                            {o.name}
+                            {o.unit && (
+                              <span className="text-xs text-muted-foreground">({unitLabel(o.unit)})</span>
+                            )}
+                          </SelectItem>
+                        ))}
+                        {itemOptions.length > 0 && <SelectSeparator />}
+                        <SelectItem value={NEW} className="text-primary">
+                          <Plus className="size-4" />
+                          New item…
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      inputMode="decimal"
+                      aria-label={`Item ${i + 1} quantity`}
+                      placeholder="পরিমাণ"
+                      value={m.quantity}
+                      onChange={(e) => setMaterial(m.key, { quantity: decimal(e.target.value) })}
+                      className="tabular-nums"
+                    />
+                    <div
+                      aria-label={`Item ${i + 1} unit`}
+                      className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm text-muted-foreground"
+                    >
+                      {unit ? unitLabel(unit) : "—"}
+                    </div>
+                    <Input
+                      inputMode="numeric"
+                      aria-label={`Item ${i + 1} unit price`}
+                      placeholder={unit ? `প্রতি ${unitLabel(unit)}` : "দাম"}
+                      value={m.unitPrice}
+                      onChange={(e) => setMaterial(m.key, { unitPrice: digits(e.target.value) })}
+                      className="tabular-nums"
+                    />
+                    <Input
+                      inputMode="numeric"
+                      aria-label={`Item ${i + 1} total`}
+                      placeholder="মোট"
+                      disabled={priced}
+                      value={priced ? String(lineTotal(m) ?? "") : m.amount}
+                      onChange={(e) => setMaterial(m.key, { amount: digits(e.target.value) })}
+                      className="tabular-nums disabled:bg-muted/40 disabled:opacity-100"
                     />
                   </div>
-                );
-              })}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <AddButton onClick={() => setMaterials((rows) => [...rows, emptyMaterial()])}>
-                Add item
-              </AddButton>
-              {canCopy && (
-                <Button type="button" variant="ghost" size="sm" onClick={copyBazarList} className="gap-1.5">
-                  <Copy className="size-4" />
-                  Copy list from {dayLabel(template!.day, { year: false })}
-                </Button>
-              )}
-            </div>
-            <Subtotal label="Total raw materials">{taka(materialsCost)}</Subtotal>
-          </Step>
-
-          {/* --- 4. What was cooked --- */}
-          <Step
-            n={4}
-            title="Products cooked"
-            hint="জার = পাতিল × প্রতি পাতিলে জার।"
-            action={
-              <LinkButton onClick={() => setManaging({ kind: "products" })}>Manage products</LinkButton>
-            }
-          >
-            <div className="grid gap-2">
-              <RowHead
-                cols="grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_2rem]"
-                labels={["Product", "Patils", "Jars per patil", "Jars", ""]}
-              />
-              {batches.map((b, i) => (
-                <div
-                  key={b.key}
-                  className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_2rem] items-center gap-2"
-                >
-                  <Select
-                    value={b.product}
-                    onValueChange={(v) =>
-                      v === NEW
-                        ? setManaging({ kind: "products", row: b.key })
-                        : setBatch(b.key, { product: v })
-                    }
-                  >
-                    <SelectTrigger className="w-full" aria-label={`Product ${i + 1}`}>
-                      <SelectValue placeholder="পণ্য বাছুন" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {productOptions.map((name) => (
-                        <SelectItem key={name} value={name}>
-                          <ProductIcon icon={iconOf(name)} className="size-4 text-muted-foreground" />
-                          {name}
-                        </SelectItem>
-                      ))}
-                      {productOptions.length > 0 && <SelectSeparator />}
-                      <SelectItem value={NEW} className="text-primary">
-                        <Plus className="size-4" />
-                        New product…
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    inputMode="numeric"
-                    aria-label={`Product ${i + 1} patils`}
-                    placeholder="0"
-                    value={b.patils}
-                    onChange={(e) => setBatch(b.key, { patils: digits(e.target.value) })}
-                    className="tabular-nums"
-                  />
-                  <Input
-                    inputMode="numeric"
-                    aria-label={`Product ${i + 1} jars per patil`}
-                    placeholder="0"
-                    value={b.jarsPerPatil}
-                    onChange={(e) => setBatch(b.key, { jarsPerPatil: digits(e.target.value) })}
-                    className="tabular-nums"
-                  />
-                  <span className="text-right text-sm tabular-nums">
-                    {(int(b.patils) * int(b.jarsPerPatil)).toLocaleString("en-IN")}
-                  </span>
                   <RemoveButton
-                    label={`Remove product ${i + 1}`}
+                    label={`Remove item ${i + 1}`}
                     onClick={() =>
-                      setBatches((rows) =>
-                        rows.length > 1 ? rows.filter((r) => r.key !== b.key) : [emptyBatch()]
+                      setMaterials((rows) =>
+                        rows.length > 1 ? rows.filter((r) => r.key !== m.key) : [emptyMaterial()]
                       )
                     }
                   />
                 </div>
-              ))}
-            </div>
-            <AddButton onClick={() => setBatches((rows) => [...rows, emptyBatch()])}>
-              Add product
+              );
+            })}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <AddButton onClick={() => setMaterials((rows) => [...rows, emptyMaterial()])}>
+              Add item
             </AddButton>
-            <Subtotal label="Total jars produced">{jars.toLocaleString("en-IN")}</Subtotal>
-          </Step>
-
-          {/* --- 5. Everything else --- */}
-          <Step n={5} title="Other costs">
-            <div className="grid grid-cols-2 gap-3 sm:max-w-sm">
-              <Field label="Gas / fuel (৳)">
-                <Input
-                  inputMode="numeric"
-                  placeholder="0"
-                  value={gas}
-                  onChange={(e) => setGas(digits(e.target.value))}
-                  className="tabular-nums"
-                />
-              </Field>
-              <Field label="Packaging (৳)">
-                <Input
-                  inputMode="numeric"
-                  placeholder="0"
-                  value={packaging}
-                  onChange={(e) => setPackaging(digits(e.target.value))}
-                  className="tabular-nums"
-                />
-              </Field>
-            </div>
-            <datalist id="prod-purposes">
-              {suggestions.purposes.map((p) => (
-                <option key={p} value={p} />
-              ))}
-            </datalist>
-            {misc.length > 0 && (
-              <div className="grid gap-2">
-                <RowHead
-                  cols="grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,2fr)_2rem]"
-                  labels={["Miscellaneous", "Amount (৳)", "Note", ""]}
-                />
-                {misc.map((m, i) => (
-                  <div
-                    key={m.key}
-                    className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,2fr)_2rem] items-center gap-2"
-                  >
-                    <Input
-                      list="prod-purposes"
-                      aria-label={`Miscellaneous cost ${i + 1} purpose`}
-                      placeholder="কারণ"
-                      maxLength={80}
-                      value={m.purpose}
-                      onChange={(e) => setMiscRow(m.key, { purpose: e.target.value })}
-                    />
-                    <Input
-                      inputMode="numeric"
-                      aria-label={`Miscellaneous cost ${i + 1} amount`}
-                      placeholder="0"
-                      value={m.amount}
-                      onChange={(e) => setMiscRow(m.key, { amount: digits(e.target.value) })}
-                      className="tabular-nums"
-                    />
-                    <Input
-                      aria-label={`Miscellaneous cost ${i + 1} note`}
-                      placeholder="ঐচ্ছিক"
-                      maxLength={300}
-                      value={m.note}
-                      onChange={(e) => setMiscRow(m.key, { note: e.target.value })}
-                    />
-                    <RemoveButton
-                      label={`Remove miscellaneous cost ${i + 1}`}
-                      onClick={() => setMisc((rows) => rows.filter((r) => r.key !== m.key))}
-                    />
-                  </div>
-                ))}
-              </div>
+            {canCopy && (
+              <Button type="button" variant="ghost" size="sm" onClick={copyBazarList} className="gap-1.5">
+                <Copy className="size-4" />
+                Copy list from {dayLabel(template!.day, { year: false })}
+              </Button>
             )}
-            <AddButton onClick={() => setMisc((rows) => [...rows, emptyMisc()])}>
-              Add miscellaneous cost
-            </AddButton>
-          </Step>
+          </div>
+          <Subtotal label="Total raw material cost">{taka(materialsCost)}</Subtotal>
+        </Step>
 
-          {/* --- 6. Where the money goes --- */}
-          <Step n={6} title="Total cost breakdown" hint="লেখার সাথে সাথে হিসাব বদলায়; সেভ করার সময় আবার হিসাব করা হয়।">
-            <CostBreakdown
-              parts={[
-                { label: "Raw materials (bazar)", amount: materialsCost, Icon: ShoppingBasket },
-                { label: "Labour (male + female)", amount: labourCost, Icon: Users },
-                { label: "Gas / fuel", amount: int(gas), Icon: Flame },
-                { label: "Packaging", amount: int(packaging), Icon: Package },
-                { label: "Miscellaneous", amount: miscCost, Icon: Shapes },
-              ]}
-              total={total}
-              jars={jars}
+        {/* --- 6. What was cooked --- */}
+        <Step
+          n={6}
+          title="Products cooked"
+          hint="জার = পাতিল × প্রতি পাতিলে জার।"
+          action={
+            <LinkButton onClick={() => setManaging({ kind: "products" })}>Manage products</LinkButton>
+          }
+          className="@4xl:col-span-7 @7xl:col-span-5"
+        >
+          <div className="grid gap-2">
+            <RowHead
+              cols="grid-cols-[minmax(0,2fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.8fr)_2rem]"
+              labels={["Product", "Patils", "Per patil", "Jars", ""]}
             />
-          </Step>
+            {batches.map((b, i) => (
+              <div
+                key={b.key}
+                className="grid grid-cols-[minmax(0,2fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.8fr)_2rem] items-center gap-2"
+              >
+                <Select
+                  value={b.product}
+                  onValueChange={(v) =>
+                    v === NEW
+                      ? setManaging({ kind: "products", row: b.key })
+                      : setBatch(b.key, { product: v })
+                  }
+                >
+                  <SelectTrigger className="w-full" aria-label={`Product ${i + 1}`}>
+                    <SelectValue placeholder="পণ্য বাছুন" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {productOptions.map((name) => (
+                      <SelectItem key={name} value={name}>
+                        <ProductIcon icon={iconOf(name)} className="size-4 text-muted-foreground" />
+                        {name}
+                      </SelectItem>
+                    ))}
+                    {productOptions.length > 0 && <SelectSeparator />}
+                    <SelectItem value={NEW} className="text-primary">
+                      <Plus className="size-4" />
+                      New product…
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input
+                  inputMode="numeric"
+                  aria-label={`Product ${i + 1} patils`}
+                  placeholder="0"
+                  value={b.patils}
+                  onChange={(e) => setBatch(b.key, { patils: digits(e.target.value) })}
+                  className="tabular-nums"
+                />
+                <Input
+                  inputMode="numeric"
+                  aria-label={`Product ${i + 1} jars per patil`}
+                  placeholder="0"
+                  value={b.jarsPerPatil}
+                  onChange={(e) => setBatch(b.key, { jarsPerPatil: digits(e.target.value) })}
+                  className="tabular-nums"
+                />
+                <span className="text-right text-sm font-medium tabular-nums">
+                  {(int(b.patils) * int(b.jarsPerPatil)).toLocaleString("en-IN")}
+                </span>
+                <RemoveButton
+                  label={`Remove product ${i + 1}`}
+                  onClick={() =>
+                    setBatches((rows) =>
+                      rows.length > 1 ? rows.filter((r) => r.key !== b.key) : [emptyBatch()]
+                    )
+                  }
+                />
+              </div>
+            ))}
+          </div>
+          <AddButton onClick={() => setBatches((rows) => [...rows, emptyBatch()])}>
+            Add product
+          </AddButton>
+          <Subtotal label="Total jars produced">{jars.toLocaleString("en-IN")}</Subtotal>
+        </Step>
 
-          {/* --- 7. A note --- */}
-          <Step n={7} title="Note" hint="ঐচ্ছিক।">
+        {/* --- 7. Everything else --- */}
+        <Step n={7} title="Other costs & note" className="@4xl:col-span-5 @7xl:col-span-7">
+          <div className="grid grid-cols-2 gap-3 @lg:max-w-sm">
+            <Field label="Gas / fuel (৳)">
+              <Input
+                inputMode="numeric"
+                placeholder="0"
+                value={gas}
+                onChange={(e) => setGas(digits(e.target.value))}
+                className="tabular-nums"
+              />
+            </Field>
+            <Field label="Packaging (৳)">
+              <Input
+                inputMode="numeric"
+                placeholder="0"
+                value={packaging}
+                onChange={(e) => setPackaging(digits(e.target.value))}
+                className="tabular-nums"
+              />
+            </Field>
+          </div>
+          <datalist id="prod-purposes">
+            {suggestions.purposes.map((p) => (
+              <option key={p} value={p} />
+            ))}
+          </datalist>
+          {misc.length > 0 && (
+            <div className="grid gap-2">
+              <RowHead
+                cols="grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,2fr)_2rem]"
+                labels={["Miscellaneous", "Amount (৳)", "Note", ""]}
+              />
+              {misc.map((m, i) => (
+                <div
+                  key={m.key}
+                  className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,2fr)_2rem] items-center gap-2"
+                >
+                  <Input
+                    list="prod-purposes"
+                    aria-label={`Miscellaneous cost ${i + 1} purpose`}
+                    placeholder="কারণ"
+                    maxLength={80}
+                    value={m.purpose}
+                    onChange={(e) => setMiscRow(m.key, { purpose: e.target.value })}
+                  />
+                  <Input
+                    inputMode="numeric"
+                    aria-label={`Miscellaneous cost ${i + 1} amount`}
+                    placeholder="0"
+                    value={m.amount}
+                    onChange={(e) => setMiscRow(m.key, { amount: digits(e.target.value) })}
+                    className="tabular-nums"
+                  />
+                  <Input
+                    aria-label={`Miscellaneous cost ${i + 1} note`}
+                    placeholder="ঐচ্ছিক"
+                    maxLength={300}
+                    value={m.note}
+                    onChange={(e) => setMiscRow(m.key, { note: e.target.value })}
+                  />
+                  <RemoveButton
+                    label={`Remove miscellaneous cost ${i + 1}`}
+                    onClick={() => setMisc((rows) => rows.filter((r) => r.key !== m.key))}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+          <AddButton onClick={() => setMisc((rows) => [...rows, emptyMisc()])}>
+            Add miscellaneous cost
+          </AddButton>
+          <Field label="Note (optional)">
             <Textarea
-              aria-label="Note"
               placeholder="এই দিনের মনে রাখার মতো কিছু থাকলে লিখুন"
               value={note}
               maxLength={1000}
-              rows={3}
+              rows={2}
               onChange={(e) => setNote(e.target.value)}
             />
-          </Step>
-        </form>
+          </Field>
+        </Step>
 
-        {/* --- The buttons (the totals are in card 6) --- */}
-        <div
-          className="border-t px-5 pt-4"
-          style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
+        {/* --- 8. Where the money goes --- */}
+        <Step
+          n={8}
+          title="Total cost breakdown"
+          hint="লেখার সাথে সাথে হিসাব বদলায়; সেভ করার সময় আবার হিসাব করা হয়।"
+          className="@4xl:col-span-7 @7xl:col-span-5"
         >
+          <CostBreakdown
+            parts={[
+              { label: "Raw materials (bazar)", amount: materialsCost, Icon: ShoppingBasket },
+              { label: "Labour (male + female)", amount: labourCost, Icon: Users },
+              { label: "Gas / fuel", amount: int(gas), Icon: Flame },
+              { label: "Packaging", amount: int(packaging), Icon: Package },
+              { label: "Miscellaneous", amount: miscCost, Icon: Shapes },
+            ]}
+            total={total}
+            jars={jars}
+          />
+        </Step>
+
+        {/* --- The buttons, always in reach --- */}
+        <div className="sticky bottom-0 z-10 -mx-4 border-t bg-background/95 px-4 py-3 backdrop-blur @4xl:col-span-12 sm:-mx-6 sm:px-6">
           {(error || (tried && problems.length > 0)) && (
-            <p className="mb-3 text-sm text-destructive">{error ?? problems[0]}</p>
+            <p className="mb-2 text-sm text-destructive">{error ?? problems[0]}</p>
           )}
           <div className="flex items-center gap-2">
             {editing && (
@@ -749,100 +824,103 @@ export function ProductionSheet({
                 disabled={saving}
               >
                 <Trash2 className="size-4" />
-                <span className="hidden sm:inline">Remove</span>
+                <span className="hidden sm:inline">Delete</span>
               </Button>
             )}
             <Button
+              type="button"
               variant="outline"
               size="lg"
-              onClick={onClose}
+              onClick={onReset}
               disabled={saving}
-              className="ml-auto"
+              className="ml-auto gap-1.5"
             >
-              Cancel
+              <RotateCcw className="size-4" />
+              Reset
             </Button>
-            <Button size="lg" onClick={save} disabled={saving} className="min-w-44 px-6 text-base">
-              {saving ? "Saving…" : editing ? "Save changes" : "Save production day"}
+            <Button type="submit" size="lg" disabled={saving} className="min-w-44 px-6 text-base">
+              {saving ? "Saving…" : editing ? "Save changes" : "Save production"}
             </Button>
           </div>
         </div>
+      </form>
 
-        <ListManager
-          kind="items"
-          open={managing?.kind === "items"}
-          onOpenChange={(o) => !o && setManaging(null)}
-          rows={items}
-          onChanged={(list) => onItems(list as ProductionItem[])}
-          onAdded={(name) => {
-            const row = managing?.row;
-            setMaterials((rows) => {
-              // Into the row that asked for it, else the first empty one.
-              const i = row !== undefined ? rows.findIndex((r) => r.key === row) : rows.findIndex((r) => !r.item);
-              return i < 0 ? rows : rows.map((r, j) => (j === i ? { ...r, item: name } : r));
-            });
-            setManaging(null);
-          }}
-          onRenamed={(from, to) =>
-            setMaterials((rows) => rows.map((r) => (r.item === from ? { ...r, item: to } : r)))
-          }
-          onRemoved={(name) =>
-            // A removed item stays only if this day already had it.
-            !savedUnits.has(name) &&
-            setMaterials((rows) => rows.map((r) => (r.item === name ? { ...r, item: "" } : r)))
-          }
-        />
-        <ListManager
-          kind="products"
-          open={managing?.kind === "products"}
-          onOpenChange={(o) => !o && setManaging(null)}
-          rows={products}
-          onChanged={(list) => onProducts(list as ProductionProduct[])}
-          onAdded={(name) => {
-            const row = managing?.row;
-            setBatches((rows) => {
-              const i = row !== undefined ? rows.findIndex((r) => r.key === row) : rows.findIndex((r) => !r.product);
-              return i < 0 ? rows : rows.map((r, j) => (j === i ? { ...r, product: name } : r));
-            });
-            setManaging(null);
-          }}
-          onRenamed={(from, to) =>
-            setBatches((rows) => rows.map((r) => (r.product === from ? { ...r, product: to } : r)))
-          }
-          onRemoved={(name) =>
-            !editing?.batches.some((b) => b.product === name) &&
-            setBatches((rows) => rows.map((r) => (r.product === name ? { ...r, product: "" } : r)))
-          }
-        />
-        <RemoveDayDialog
-          day={confirmingDelete ? day : null}
-          onClose={() => setConfirmingDelete(false)}
-          onDeleted={onDeleted}
-        />
-      </SheetContent>
-    </Sheet>
+      <ListManager
+        kind="items"
+        open={managing?.kind === "items"}
+        onOpenChange={(o) => !o && setManaging(null)}
+        rows={items}
+        onChanged={(list) => onItems(list as ProductionItem[])}
+        onAdded={(name) => {
+          const row = managing?.row;
+          setMaterials((rows) => {
+            // Into the row that asked for it, else the first empty one.
+            const i = row !== undefined ? rows.findIndex((r) => r.key === row) : rows.findIndex((r) => !r.item);
+            return i < 0 ? rows : rows.map((r, j) => (j === i ? { ...r, item: name } : r));
+          });
+          setManaging(null);
+        }}
+        onRenamed={(from, to) =>
+          setMaterials((rows) => rows.map((r) => (r.item === from ? { ...r, item: to } : r)))
+        }
+        onRemoved={(name) =>
+          // A removed item stays only if this production already had it.
+          !savedUnits.has(name) &&
+          setMaterials((rows) => rows.map((r) => (r.item === name ? { ...r, item: "" } : r)))
+        }
+      />
+      <ListManager
+        kind="products"
+        open={managing?.kind === "products"}
+        onOpenChange={(o) => !o && setManaging(null)}
+        rows={products}
+        onChanged={(list) => onProducts(list as ProductionProduct[])}
+        onAdded={(name) => {
+          const row = managing?.row;
+          setBatches((rows) => {
+            const i = row !== undefined ? rows.findIndex((r) => r.key === row) : rows.findIndex((r) => !r.product);
+            return i < 0 ? rows : rows.map((r, j) => (j === i ? { ...r, product: name } : r));
+          });
+          setManaging(null);
+        }}
+        onRenamed={(from, to) =>
+          setBatches((rows) => rows.map((r) => (r.product === from ? { ...r, product: to } : r)))
+        }
+        onRemoved={(name) =>
+          !editing?.batches.some((b) => b.product === name) &&
+          setBatches((rows) => rows.map((r) => (r.product === name ? { ...r, product: "" } : r)))
+        }
+      />
+      <DeleteDialog
+        day={confirmingDelete && editing ? editing.day : null}
+        onClose={() => setConfirmingDelete(false)}
+        onDeleted={() => router.push(`/admin/crm/production?month=${editing?.day.slice(0, 7)}`)}
+      />
+    </div>
   );
 }
 
 // --- Bits ------------------------------------------------------------------------
 
-/** One numbered part of the form, in its own card. */
+/** One numbered part of the form, in its own card; cards side by side in
+ *  the bento stretch to the same height. */
 function Step({
   n,
   title,
   hint,
   action,
+  className,
   children,
 }: {
   n: number;
   title: string;
   hint?: string;
   action?: React.ReactNode;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
-    // shrink-0: in the scrolling column a Card (overflow-hidden) would
-    // otherwise shrink to fit and clip its own bottom.
-    <Card className="shrink-0 gap-0 py-4 shadow-none">
+    <Card className={cn("h-full gap-0 py-4", className)}>
       <CardContent className="grid gap-4 px-4">
         <div className="flex items-start gap-3">
           <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
@@ -942,10 +1020,10 @@ function Subtotal({ label, children }: { label: string; children: React.ReactNod
   );
 }
 
-/** Column heads for a row grid; hidden on phones, where rows stack. */
+/** Column heads for a row grid; hidden on a narrow page, where rows stack. */
 function RowHead({ cols, labels }: { cols: string; labels: string[] }) {
   return (
-    <div className={cn("hidden gap-2 text-xs text-muted-foreground sm:grid", cols)}>
+    <div className={cn("hidden gap-2 text-xs text-muted-foreground @2xl:grid", cols)}>
       {labels.map((l, i) => (
         <span key={i} className="truncate">
           {l}
@@ -1295,7 +1373,7 @@ function ListManager({
   );
 }
 
-function RemoveDayDialog({
+function DeleteDialog({
   day,
   onClose,
   onDeleted,
@@ -1318,10 +1396,10 @@ function RemoveDayDialog({
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Remove this production day?</DialogTitle>
+          <DialogTitle>Delete this production?</DialogTitle>
           <DialogDescription>
-            {day && dayLabel(day, { weekday: true })} আবার সাধারণ দিন হয়ে যাবে, আর এই দিনের
-            সব তথ্য — কাঁচামাল, রাঁধুনি, পণ্য, খরচ — মুছে যাবে। এটা আর ফেরানো যাবে না।
+            {day && dayLabel(day, { weekday: true })}-এর প্রোডাকশন আর এর সব তথ্য — কাঁচামাল,
+            রাঁধুনি, পণ্য, খরচ — মুছে যাবে। এটা আর ফেরানো যাবে না।
           </DialogDescription>
         </DialogHeader>
         {error && <p className="text-sm text-destructive">{error}</p>}
@@ -1339,13 +1417,13 @@ function RemoveDayDialog({
                 await deleteProductionDay(day);
                 onDeleted();
               } catch (err) {
-                setError(err instanceof Error ? err.message : "Could not remove");
+                setError(err instanceof Error ? err.message : "Could not delete");
               } finally {
                 setBusy(false);
               }
             }}
           >
-            Remove
+            Delete
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -31,8 +31,3 @@ export const taka = (n: number) => `৳${n.toLocaleString("en-IN")}`;
 /** Cost per jar keeps its paisa: ৳40.63. */
 export const takaPaisa = (n: number) =>
   `৳${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-/** YYYY-MM-DD for a UTC-midnight Date (calendar arithmetic stays in UTC). */
-export function isoOf(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}

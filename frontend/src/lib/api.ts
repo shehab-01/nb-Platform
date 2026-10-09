@@ -1953,6 +1953,8 @@ export type ProductionDayInput = {
 export type ProductionDaySummary = {
   day: string;
   products: number;
+  /** What was cooked, in the order entered. */
+  product_names: string[];
   patils: number;
   jars: number;
   total_cost: number;
@@ -2008,12 +2010,15 @@ export async function listProductionDays(opts: {
   return request<ProductionDaySummary[]>(`/api/production/days?${q}`);
 }
 
-/** Makes the day a production day, or replaces what it has. */
+/** Records the day's production, or replaces it. With fromDay, the
+ *  production saved on that date is moved to `day` (super admin only). */
 export async function saveProductionDay(
   day: string,
-  input: ProductionDayInput
+  input: ProductionDayInput,
+  fromDay?: string
 ): Promise<ProductionDay> {
-  return request<ProductionDay>(`/api/production/days/${day}`, {
+  const move = fromDay && fromDay !== day ? `?from_day=${fromDay}` : "";
+  return request<ProductionDay>(`/api/production/days/${day}${move}`, {
     method: "PUT",
     body: JSON.stringify(input),
   });

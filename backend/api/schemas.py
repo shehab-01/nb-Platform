@@ -1300,10 +1300,12 @@ class ProductionDayOut(BaseModel):
 
 
 class ProductionDaySummary(BaseModel):
-    """One production day in the recent-days list and the calendar."""
+    """One production day in the month list."""
 
     day: date
     products: int
+    # What was cooked, in the order entered.
+    product_names: list[str] = []
     patils: int
     jars: int
     total_cost: int

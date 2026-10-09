@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -153,11 +153,6 @@ async def _load(
     if fresh:
         stmt = stmt.execution_options(populate_existing=True)
     return await session.scalar(stmt)
-
-
-def _not_future(day: date) -> None:
-    if day > _today():
-        raise HTTPException(status_code=400, detail="That day has not happened yet")
 
 
 # --- The two lists: products and raw-material items ------------------------------
@@ -332,19 +327,11 @@ async def list_days(
     ctx: tenancy.StoreContext = Depends(_require),
 ) -> list[ProductionDaySummary]:
     """Production days, newest first: those between start and end (both
-    inclusive, either open), at most `limit`. The calendar asks for a month;
-    the recent-days list asks for the last few."""
-    products = (
-        select(func.count())
-        .where(
-            ProductionBatch.store_id == ctx.store.id,
-            ProductionBatch.production_day_id == ProductionDay.id,
-        )
-        .scalar_subquery()
-    )
+    inclusive, either open), at most `limit`. The list page asks for a month;
+    the entry page asks for the latest one to start from."""
     stmt = select(
+        ProductionDay.id,
         ProductionDay.day,
-        products,
         ProductionDay.patils,
         ProductionDay.jars,
         ProductionDay.total_cost,
@@ -353,17 +340,30 @@ async def list_days(
         stmt = stmt.where(ProductionDay.day >= start)
     if end is not None:
         stmt = stmt.where(ProductionDay.day <= end)
-    rows = await session.execute(stmt.order_by(ProductionDay.day.desc()).limit(limit))
+    rows = (await session.execute(stmt.order_by(ProductionDay.day.desc()).limit(limit))).all()
+
+    names: dict[int, list[str]] = {}
+    if rows:
+        for day_id, product in await session.execute(
+            select(ProductionBatch.production_day_id, ProductionBatch.product)
+            .where(
+                ProductionBatch.store_id == ctx.store.id,
+                ProductionBatch.production_day_id.in_([r[0] for r in rows]),
+            )
+            .order_by(ProductionBatch.production_day_id, ProductionBatch.position)
+        ):
+            names.setdefault(day_id, []).append(product)
     return [
         ProductionDaySummary(
             day=d,
-            products=n,
+            products=len(names.get(day_id, [])),
+            product_names=names.get(day_id, []),
             patils=patils,
             jars=jars,
             total_cost=total,
             cost_per_jar=round(total / jars, 2) if jars else 0.0,
         )
-        for d, n, patils, jars, total in rows
+        for day_id, d, patils, jars, total in rows
     ]
 
 
@@ -385,21 +385,57 @@ def _refuse_unknown(names: set[str], allowed: set[str], what: str) -> None:
         )
 
 
+def date_refusal(
+    *, super_admin: bool, day: date, today: date, new: bool, moving: bool
+) -> str | None:
+    """Why this save may not happen on this date, or None. A production is
+    recorded for today; only a super admin may record an earlier day or move
+    a production to another date. Correcting a production keeps its date, so
+    anyone with CRM access may do that whenever it was."""
+    if day > today:
+        return "That day has not happened yet"
+    if super_admin:
+        return None
+    if moving:
+        return "Only a super admin can change a production's date"
+    if new and day != today:
+        return "Only a super admin can record a production for another day"
+    return None
+
+
 @router.put("/days/{day}", response_model=ProductionDayOut)
 async def save_day(
     day: date,
     body: ProductionDayIn,
+    from_day: date | None = Query(
+        None, description="Move the production saved on this date to `day`"
+    ),
     session: AsyncSession = Depends(get_session),
     ctx: tenancy.StoreContext = Depends(_require),
 ) -> ProductionDay:
-    """Make the day a production day, or correct it: the whole day is
-    replaced by what the drawer sends."""
-    _not_future(day)
+    """Record a production for the day, or correct one: the whole day is
+    replaced by what the form sends. With from_day, the production saved on
+    that date is corrected and moved to `day` (super admin only)."""
     store_id = ctx.store.id
-    row = await _load(session, store_id, day)
+    moving = from_day is not None and from_day != day
+    row = await _load(session, store_id, from_day if moving else day)
+    if moving and row is None:
+        raise HTTPException(status_code=404, detail="No production on the date to move from")
+    refusal = date_refusal(
+        super_admin=ctx.is_super_admin,
+        day=day,
+        today=_today(),
+        new=row is None,
+        moving=moving,
+    )
+    if refusal:
+        status = 400 if day > _today() else 403
+        raise HTTPException(status_code=status, detail=refusal)
+    if moving and await _load(session, store_id, day) is not None:
+        raise HTTPException(status_code=409, detail="That date already has a production")
 
     # Products and items come from the store's lists. One removed from a list
-    # since stays valid on a day that already has it, with its saved unit.
+    # since stays valid on a production that already has it, with its unit.
     products = {p.name for p in await _products(session, store_id)}
     units: dict[str, str | None] = {}
     if row is not None:
@@ -412,15 +448,16 @@ async def save_day(
     if row is None:
         row = ProductionDay(store_id=store_id, day=day, created_by_id=ctx.user.id)
         session.add(row)
+    row.day = day
     row.updated_by_id = ctx.user.id
     _apply(row, body, store_id, units)
     try:
         await session.commit()
     except IntegrityError:
-        # Someone else made it a production day at the same moment.
+        # Someone else recorded a production for this date at the same moment.
         await session.rollback()
         raise HTTPException(
-            status_code=409, detail="This day was just saved by someone else; reload and try again"
+            status_code=409, detail="That date already has a production; reload and try again"
         )
     saved = await _load(session, store_id, day, fresh=True)
     assert saved is not None
@@ -433,9 +470,9 @@ async def delete_day(
     session: AsyncSession = Depends(get_session),
     ctx: tenancy.StoreContext = Depends(_require),
 ) -> None:
-    """Make the day an ordinary day again: its production record goes."""
+    """Delete the production recorded for the day."""
     row = await _load(session, ctx.store.id, day)
     if row is None:
-        raise HTTPException(status_code=404, detail="That day is not a production day")
+        raise HTTPException(status_code=404, detail="No production on that date")
     await session.delete(row)
     await session.commit()

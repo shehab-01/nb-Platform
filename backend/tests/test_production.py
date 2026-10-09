@@ -13,7 +13,7 @@ import pytest
 from pydantic import ValidationError
 
 from api.models import ProductionDay
-from api.routers.production import _apply, line_amount, totals
+from api.routers.production import _apply, date_refusal, line_amount, totals
 from api.schemas import ProductionDayIn, ProductionDayOut, ProductionItemIn, ProductionMaterialIn
 
 # Each item's unit, as the store's item list gives it.
@@ -122,3 +122,35 @@ def test_an_item_needs_a_known_unit():
     assert ProductionItemIn(name="  Mustard   oil ", unit="L").name == "Mustard oil"
     with pytest.raises(ValidationError):
         ProductionItemIn(name="Oil", unit="tonne")
+
+
+TODAY = datetime(2026, 10, 10).date()
+YESTERDAY = datetime(2026, 10, 9).date()
+
+
+def refusal(**kw):
+    base = dict(super_admin=False, day=TODAY, today=TODAY, new=True, moving=False)
+    return date_refusal(**(base | kw))
+
+
+def test_anyone_with_crm_records_today():
+    assert refusal() is None
+
+
+def test_only_a_super_admin_records_an_earlier_day():
+    assert refusal(day=YESTERDAY) is not None
+    assert refusal(day=YESTERDAY, super_admin=True) is None
+
+
+def test_correcting_keeps_its_date_so_anyone_may():
+    assert refusal(day=YESTERDAY, new=False) is None
+
+
+def test_only_a_super_admin_moves_a_production():
+    assert refusal(day=YESTERDAY, new=False, moving=True) is not None
+    assert refusal(day=YESTERDAY, new=False, moving=True, super_admin=True) is None
+
+
+def test_nobody_records_the_future():
+    tomorrow = datetime(2026, 10, 11).date()
+    assert refusal(day=tomorrow, super_admin=True) is not None

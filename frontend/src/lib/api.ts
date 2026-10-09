@@ -1876,3 +1876,194 @@ export type DropInfo = {
   max_files: number;
   max_bytes: number;
 };
+
+// ---- Production cost (CRM) ----
+
+/** Times are "HH:MM" going in and "HH:MM:SS" coming back. */
+export type ProductionShift = { starts: string; ends: string; cooks: number | null };
+
+export type ProductionMaterial = {
+  item: string;
+  quantity: number | null;
+  unit: string | null;
+  unit_price: number | null;
+  /** Worked out by the server: quantity × unit price, or the lump sum. */
+  amount: number;
+};
+
+export type ProductionBatch = {
+  product: string;
+  patils: number;
+  jars_per_patil: number;
+  jars: number;
+};
+
+export type ProductionMisc = { purpose: string; amount: number; note: string | null };
+
+/** A production day as saved; every total was worked out by the server. */
+export type ProductionDay = {
+  day: string;
+  starts_at: string | null;
+  ends_at: string | null;
+  shifts: ProductionShift[];
+  male_cooks: number;
+  male_rate: number;
+  female_cooks: number;
+  female_rate: number;
+  gas_cost: number;
+  packaging_cost: number;
+  note: string | null;
+  materials: ProductionMaterial[];
+  batches: ProductionBatch[];
+  misc: ProductionMisc[];
+  materials_cost: number;
+  labour_cost: number;
+  misc_cost: number;
+  total_cost: number;
+  patils: number;
+  jars: number;
+  cost_per_jar: number;
+  updated_at: string;
+};
+
+/** What the drawer sends. No totals: the server works them out. A material
+ *  line names one of the store's items (the server adds its unit) and gives
+ *  quantity and that day's unit_price, or a lump-sum amount. */
+export type ProductionDayInput = {
+  starts_at: string | null;
+  ends_at: string | null;
+  shifts: ProductionShift[];
+  male_cooks: number;
+  male_rate: number;
+  female_cooks: number;
+  female_rate: number;
+  gas_cost: number;
+  packaging_cost: number;
+  materials: {
+    item: string;
+    quantity: string | null;
+    unit_price: number | null;
+    amount: number | null;
+  }[];
+  batches: { product: string; patils: number; jars_per_patil: number }[];
+  misc: { purpose: string; amount: number; note: string | null }[];
+  note: string | null;
+};
+
+export type ProductionDaySummary = {
+  day: string;
+  products: number;
+  patils: number;
+  jars: number;
+  total_cost: number;
+  cost_per_jar: number;
+};
+
+/** Something the store cooks. icon is a key from
+ *  components/admin/production/product-icons.tsx. */
+export type ProductionProduct = { id: number; name: string; icon: string };
+
+export const PRODUCTION_UNITS = ["kg", "g", "L", "ml", "pcs", "dozen", "packet", "bottle"] as const;
+export type ProductionUnit = (typeof PRODUCTION_UNITS)[number];
+
+/** How a unit reads on screen. The API stores and checks the code; the
+ *  admin shows the bazar in Bangla. */
+export const UNIT_LABELS: Record<ProductionUnit, string> = {
+  kg: "কেজি",
+  g: "গ্রাম",
+  L: "লিটার",
+  ml: "মিলি",
+  pcs: "পিস",
+  dozen: "ডজন",
+  packet: "প্যাকেট",
+  bottle: "বোতল",
+};
+
+/** A unit code in Bangla; an unknown code (a newer API) shows as it is. */
+export function unitLabel(unit: string | null | undefined): string {
+  return unit ? (UNIT_LABELS[unit as ProductionUnit] ?? unit) : "";
+}
+
+/** A raw material the store buys: a name and its unit, no price (each day
+ *  records what it paid). */
+export type ProductionItem = { id: number; name: string; unit: ProductionUnit };
+
+export type ProductionSuggestions = { purposes: string[] };
+
+/** The day as saved, or null when it is not a production day. */
+export async function getProductionDay(day: string): Promise<ProductionDay | null> {
+  return request<ProductionDay | null>(`/api/production/days/${day}`);
+}
+
+/** Production days, newest first, between start and end (inclusive). */
+export async function listProductionDays(opts: {
+  start?: string;
+  end?: string;
+  limit?: number;
+}): Promise<ProductionDaySummary[]> {
+  const q = new URLSearchParams();
+  if (opts.start) q.set("start", opts.start);
+  if (opts.end) q.set("end", opts.end);
+  if (opts.limit) q.set("limit", String(opts.limit));
+  return request<ProductionDaySummary[]>(`/api/production/days?${q}`);
+}
+
+/** Makes the day a production day, or replaces what it has. */
+export async function saveProductionDay(
+  day: string,
+  input: ProductionDayInput
+): Promise<ProductionDay> {
+  return request<ProductionDay>(`/api/production/days/${day}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+/** Makes the day an ordinary day again. */
+export async function deleteProductionDay(day: string): Promise<void> {
+  await requestVoid(`/api/production/days/${day}`, { method: "DELETE" });
+}
+
+export async function listProductionProducts(): Promise<ProductionProduct[]> {
+  return request<ProductionProduct[]>("/api/production/products");
+}
+
+/** Adds a product, or edits one when id is given; returns the whole list. */
+export async function saveProductionProduct(
+  input: { name: string; icon: string },
+  id?: number
+): Promise<ProductionProduct[]> {
+  return request<ProductionProduct[]>(
+    id === undefined ? "/api/production/products" : `/api/production/products/${id}`,
+    { method: id === undefined ? "POST" : "PUT", body: JSON.stringify(input) }
+  );
+}
+
+/** Removes a product; returns the whole list. */
+export async function deleteProductionProduct(id: number): Promise<ProductionProduct[]> {
+  return request<ProductionProduct[]>(`/api/production/products/${id}`, { method: "DELETE" });
+}
+
+export async function listProductionItems(): Promise<ProductionItem[]> {
+  return request<ProductionItem[]>("/api/production/items");
+}
+
+/** Adds a raw material, or edits one when id is given; returns the whole list. */
+export async function saveProductionItem(
+  input: { name: string; unit: ProductionUnit },
+  id?: number
+): Promise<ProductionItem[]> {
+  return request<ProductionItem[]>(
+    id === undefined ? "/api/production/items" : `/api/production/items/${id}`,
+    { method: id === undefined ? "POST" : "PUT", body: JSON.stringify(input) }
+  );
+}
+
+/** Removes a raw material; returns the whole list. */
+export async function deleteProductionItem(id: number): Promise<ProductionItem[]> {
+  return request<ProductionItem[]>(`/api/production/items/${id}`, { method: "DELETE" });
+}
+
+export async function getProductionSuggestions(): Promise<ProductionSuggestions> {
+  return request<ProductionSuggestions>("/api/production/suggestions");
+}

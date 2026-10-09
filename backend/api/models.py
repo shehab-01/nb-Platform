@@ -1,10 +1,11 @@
 import enum
-from datetime import datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     Enum,
     ForeignKey,
@@ -14,6 +15,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    Time,
     func,
     text,
 )
@@ -904,3 +906,173 @@ class ProofDropFile(Base):
     )
 
     __table_args__ = (Index("ix_proof_drop_files_store_drop", "store_id", "drop_id"),)
+
+
+class ProductionDay(Base):
+    """
+    A day the store cooked, on the CRM's Production Cost page: one row per
+    store per Dhaka day, and a day without one is simply not a production day.
+
+    Everything typed in the drawer is here or in the child rows; the totals
+    (materials_cost … jars) are worked out by api.routers.production when the
+    day is saved, so a past day reads exactly as it was saved and lists of
+    days need no joins. shifts is informational only — pay is cooks × rate —
+    as [{"starts": "08:00", "ends": "14:00", "cooks": 6}].
+    """
+
+    __tablename__ = "production_days"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
+    day: Mapped[date] = mapped_column(Date)
+    starts_at: Mapped[time | None] = mapped_column(Time)
+    ends_at: Mapped[time | None] = mapped_column(Time)
+    shifts: Mapped[list] = mapped_column(JSONB, default=list)
+    # Pay is per head per day, whole taka.
+    male_cooks: Mapped[int] = mapped_column(Integer, default=0)
+    male_rate: Mapped[int] = mapped_column(Integer, default=0)
+    female_cooks: Mapped[int] = mapped_column(Integer, default=0)
+    female_rate: Mapped[int] = mapped_column(Integer, default=0)
+    gas_cost: Mapped[int] = mapped_column(Integer, default=0)
+    packaging_cost: Mapped[int] = mapped_column(Integer, default=0)
+    note: Mapped[str | None] = mapped_column(Text)
+    # Worked out on save (api.routers.production.totals).
+    materials_cost: Mapped[int] = mapped_column(Integer, default=0)
+    labour_cost: Mapped[int] = mapped_column(Integer, default=0)
+    misc_cost: Mapped[int] = mapped_column(Integer, default=0)
+    total_cost: Mapped[int] = mapped_column(Integer, default=0)
+    patils: Mapped[int] = mapped_column(Integer, default=0)
+    jars: Mapped[int] = mapped_column(Integer, default=0)
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    updated_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    materials: Mapped[list["ProductionMaterial"]] = relationship(
+        lazy="selectin", order_by="ProductionMaterial.position", cascade="all, delete-orphan"
+    )
+    batches: Mapped[list["ProductionBatch"]] = relationship(
+        lazy="selectin", order_by="ProductionBatch.position", cascade="all, delete-orphan"
+    )
+    misc: Mapped[list["ProductionMisc"]] = relationship(
+        lazy="selectin", order_by="ProductionMisc.position", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index("ix_production_days_store_day", "store_id", "day", unique=True),
+    )
+
+
+class ProductionMaterial(Base):
+    """One line of a production day's bazar list: one of the store's items
+    (ProductionItem), its name and unit copied here so editing the item never
+    rewrites the day. unit_price is what was paid that day. quantity and
+    unit_price are optional for a lump sum ("others, ৳800"); amount is always
+    set, by the server as quantity × unit_price when both are given."""
+
+    __tablename__ = "production_materials"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
+    production_day_id: Mapped[int] = mapped_column(
+        ForeignKey("production_days.id", ondelete="CASCADE")
+    )
+    position: Mapped[int] = mapped_column(Integer)
+    item: Mapped[str] = mapped_column(String(120))
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(12, 3))
+    unit: Mapped[str | None] = mapped_column(String(20))
+    unit_price: Mapped[int | None] = mapped_column(Integer)
+    amount: Mapped[int] = mapped_column(Integer)
+
+    __table_args__ = (
+        Index("ix_production_materials_store_day", "store_id", "production_day_id"),
+    )
+
+
+class ProductionBatch(Base):
+    """A product cooked on a production day: so many patils (pots), so many
+    jars from each. The product is stored by name, like an expense's
+    category, so editing or removing it from the store's list never rewrites
+    the past."""
+
+    __tablename__ = "production_batches"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
+    production_day_id: Mapped[int] = mapped_column(
+        ForeignKey("production_days.id", ondelete="CASCADE")
+    )
+    position: Mapped[int] = mapped_column(Integer)
+    product: Mapped[str] = mapped_column(String(80))
+    patils: Mapped[int] = mapped_column(Integer)
+    jars_per_patil: Mapped[int] = mapped_column(Integer)
+    jars: Mapped[int] = mapped_column(Integer)
+
+    __table_args__ = (
+        Index("ix_production_batches_store_day", "store_id", "production_day_id"),
+    )
+
+
+class ProductionMisc(Base):
+    """Any other cost of a production day (transport, tips, …)."""
+
+    __tablename__ = "production_misc"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
+    production_day_id: Mapped[int] = mapped_column(
+        ForeignKey("production_days.id", ondelete="CASCADE")
+    )
+    position: Mapped[int] = mapped_column(Integer)
+    purpose: Mapped[str] = mapped_column(String(80))
+    amount: Mapped[int] = mapped_column(Integer)
+    note: Mapped[str | None] = mapped_column(String(300))
+
+    __table_args__ = (Index("ix_production_misc_store_day", "store_id", "production_day_id"),)
+
+
+class ProductionProduct(Base):
+    """Something the store cooks (an achar, a sauce, …), offered in the
+    production drawer. Not a storefront Product: this is the kitchen's list."""
+
+    __tablename__ = "production_products"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
+    name: Mapped[str] = mapped_column(String(80))
+    # A Lucide icon key from the admin's picker, e.g. "fish".
+    icon: Mapped[str] = mapped_column(String(40), default="cooking-pot")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_production_products_store_name", "store_id", "name", unique=True),
+    )
+
+
+class ProductionItem(Base):
+    """A raw material the store buys for cooking: a name and the unit it is
+    bought in. No price: each day records what it paid."""
+
+    __tablename__ = "production_items"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
+    name: Mapped[str] = mapped_column(String(120))
+    unit: Mapped[str] = mapped_column(String(20))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_production_items_store_name", "store_id", "name", unique=True),
+    )

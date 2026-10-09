@@ -32,6 +32,7 @@ from api.schemas import (
     StoreUpdate,
 )
 from api.media import describe as describe_image
+from api.routers import production
 from api.services import domain_health, gdrive
 
 log = logging.getLogger(__name__)
@@ -287,6 +288,7 @@ async def create_store(
     )
     session.add(store)
     await session.flush()
+    production.seed_items(session, store.id)
     await _set_domains(session, store, payload.domains)
     await session.commit()
     stores.invalidate()

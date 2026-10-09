@@ -18,12 +18,14 @@ import asyncio
 import os
 import sys
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from api.config import settings
 from api.db import async_session, engine
+from api.routers import production
 from api.models import (
     Product,
+    ProductionItem,
     ProductVariant,
     Store,
     StoreDomain,
@@ -115,6 +117,7 @@ async def seed() -> None:
                 )
                 session.add(store)
                 await session.flush()
+                production.seed_items(session, store.id)
                 print(f"created store {slug}")
             # Queried rather than read off the relationship: a store flushed a
             # moment ago has not loaded its domains, and a lazy load inside an
@@ -145,6 +148,10 @@ async def seed() -> None:
                 select(Product).where(Product.store_id == artifact.id)
             ):
                 await session.delete(product)
+            # Migration 0035 gave it the default raw materials too.
+            await session.execute(
+                delete(ProductionItem).where(ProductionItem.store_id == artifact.id)
+            )
             await session.flush()
             await session.delete(artifact)
             await session.flush()

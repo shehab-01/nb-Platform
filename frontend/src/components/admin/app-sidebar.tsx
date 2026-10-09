@@ -8,6 +8,7 @@ import {
   ChevronsUpDown,
   Activity,
   Check,
+  CookingPot,
   LayoutDashboard,
   LayoutTemplate,
   LogOut,
@@ -106,6 +107,7 @@ const platformNav: NavItem[] = [
  *  item gated by its own permission. */
 const crmNav: NavItem[] = [
   { title: "Expenses", url: "/admin/crm/expenses", icon: Wallet, permission: "crm" },
+  { title: "Production Cost", url: "/admin/crm/production", icon: CookingPot, permission: "crm" },
 ];
 
 function roleLabel(role: string): string {

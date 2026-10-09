@@ -1,5 +1,5 @@
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
@@ -1143,3 +1143,221 @@ class ExpenseSummaryOut(BaseModel):
     month_total: int
     previous_month_total: int
     by_category: list[ExpenseAmount]
+
+
+# --- Production cost (CRM) -----------------------------------------------------
+
+
+def _squash(v: str | None) -> str | None:
+    """Trim and collapse runs of spaces; an empty string becomes None."""
+    if v is None:
+        return None
+    v = " ".join(v.split())
+    return v or None
+
+
+class ProductionShift(BaseModel):
+    """A shift of a production day. Informational: pay is cooks × rate."""
+
+    starts: time
+    ends: time
+    cooks: int | None = Field(default=None, ge=0, le=500)
+
+
+class ProductionMaterialIn(BaseModel):
+    """A bazar-list line: one of the store's items (its unit is taken from the
+    item list, not from here) and what was paid for it that day. With a
+    quantity and a unit price the server works out the amount; without them
+    (a lump sum) the amount is required."""
+
+    item: str = Field(min_length=1, max_length=120)
+    quantity: Decimal | None = Field(default=None, gt=0, le=1_000_000, decimal_places=3)
+    unit_price: int | None = Field(default=None, ge=0, le=10_000_000)
+    amount: int | None = Field(default=None, ge=0, le=100_000_000)
+
+    @field_validator("item")
+    @classmethod
+    def _clean(cls, v: str | None) -> str | None:
+        return _squash(v)
+
+    @model_validator(mode="after")
+    def _priced(self) -> "ProductionMaterialIn":
+        if not self.item:
+            raise ValueError("Item is empty")
+        if (self.quantity is None or self.unit_price is None) and self.amount is None:
+            raise ValueError(f"{self.item}: give a quantity and unit price, or a total")
+        return self
+
+
+class ProductionBatchIn(BaseModel):
+    product: str = Field(min_length=1, max_length=80)
+    patils: int = Field(ge=1, le=1000)
+    jars_per_patil: int = Field(ge=1, le=100_000)
+
+    @field_validator("product")
+    @classmethod
+    def _clean(cls, v: str) -> str:
+        v = _squash(v) or ""
+        if not v:
+            raise ValueError("Product is empty")
+        return v
+
+
+class ProductionMiscIn(BaseModel):
+    purpose: str = Field(min_length=1, max_length=80)
+    amount: int = Field(gt=0, le=100_000_000)
+    note: str | None = Field(default=None, max_length=300)
+
+    @field_validator("purpose", "note")
+    @classmethod
+    def _clean(cls, v: str | None) -> str | None:
+        return _squash(v)
+
+
+class ProductionDayIn(BaseModel):
+    """What the production drawer sends for one day. No totals: the server
+    works them all out."""
+
+    starts_at: time | None = None
+    ends_at: time | None = None
+    shifts: list[ProductionShift] = Field(default=[], max_length=6)
+    male_cooks: int = Field(default=0, ge=0, le=500)
+    male_rate: int = Field(default=0, ge=0, le=100_000)
+    female_cooks: int = Field(default=0, ge=0, le=500)
+    female_rate: int = Field(default=0, ge=0, le=100_000)
+    gas_cost: int = Field(default=0, ge=0, le=100_000_000)
+    packaging_cost: int = Field(default=0, ge=0, le=100_000_000)
+    materials: list[ProductionMaterialIn] = Field(default=[], max_length=100)
+    # Without jars there is no cost per jar, so at least one product is cooked.
+    batches: list[ProductionBatchIn] = Field(min_length=1, max_length=30)
+    misc: list[ProductionMiscIn] = Field(default=[], max_length=30)
+    note: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("note")
+    @classmethod
+    def _strip(cls, v: str | None) -> str | None:
+        return (v.strip() or None) if isinstance(v, str) else v
+
+
+class ProductionMaterialOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    item: str
+    quantity: float | None = None
+    unit: str | None = None
+    unit_price: int | None = None
+    amount: int
+
+
+class ProductionBatchOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    product: str
+    patils: int
+    jars_per_patil: int
+    jars: int
+
+
+class ProductionMiscOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    purpose: str
+    amount: int
+    note: str | None = None
+
+
+class ProductionDayOut(BaseModel):
+    """A production day as saved, with the totals the server worked out."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    day: date
+    starts_at: time | None = None
+    ends_at: time | None = None
+    shifts: list[ProductionShift]
+    male_cooks: int
+    male_rate: int
+    female_cooks: int
+    female_rate: int
+    gas_cost: int
+    packaging_cost: int
+    note: str | None = None
+    materials: list[ProductionMaterialOut]
+    batches: list[ProductionBatchOut]
+    misc: list[ProductionMiscOut]
+    materials_cost: int
+    labour_cost: int
+    misc_cost: int
+    total_cost: int
+    patils: int
+    jars: int
+    updated_at: datetime
+
+    @computed_field
+    @property
+    def cost_per_jar(self) -> float:
+        return round(self.total_cost / self.jars, 2) if self.jars else 0.0
+
+
+class ProductionDaySummary(BaseModel):
+    """One production day in the recent-days list and the calendar."""
+
+    day: date
+    products: int
+    patils: int
+    jars: int
+    total_cost: int
+    cost_per_jar: float
+
+
+class ProductionProductIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    # A Lucide key from the admin's picker; only the shape is checked here.
+    icon: str = Field(default="cooking-pot", pattern=r"^[a-z][a-z0-9-]{0,39}$")
+
+    @field_validator("name")
+    @classmethod
+    def _clean(cls, v: str) -> str:
+        v = _squash(v) or ""
+        if not v:
+            raise ValueError("Name is empty")
+        return v
+
+
+class ProductionProductOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    icon: str
+
+
+# The units a raw material can be bought in.
+ProductionUnit = Literal["kg", "g", "L", "ml", "pcs", "dozen", "packet", "bottle"]
+
+
+class ProductionItemIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    unit: ProductionUnit
+
+    @field_validator("name")
+    @classmethod
+    def _clean(cls, v: str) -> str:
+        v = _squash(v) or ""
+        if not v:
+            raise ValueError("Name is empty")
+        return v
+
+
+class ProductionItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    unit: str
+
+
+class ProductionSuggestions(BaseModel):
+    """Purposes other costs were given before, most recent first."""
+
+    purposes: list[str]

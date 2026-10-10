@@ -7,8 +7,8 @@ import { ProductionForm } from "@/components/admin/production/production-form";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getProductionDay, listProductionDays, type ProductionDay } from "@/lib/api";
 
-/** Adding a production: the entry page, dated today, filled in from the
- *  latest production before today. */
+/** Adding a production: the entry page, dated today and empty. The latest
+ *  production before today is fetched only so its bazar list can be copied. */
 export default function NewProductionPage() {
   return (
     <CrmOnly>

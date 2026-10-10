@@ -4,24 +4,25 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft,
   CalendarDays,
+  ChefHat,
+  Clock3,
+  Coins,
   Copy,
-  Flame,
-  Package,
+  Minus,
   Pencil,
   Plus,
   RotateCcw,
-  Shapes,
-  ShoppingBasket,
+  Save,
   Trash2,
+  User,
+  UserRound,
   Users,
   X,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/components/admin/auth-context";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -60,8 +61,17 @@ import {
   unitLabel,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import {
+  costParts,
+  KpiRow,
+  ProductionHeader,
+  SummaryRail,
+  TotalBar,
+  TotalCostBlock,
+} from "./day-dashboard";
 import { dayLabel, dhakaToday, taka, takaPaisa } from "./format";
 import { PRODUCT_ICONS, ProductIcon } from "./product-icons";
+import { useLeaveGuard } from "./use-leave-guard";
 
 // --- Form rows -------------------------------------------------------------------
 
@@ -111,7 +121,7 @@ const NEW = "__new";
 type FormProps = {
   /** The production as saved, when correcting it. */
   editing: ProductionDay | null;
-  /** The latest production, to start a new one from. */
+  /** The latest production, whose bazar list a new one may copy. */
   template: ProductionDay | null;
   products: ProductionProduct[];
   items: ProductionItem[];
@@ -124,9 +134,9 @@ type FormProps = {
  * Adding a production, or correcting one, as a page of numbered cards laid
  * out like the dashboard it becomes. The date is today; a super admin may
  * pick an earlier one (or move a saved production). A new production starts
- * from the latest one's time, shifts, team and products, with its bazar list
- * one click away. Every figure shown is a preview: the server works out
- * what is saved. Saving goes back to the list.
+ * empty, whatever date is picked; the latest one's bazar list is one click
+ * away. Every figure shown is a preview: the server works out what is saved.
+ * Saving goes back to the list.
  */
 export function ProductionForm(props: FormProps) {
   // Reset starts the form over from what it opened with.
@@ -147,7 +157,8 @@ function FormBody({
   const router = useRouter();
   const { isSuperAdmin } = useAuth();
   const today = dhakaToday();
-  const start = editing ?? template;
+  // Only a production being corrected fills the form; a new one is empty.
+  const start = editing;
 
   const [day, setDay] = React.useState(editing?.day ?? today);
   const [startsAt, setStartsAt] = React.useState(hm(start?.starts_at));
@@ -346,504 +357,663 @@ function FormBody({
   const canCopy = !editing && template !== null && template.materials.length > 0;
   const canPickDate = isSuperAdmin;
 
+  /** Shifts follow the "Total shift" picker: more adds empty ones, fewer
+   *  drops the last. */
+  const setShiftCount = (n: number) =>
+    setShifts((rows) =>
+      n <= rows.length
+        ? rows.slice(0, n)
+        : [
+            ...rows,
+            ...Array.from({ length: n - rows.length }, () => ({
+              key: key(),
+              starts: "",
+              ends: "",
+              cooks: "",
+            })),
+          ]
+    );
+
+  // The dashboard around the form shows what is being typed.
+  const preview: ProductionDay = {
+    day,
+    starts_at: startsAt || null,
+    ends_at: endsAt || null,
+    shifts: shifts.map((s) => ({
+      starts: s.starts,
+      ends: s.ends,
+      cooks: s.cooks === "" ? null : Number(s.cooks),
+    })),
+    male_cooks: int(maleCooks),
+    male_rate: int(maleRate),
+    female_cooks: int(femaleCooks),
+    female_rate: int(femaleRate),
+    gas_cost: int(gas),
+    packaging_cost: int(packaging),
+    note: note.trim() || null,
+    materials: [],
+    batches: filledBatches.map((b) => ({
+      product: b.product || "—",
+      patils: int(b.patils),
+      jars_per_patil: int(b.jarsPerPatil),
+      jars: int(b.patils) * int(b.jarsPerPatil),
+    })),
+    misc: [],
+    materials_cost: materialsCost,
+    labour_cost: labourCost,
+    misc_cost: miscCost,
+    total_cost: total,
+    patils: batches.reduce((s, b) => s + int(b.patils), 0),
+    jars,
+    cost_per_jar: jars ? total / jars : 0,
+    updated_at: "",
+  };
+
+  // Unsaved: anything differs from how the page opened. Saving or deleting
+  // navigates with router.push, which the guard does not stop.
+  const snapshot = JSON.stringify([
+    day,
+    startsAt,
+    endsAt,
+    shifts.map((s) => [s.starts, s.ends, s.cooks]),
+    [maleCooks, maleRate, femaleCooks, femaleRate, gas, packaging, note],
+    materials.map((m) => [m.item, m.quantity, m.unitPrice, m.amount]),
+    batches.map((b) => [b.product, b.patils, b.jarsPerPatil]),
+    misc.map((m) => [m.purpose, m.amount, m.note]),
+  ]);
+  const [opened] = React.useState(snapshot);
+  useLeaveGuard(
+    snapshot !== opened && !saving,
+    "সেভ না করা তথ্য আছে। এই পাতা ছেড়ে গেলে লেখা তথ্য হারিয়ে যাবে। তবুও যাবেন?"
+  );
+
   return (
     <div className="@container">
-      {/* --- Heading --- */}
-      <Link
-        href={backTo}
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-4" />
-        {editing ? "Back to the production" : "Back to productions"}
-      </Link>
-      <h1 className="mt-3 text-2xl font-bold tracking-tight">
-        {editing ? "Edit production" : "Add production"}
-      </h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        এই দিনের রান্নার সব খরচ লিখুন। সেভ করলে মোট হিসাব হবে আর তালিকায় যোগ হবে।
-      </p>
+      <ProductionHeader
+        title="Production"
+        subtitle="প্রতিদিনের রান্না, কর্মী, কাঁচামাল আর মোট খরচের হিসাব।"
+        day={day}
+      />
 
-      <form
-        className="mt-6 grid gap-4 @4xl:grid-cols-12"
-        onSubmit={(e) => {
-          e.preventDefault();
-          save();
-        }}
-      >
-        {/* --- 1. Date and time --- */}
-        <Step n={1} title="Date & basic info" className="@4xl:col-span-6">
-          <div className="grid gap-3 @md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)]">
-            <Field label="Date">
-              {canPickDate ? (
-                <Input
-                  type="date"
-                  value={day}
-                  max={today}
-                  onChange={(e) => e.target.value && setDay(e.target.value)}
-                />
-              ) : (
-                <div className="flex h-9 items-center gap-2 rounded-md border bg-muted/40 px-3 text-sm">
-                  <CalendarDays className="size-4 text-muted-foreground" />
-                  {dayLabel(day, { weekday: true })}
-                </div>
-              )}
-            </Field>
-            <Field label="Starts">
-              <Input type="time" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} />
-            </Field>
-            <Field label="Ends">
-              <Input type="time" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} />
-            </Field>
+      {/* The page reads as the dashboard it will become; only the form is
+          lit, the rest follows it, dimmed. */}
+      <div className="mt-6 grid items-start gap-4 @[88rem]:grid-cols-[minmax(0,1fr)_19rem]">
+        <div className="grid min-w-0 gap-4">
+          <div aria-hidden className="pointer-events-none select-none opacity-40">
+            <KpiRow record={preview} />
           </div>
-          <p className="-mt-1 text-xs text-muted-foreground">
-            {canPickDate
-              ? "তারিখ আজকের; আগের কোনো দিনের প্রোডাকশন লিখতে তারিখ বদলান।"
-              : "তারিখ নিজে থেকেই আজকের। শুধু সুপার অ্যাডমিন অন্য তারিখ দিতে পারেন।"}
-          </p>
-          {dateTaken && (
-            <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm">
-              {dayLabel(day, { weekday: true })}-এ আগেই একটি প্রোডাকশন আছে।{" "}
+
+          <form
+            className="@container overflow-hidden rounded-2xl border bg-card shadow-2xl ring-4 ring-primary/15"
+            onSubmit={(e) => {
+              e.preventDefault();
+              save();
+            }}
+          >
+            {/* --- The card's title bar --- */}
+            <div className="flex items-start gap-3 bg-primary px-5 py-4 text-primary-foreground">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary-foreground/15">
+                <ChefHat className="size-5" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-lg font-semibold">
+                  {editing ? "Update production costing" : "Add production costing"}
+                </h2>
+                <p className="text-sm opacity-90">
+                  এই দিনের সব তথ্য লিখুন। সেভ করলে প্রোডাকশনের তালিকায় যোগ হবে।
+                </p>
+              </div>
               <Link
-                href={`/admin/crm/production/${day}`}
-                className="font-medium text-primary hover:underline"
+                href={backTo}
+                aria-label="Close"
+                className="rounded-md p-1.5 transition-colors hover:bg-primary-foreground/15"
               >
-                সেটি খুলুন →
+                <X className="size-5" />
               </Link>
             </div>
-          )}
-        </Step>
 
-        {/* --- 2. Shifts --- */}
-        <Step n={2} title="Shift information" hint="শুধু তথ্যের জন্য; মজুরি রাঁধুনি × দৈনিক মজুরি থেকে হিসাব হয়।" className="@4xl:col-span-6">
-          {shifts.length > 0 && (
-            <div className="grid gap-2">
-              <RowHead cols="grid-cols-[4rem_1fr_1fr_4.5rem_2rem]" labels={["", "Starts", "Ends", "Cooks", ""]} />
-              {shifts.map((s, i) => (
-                <div key={s.key} className="grid grid-cols-[4rem_1fr_1fr_4.5rem_2rem] items-center gap-2">
-                  <span className="text-sm text-muted-foreground">Shift {i + 1}</span>
-                  <Input
-                    type="time"
-                    aria-label={`Shift ${i + 1} starts`}
-                    value={s.starts}
-                    onChange={(e) => setShift(s.key, { starts: e.target.value })}
-                  />
-                  <Input
-                    type="time"
-                    aria-label={`Shift ${i + 1} ends`}
-                    value={s.ends}
-                    onChange={(e) => setShift(s.key, { ends: e.target.value })}
-                  />
-                  <Input
-                    inputMode="numeric"
-                    aria-label={`Shift ${i + 1} cooks`}
-                    placeholder="0"
-                    value={s.cooks}
-                    onChange={(e) => setShift(s.key, { cooks: digits(e.target.value) })}
-                    className="tabular-nums"
-                  />
-                  <RemoveButton
-                    label={`Remove shift ${i + 1}`}
-                    onClick={() => setShifts((rows) => rows.filter((r) => r.key !== s.key))}
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-          {shifts.length < 6 && (
-            <AddButton
-              onClick={() =>
-                setShifts((rows) => [...rows, { key: key(), starts: "", ends: "", cooks: "" }])
-              }
-            >
-              Add shift
-            </AddButton>
-          )}
-        </Step>
-
-        {/* --- 3. The team --- */}
-        <Step n={3} title="Workforce" hint="আজ কতজন রাঁধুনি কাজ করেছেন।" className="@4xl:col-span-5">
-          <div className="grid grid-cols-3 gap-3">
-            {(
-              [
-                ["Male cooks", maleCooks, setMaleCooks],
-                ["Female cooks", femaleCooks, setFemaleCooks],
-              ] as const
-            ).map(([label, value, set]) => (
-              <label key={label} className="grid gap-1.5 rounded-lg border p-3">
-                <span className="text-xs text-muted-foreground">{label}</span>
-                <Input
-                  inputMode="numeric"
-                  placeholder="0"
-                  value={value}
-                  onChange={(e) => set(digits(e.target.value))}
-                  className="h-10 text-lg font-semibold tabular-nums"
-                />
-              </label>
-            ))}
-            <div className="grid gap-1.5 rounded-lg border border-primary/30 bg-primary/5 p-3">
-              <span className="text-xs text-muted-foreground">Total cooks</span>
-              <span className="flex h-10 items-center text-lg font-semibold tabular-nums">
-                {int(maleCooks) + int(femaleCooks)}
-              </span>
-            </div>
-          </div>
-        </Step>
-
-        {/* --- 4. Their pay --- */}
-        <Step n={4} title="Cook pay" hint="প্রত্যেক রাঁধুনির এক দিনের মজুরি।" className="@4xl:col-span-7">
-          <div className="grid gap-2">
-            {(
-              [
-                ["Male cooks", maleCooks, maleRate, setMaleRate],
-                ["Female cooks", femaleCooks, femaleRate, setFemaleRate],
-              ] as const
-            ).map(([label, cooks, rate, setRate]) => (
-              <div key={label} className="grid grid-cols-[minmax(0,1fr)_auto_7rem_6rem] items-center gap-2">
-                <span className="truncate text-sm">{label}</span>
-                <span className="text-sm text-muted-foreground tabular-nums">{int(cooks)} ×</span>
-                <Input
-                  inputMode="numeric"
-                  aria-label={`${label} pay each`}
-                  placeholder="৳ 0"
-                  value={rate}
-                  onChange={(e) => setRate(digits(e.target.value))}
-                  className="tabular-nums"
-                />
-                <span className="text-right text-sm font-medium tabular-nums">
-                  {taka(int(cooks) * int(rate))}
-                </span>
-              </div>
-            ))}
-          </div>
-          <Subtotal label="Total labour cost">{taka(labourCost)}</Subtotal>
-        </Step>
-
-        {/* --- 5. The bazar list --- */}
-        <Step
-          n={5}
-          title="Raw materials"
-          hint="আইটেম বাছুন, তারপর আজ কতটুকু কেনা হলো আর একক দাম কত। পরিমাণ ও দাম না থাকলে মোট টাকা লিখুন।"
-          action={<LinkButton onClick={() => setManaging({ kind: "items" })}>Manage items</LinkButton>}
-          className="@4xl:col-span-12 @7xl:col-span-7"
-        >
-          <div className="grid gap-3 @2xl:gap-2">
-            <RowHead
-              cols="grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1fr)_2rem]"
-              labels={["Item", "Quantity", "Unit", "Unit price (৳)", "Total (৳)", ""]}
-            />
-            {materials.map((m, i) => {
-              const priced = m.quantity !== "" && m.unitPrice !== "";
-              const unit = m.item ? unitOf(m.item) : null;
-              return (
-                <div key={m.key} className="flex items-start gap-2">
-                  <div className="grid flex-1 grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1fr)] gap-2 @2xl:grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1fr)]">
-                    <Select
-                      value={m.item}
-                      onValueChange={(v) =>
-                        v === NEW
-                          ? setManaging({ kind: "items", row: m.key })
-                          : setMaterial(m.key, { item: v })
-                      }
-                    >
-                      <SelectTrigger
-                        className="col-span-4 w-full @2xl:col-span-1"
-                        aria-label={`Item ${i + 1}`}
-                      >
-                        <SelectValue placeholder="আইটেম বাছুন" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {itemOptions.map((o) => (
-                          <SelectItem key={o.name} value={o.name}>
-                            {o.name}
-                            {o.unit && (
-                              <span className="text-xs text-muted-foreground">({unitLabel(o.unit)})</span>
-                            )}
-                          </SelectItem>
-                        ))}
-                        {itemOptions.length > 0 && <SelectSeparator />}
-                        <SelectItem value={NEW} className="text-primary">
-                          <Plus className="size-4" />
-                          New item…
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Input
-                      inputMode="decimal"
-                      aria-label={`Item ${i + 1} quantity`}
-                      placeholder="পরিমাণ"
-                      value={m.quantity}
-                      onChange={(e) => setMaterial(m.key, { quantity: decimal(e.target.value) })}
-                      className="tabular-nums"
-                    />
-                    <div
-                      aria-label={`Item ${i + 1} unit`}
-                      className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm text-muted-foreground"
-                    >
-                      {unit ? unitLabel(unit) : "—"}
+            <div className="grid gap-4 p-4 @2xl:grid-cols-12 @2xl:p-5">
+              {/* --- 1. Date and time --- */}
+              <Box n={1} title="Date & basic info" className="@2xl:col-span-6">
+                <div className="grid gap-3 @lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
+                  <label className="grid gap-1.5">
+                    <span className="text-xs text-muted-foreground">Date *</span>
+                    {canPickDate ? (
+                      <Input
+                        type="date"
+                        value={day}
+                        max={today}
+                        onChange={(e) => e.target.value && setDay(e.target.value)}
+                      />
+                    ) : (
+                      <div className="flex h-9 items-center gap-2 rounded-md border bg-muted/40 px-3 text-sm">
+                        <CalendarDays className="size-4 text-muted-foreground" />
+                        {dayLabel(day)}
+                      </div>
+                    )}
+                  </label>
+                  <div className="grid gap-1.5">
+                    <span className="text-xs text-muted-foreground">Production time</span>
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        type="time"
+                        aria-label="Production starts"
+                        value={startsAt}
+                        onChange={(e) => setStartsAt(e.target.value)}
+                      />
+                      <span className="text-muted-foreground">–</span>
+                      <Input
+                        type="time"
+                        aria-label="Production ends"
+                        value={endsAt}
+                        onChange={(e) => setEndsAt(e.target.value)}
+                      />
                     </div>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {canPickDate
+                    ? "তারিখ আজকের; আগের কোনো দিনের প্রোডাকশন লিখতে তারিখ বদলান।"
+                    : "তারিখ নিজে থেকেই আজকের। শুধু সুপার অ্যাডমিন অন্য তারিখ দিতে পারেন।"}
+                </p>
+                {dateTaken && (
+                  <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm">
+                    {dayLabel(day)}-এ আগেই একটি প্রোডাকশন আছে।{" "}
+                    <Link
+                      href={`/admin/crm/production/${day}`}
+                      className="font-medium text-primary hover:underline"
+                    >
+                      সেটি খুলুন →
+                    </Link>
+                  </div>
+                )}
+              </Box>
+
+              {/* --- Shifts --- */}
+              <Box icon={Clock3} title="Shift information" className="@2xl:col-span-6">
+                <label className="flex items-center gap-3">
+                  <span className="text-xs text-muted-foreground">Total shift</span>
+                  <Select
+                    value={String(shifts.length)}
+                    onValueChange={(v) => setShiftCount(Number(v))}
+                  >
+                    <SelectTrigger className="w-20">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[0, 1, 2, 3, 4].map((n) => (
+                        <SelectItem key={n} value={String(n)}>
+                          {n}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </label>
+                {/* One shift per row, going down: when, and how many cooks
+                    worked it. For the record only; pay is cooks × rate. */}
+                {shifts.length > 0 && (
+                  <div className="overflow-hidden rounded-lg border">
+                    <div className="grid grid-cols-[3.5rem_minmax(0,1fr)_minmax(0,1fr)_4.5rem] gap-2 bg-muted/50 px-3 py-2 text-[11px] font-medium">
+                      <span>Shift</span>
+                      <span>Starts</span>
+                      <span>Ends</span>
+                      <span>Cooks</span>
+                    </div>
+                    {shifts.map((s, i) => (
+                      <div
+                        key={s.key}
+                        className="grid grid-cols-[3.5rem_minmax(0,1fr)_minmax(0,1fr)_4.5rem] items-center gap-2 border-t px-3 py-1.5"
+                      >
+                        <span className="text-sm font-medium">{i + 1}</span>
+                        <Input
+                          type="time"
+                          aria-label={`Shift ${i + 1} starts`}
+                          value={s.starts}
+                          onChange={(e) => setShift(s.key, { starts: e.target.value })}
+                          className="h-8 px-2"
+                        />
+                        <Input
+                          type="time"
+                          aria-label={`Shift ${i + 1} ends`}
+                          value={s.ends}
+                          onChange={(e) => setShift(s.key, { ends: e.target.value })}
+                          className="h-8 px-2"
+                        />
+                        <div className="relative">
+                          <Input
+                            inputMode="numeric"
+                            aria-label={`Cooks in shift ${i + 1}`}
+                            placeholder="0"
+                            value={s.cooks}
+                            onChange={(e) => setShift(s.key, { cooks: digits(e.target.value) })}
+                            className="h-8 pr-7 pl-2 tabular-nums"
+                          />
+                          <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[11px] text-muted-foreground">
+                            জন
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  প্রতিটি শিফটে কতজন রাঁধুনি কাজ করেছেন, তা শুধু তথ্যের জন্য; মজুরি হিসাব হয়
+                  Workforce × Cook salary থেকে।
+                </p>
+              </Box>
+
+              {/* --- 2. The team --- */}
+              <Box n={2} title="Workforce" aside="(Today)" className="@2xl:col-span-6">
+                <div className="grid grid-cols-3 gap-2">
+                  <Tally icon={User} label="Male cook" value={maleCooks} onChange={setMaleCooks} />
+                  <Tally icon={UserRound} label="Female cook" value={femaleCooks} onChange={setFemaleCooks} />
+                  <div className="flex flex-col items-center gap-1 rounded-lg bg-primary/10 p-2.5 text-center">
+                    <span className="flex items-center gap-1 text-xs font-medium">
+                      <Users className="size-4 text-primary" />
+                      Total cook
+                    </span>
+                    <span className="flex h-9 items-center text-xl font-bold tabular-nums">
+                      {int(maleCooks) + int(femaleCooks)}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">জন</span>
+                  </div>
+                </div>
+              </Box>
+
+              {/* --- Their pay --- */}
+              <Box icon={Coins} title="Cook salary" aside="(Today)" className="@2xl:col-span-6">
+                <div className="grid gap-2">
+                  {(
+                    [
+                      [User, "Male cook", maleCooks, maleRate, setMaleRate],
+                      [UserRound, "Female cook", femaleCooks, femaleRate, setFemaleRate],
+                    ] as const
+                  ).map(([Icon, label, cooks, rate, setRate]) => (
+                    <div
+                      key={label}
+                      className="grid grid-cols-[minmax(0,1fr)_auto_5.5rem_auto_4.5rem] items-center gap-2 text-sm"
+                    >
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <Icon className="size-4 shrink-0 text-primary" />
+                        <span className="truncate">{label}</span>
+                      </span>
+                      <span className="text-muted-foreground tabular-nums">{int(cooks)} × ৳</span>
+                      <Input
+                        inputMode="numeric"
+                        aria-label={`${label} pay each`}
+                        placeholder="0"
+                        value={rate}
+                        onChange={(e) => setRate(digits(e.target.value))}
+                        className="h-8 tabular-nums"
+                      />
+                      <span className="text-muted-foreground">=</span>
+                      <span className="text-right font-semibold tabular-nums">
+                        {taka(int(cooks) * int(rate))}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <TotalBar className="mt-auto" label="Total labour cost">{taka(labourCost)}</TotalBar>
+              </Box>
+
+              {/* --- 3. The bazar list --- */}
+              <Box
+                n={3}
+                title="Raw materials"
+                aside="(Bazar list)"
+                action={<LinkButton onClick={() => setManaging({ kind: "items" })}>Manage items</LinkButton>}
+                className="@2xl:col-span-12 @4xl:col-span-5"
+              >
+                <div className="overflow-hidden rounded-lg border">
+                  <div className="hidden grid-cols-[1.25rem_minmax(0,1fr)_5.5rem_4.75rem_4.5rem_1.25rem] gap-1.5 bg-muted/50 px-2 py-2 text-[11px] font-medium @lg:grid">
+                    <span>#</span>
+                    <span>Item</span>
+                    <span>Quantity</span>
+                    <span>Unit price (৳)</span>
+                    <span className="text-right">Total (৳)</span>
+                    <span />
+                  </div>
+                  {materials.map((m, i) => {
+                    const priced = m.quantity !== "" && m.unitPrice !== "";
+                    const unit = m.item ? unitOf(m.item) : null;
+                    return (
+                      <div
+                        key={m.key}
+                        className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_1.25rem] items-center gap-1.5 border-t px-2 py-1.5 first:border-t-0 @lg:grid-cols-[1.25rem_minmax(0,1fr)_5.5rem_4.75rem_4.5rem_1.25rem] @lg:first:border-t"
+                      >
+                        <span className="hidden text-xs text-muted-foreground tabular-nums @lg:block">
+                          {i + 1}
+                        </span>
+                        <Select
+                          value={m.item}
+                          onValueChange={(v) =>
+                            v === NEW
+                              ? setManaging({ kind: "items", row: m.key })
+                              : setMaterial(m.key, { item: v })
+                          }
+                        >
+                          <SelectTrigger
+                            size="sm"
+                            className="col-span-3 w-full @lg:col-span-1"
+                            aria-label={`Item ${i + 1}`}
+                          >
+                            <SelectValue placeholder="আইটেম বাছুন" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {itemOptions.map((o) => (
+                              <SelectItem key={o.name} value={o.name}>
+                                {o.name}
+                                {o.unit && (
+                                  <span className="text-xs text-muted-foreground">
+                                    ({unitLabel(o.unit)})
+                                  </span>
+                                )}
+                              </SelectItem>
+                            ))}
+                            {itemOptions.length > 0 && <SelectSeparator />}
+                            <SelectItem value={NEW} className="text-primary">
+                              <Plus className="size-4" />
+                              New item…
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <RemoveButton
+                          label={`Remove item ${i + 1}`}
+                          onClick={() =>
+                            setMaterials((rows) =>
+                              rows.length > 1 ? rows.filter((r) => r.key !== m.key) : [emptyMaterial()]
+                            )
+                          }
+                          className="@lg:order-1"
+                        />
+                        <div className="relative">
+                          <Input
+                            inputMode="decimal"
+                            aria-label={`Item ${i + 1} quantity`}
+                            placeholder="0"
+                            value={m.quantity}
+                            onChange={(e) => setMaterial(m.key, { quantity: decimal(e.target.value) })}
+                            className={cn("h-8 px-2 tabular-nums", unit && "pr-11")}
+                          />
+                          {unit && (
+                            <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[11px] text-muted-foreground">
+                              {unitLabel(unit)}
+                            </span>
+                          )}
+                        </div>
+                        <Input
+                          inputMode="numeric"
+                          aria-label={`Item ${i + 1} unit price`}
+                          placeholder="দাম"
+                          value={m.unitPrice}
+                          onChange={(e) => setMaterial(m.key, { unitPrice: digits(e.target.value) })}
+                          className="h-8 px-2 tabular-nums"
+                        />
+                        <Input
+                          inputMode="numeric"
+                          aria-label={`Item ${i + 1} total`}
+                          placeholder="মোট"
+                          disabled={priced}
+                          value={priced ? String(lineTotal(m) ?? "") : m.amount}
+                          onChange={(e) => setMaterial(m.key, { amount: digits(e.target.value) })}
+                          className="h-8 px-2 text-right tabular-nums disabled:border-transparent disabled:bg-transparent disabled:opacity-100"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <AddButton onClick={() => setMaterials((rows) => [...rows, emptyMaterial()])}>
+                    Add item
+                  </AddButton>
+                  {canCopy && (
+                    <Button type="button" variant="ghost" size="sm" onClick={copyBazarList} className="gap-1.5">
+                      <Copy className="size-4" />
+                      Copy list from {dayLabel(template!.day, { year: false })}
+                    </Button>
+                  )}
+                </div>
+                <TotalBar className="mt-auto" label="Total raw material cost">{taka(materialsCost)}</TotalBar>
+              </Box>
+
+              {/* --- 4. What was cooked --- */}
+              <Box
+                n={4}
+                title="Cooking details"
+                aside="(প্রতি পণ্যের জন্য)"
+                action={
+                  <LinkButton onClick={() => setManaging({ kind: "products" })}>Manage products</LinkButton>
+                }
+                className="@2xl:col-span-7 @4xl:col-span-4"
+              >
+                <div className="overflow-hidden rounded-lg border">
+                  <div className="grid grid-cols-[minmax(0,1fr)_3.25rem_3.75rem_3.25rem_1.25rem] gap-1.5 bg-muted/50 px-2 py-2 text-[11px] font-medium leading-tight">
+                    <span>Product</span>
+                    <span className="text-center">No. of patil</span>
+                    <span className="text-center">Per patil (jar)</span>
+                    <span className="text-right">Total jar</span>
+                    <span />
+                  </div>
+                  {batches.map((b, i) => (
+                    <div
+                      key={b.key}
+                      className="grid grid-cols-[minmax(0,1fr)_3.25rem_3.75rem_3.25rem_1.25rem] items-center gap-1.5 border-t px-2 py-1.5"
+                    >
+                      <Select
+                        value={b.product}
+                        onValueChange={(v) =>
+                          v === NEW
+                            ? setManaging({ kind: "products", row: b.key })
+                            : setBatch(b.key, { product: v })
+                        }
+                      >
+                        <SelectTrigger size="sm" className="w-full" aria-label={`Product ${i + 1}`}>
+                          <SelectValue placeholder="পণ্য বাছুন" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {productOptions.map((name) => (
+                            <SelectItem key={name} value={name}>
+                              <ProductIcon icon={iconOf(name)} className="size-4 text-muted-foreground" />
+                              {name}
+                            </SelectItem>
+                          ))}
+                          {productOptions.length > 0 && <SelectSeparator />}
+                          <SelectItem value={NEW} className="text-primary">
+                            <Plus className="size-4" />
+                            New product…
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        inputMode="numeric"
+                        aria-label={`Product ${i + 1} patils`}
+                        placeholder="0"
+                        value={b.patils}
+                        onChange={(e) => setBatch(b.key, { patils: digits(e.target.value) })}
+                        className="h-8 px-2 text-center tabular-nums"
+                      />
+                      <Input
+                        inputMode="numeric"
+                        aria-label={`Product ${i + 1} jars per patil`}
+                        placeholder="0"
+                        value={b.jarsPerPatil}
+                        onChange={(e) => setBatch(b.key, { jarsPerPatil: digits(e.target.value) })}
+                        className="h-8 px-2 text-center tabular-nums"
+                      />
+                      <span className="text-right text-sm font-semibold tabular-nums">
+                        {(int(b.patils) * int(b.jarsPerPatil)).toLocaleString("en-IN")}
+                      </span>
+                      <RemoveButton
+                        label={`Remove product ${i + 1}`}
+                        onClick={() =>
+                          setBatches((rows) =>
+                            rows.length > 1 ? rows.filter((r) => r.key !== b.key) : [emptyBatch()]
+                          )
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+                <AddButton onClick={() => setBatches((rows) => [...rows, emptyBatch()])}>
+                  Add product
+                </AddButton>
+                <TotalBar className="mt-auto" label="Total jar produced">{jars.toLocaleString("en-IN")}</TotalBar>
+              </Box>
+
+              {/* --- 5. Where the money goes --- */}
+              <Box n={5} title="Total cost breakdown" className="@2xl:col-span-5 @4xl:col-span-3">
+                <ul className="grid">
+                  {costParts(preview).map(({ label, amount, Icon }) => (
+                    <li key={label} className="flex items-center gap-2.5 border-b py-2 last:border-0">
+                      <Icon className="size-4.5 shrink-0 text-primary" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[11px] text-muted-foreground">{label}</div>
+                        <div className="text-sm font-semibold tabular-nums">{taka(amount)}</div>
+                      </div>
+                      <span className="text-xs text-muted-foreground tabular-nums">
+                        {total ? `${((amount / total) * 100).toFixed(1)}%` : "—"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <TotalCostBlock total={total} className="mt-auto px-4 py-3" />
+                <p className="text-center text-xs text-muted-foreground">
+                  প্রতি জার: {jars ? takaPaisa(total / jars) : "—"}
+                </p>
+              </Box>
+
+              {/* --- 6. Everything else --- */}
+              <Box n={6} title="Miscellaneous" className="@2xl:col-span-12 @4xl:col-span-9">
+                <div className="grid grid-cols-2 gap-3 @lg:grid-cols-4">
+                  <label className="grid gap-1.5">
+                    <span className="text-xs text-muted-foreground">Gas / fuel (৳)</span>
                     <Input
                       inputMode="numeric"
-                      aria-label={`Item ${i + 1} unit price`}
-                      placeholder={unit ? `প্রতি ${unitLabel(unit)}` : "দাম"}
-                      value={m.unitPrice}
-                      onChange={(e) => setMaterial(m.key, { unitPrice: digits(e.target.value) })}
+                      placeholder="0"
+                      value={gas}
+                      onChange={(e) => setGas(digits(e.target.value))}
                       className="tabular-nums"
                     />
+                  </label>
+                  <label className="grid gap-1.5">
+                    <span className="text-xs text-muted-foreground">Packaging (৳)</span>
                     <Input
                       inputMode="numeric"
-                      aria-label={`Item ${i + 1} total`}
-                      placeholder="মোট"
-                      disabled={priced}
-                      value={priced ? String(lineTotal(m) ?? "") : m.amount}
-                      onChange={(e) => setMaterial(m.key, { amount: digits(e.target.value) })}
-                      className="tabular-nums disabled:bg-muted/40 disabled:opacity-100"
+                      placeholder="0"
+                      value={packaging}
+                      onChange={(e) => setPackaging(digits(e.target.value))}
+                      className="tabular-nums"
                     />
-                  </div>
-                  <RemoveButton
-                    label={`Remove item ${i + 1}`}
-                    onClick={() =>
-                      setMaterials((rows) =>
-                        rows.length > 1 ? rows.filter((r) => r.key !== m.key) : [emptyMaterial()]
-                      )
-                    }
-                  />
+                  </label>
                 </div>
-              );
-            })}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <AddButton onClick={() => setMaterials((rows) => [...rows, emptyMaterial()])}>
-              Add item
-            </AddButton>
-            {canCopy && (
-              <Button type="button" variant="ghost" size="sm" onClick={copyBazarList} className="gap-1.5">
-                <Copy className="size-4" />
-                Copy list from {dayLabel(template!.day, { year: false })}
-              </Button>
-            )}
-          </div>
-          <Subtotal label="Total raw material cost">{taka(materialsCost)}</Subtotal>
-        </Step>
-
-        {/* --- 6. What was cooked --- */}
-        <Step
-          n={6}
-          title="Products cooked"
-          hint="জার = পাতিল × প্রতি পাতিলে জার।"
-          action={
-            <LinkButton onClick={() => setManaging({ kind: "products" })}>Manage products</LinkButton>
-          }
-          className="@4xl:col-span-7 @7xl:col-span-5"
-        >
-          <div className="grid gap-2">
-            <RowHead
-              cols="grid-cols-[minmax(0,2fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.8fr)_2rem]"
-              labels={["Product", "Patils", "Per patil", "Jars", ""]}
-            />
-            {batches.map((b, i) => (
-              <div
-                key={b.key}
-                className="grid grid-cols-[minmax(0,2fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.8fr)_2rem] items-center gap-2"
-              >
-                <Select
-                  value={b.product}
-                  onValueChange={(v) =>
-                    v === NEW
-                      ? setManaging({ kind: "products", row: b.key })
-                      : setBatch(b.key, { product: v })
-                  }
-                >
-                  <SelectTrigger className="w-full" aria-label={`Product ${i + 1}`}>
-                    <SelectValue placeholder="পণ্য বাছুন" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {productOptions.map((name) => (
-                      <SelectItem key={name} value={name}>
-                        <ProductIcon icon={iconOf(name)} className="size-4 text-muted-foreground" />
-                        {name}
-                      </SelectItem>
+                <datalist id="prod-purposes">
+                  {suggestions.purposes.map((p) => (
+                    <option key={p} value={p} />
+                  ))}
+                </datalist>
+                {misc.length > 0 && (
+                  <div className="grid gap-2">
+                    <div className="hidden grid-cols-[minmax(0,1fr)_6rem_minmax(0,1.4fr)_1.25rem] gap-2 text-xs text-muted-foreground @lg:grid">
+                      <span>Other expenses</span>
+                      <span>Amount (৳)</span>
+                      <span>Note (optional)</span>
+                      <span />
+                    </div>
+                    {misc.map((m, i) => (
+                      <div
+                        key={m.key}
+                        className="grid grid-cols-[minmax(0,1fr)_6rem_1.25rem] items-center gap-2 @lg:grid-cols-[minmax(0,1fr)_6rem_minmax(0,1.4fr)_1.25rem]"
+                      >
+                        <Input
+                          list="prod-purposes"
+                          aria-label={`Other expense ${i + 1} purpose`}
+                          placeholder="কারণ"
+                          maxLength={80}
+                          value={m.purpose}
+                          onChange={(e) => setMiscRow(m.key, { purpose: e.target.value })}
+                        />
+                        <Input
+                          inputMode="numeric"
+                          aria-label={`Other expense ${i + 1} amount`}
+                          placeholder="0"
+                          value={m.amount}
+                          onChange={(e) => setMiscRow(m.key, { amount: digits(e.target.value) })}
+                          className="tabular-nums"
+                        />
+                        <Input
+                          aria-label={`Other expense ${i + 1} note`}
+                          placeholder="ঐচ্ছিক"
+                          maxLength={300}
+                          value={m.note}
+                          onChange={(e) => setMiscRow(m.key, { note: e.target.value })}
+                          className="order-last col-span-2 @lg:order-none @lg:col-span-1"
+                        />
+                        <RemoveButton
+                          label={`Remove other expense ${i + 1}`}
+                          onClick={() => setMisc((rows) => rows.filter((r) => r.key !== m.key))}
+                        />
+                      </div>
                     ))}
-                    {productOptions.length > 0 && <SelectSeparator />}
-                    <SelectItem value={NEW} className="text-primary">
-                      <Plus className="size-4" />
-                      New product…
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                <Input
-                  inputMode="numeric"
-                  aria-label={`Product ${i + 1} patils`}
-                  placeholder="0"
-                  value={b.patils}
-                  onChange={(e) => setBatch(b.key, { patils: digits(e.target.value) })}
-                  className="tabular-nums"
-                />
-                <Input
-                  inputMode="numeric"
-                  aria-label={`Product ${i + 1} jars per patil`}
-                  placeholder="0"
-                  value={b.jarsPerPatil}
-                  onChange={(e) => setBatch(b.key, { jarsPerPatil: digits(e.target.value) })}
-                  className="tabular-nums"
-                />
-                <span className="text-right text-sm font-medium tabular-nums">
-                  {(int(b.patils) * int(b.jarsPerPatil)).toLocaleString("en-IN")}
-                </span>
-                <RemoveButton
-                  label={`Remove product ${i + 1}`}
-                  onClick={() =>
-                    setBatches((rows) =>
-                      rows.length > 1 ? rows.filter((r) => r.key !== b.key) : [emptyBatch()]
-                    )
-                  }
-                />
-              </div>
-            ))}
-          </div>
-          <AddButton onClick={() => setBatches((rows) => [...rows, emptyBatch()])}>
-            Add product
-          </AddButton>
-          <Subtotal label="Total jars produced">{jars.toLocaleString("en-IN")}</Subtotal>
-        </Step>
+                  </div>
+                )}
+                <AddButton onClick={() => setMisc((rows) => [...rows, emptyMisc()])}>
+                  Add other expense
+                </AddButton>
+                <label className="grid gap-1.5">
+                  <span className="text-xs text-muted-foreground">Note (optional)</span>
+                  <Textarea
+                    placeholder="এই দিনের মনে রাখার মতো কিছু থাকলে লিখুন"
+                    value={note}
+                    maxLength={1000}
+                    rows={2}
+                    onChange={(e) => setNote(e.target.value)}
+                  />
+                </label>
+              </Box>
 
-        {/* --- 7. Everything else --- */}
-        <Step n={7} title="Other costs & note" className="@4xl:col-span-5 @7xl:col-span-7">
-          <div className="grid grid-cols-2 gap-3 @lg:max-w-sm">
-            <Field label="Gas / fuel (৳)">
-              <Input
-                inputMode="numeric"
-                placeholder="0"
-                value={gas}
-                onChange={(e) => setGas(digits(e.target.value))}
-                className="tabular-nums"
-              />
-            </Field>
-            <Field label="Packaging (৳)">
-              <Input
-                inputMode="numeric"
-                placeholder="0"
-                value={packaging}
-                onChange={(e) => setPackaging(digits(e.target.value))}
-                className="tabular-nums"
-              />
-            </Field>
-          </div>
-          <datalist id="prod-purposes">
-            {suggestions.purposes.map((p) => (
-              <option key={p} value={p} />
-            ))}
-          </datalist>
-          {misc.length > 0 && (
-            <div className="grid gap-2">
-              <RowHead
-                cols="grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,2fr)_2rem]"
-                labels={["Miscellaneous", "Amount (৳)", "Note", ""]}
-              />
-              {misc.map((m, i) => (
-                <div
-                  key={m.key}
-                  className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,2fr)_2rem] items-center gap-2"
-                >
-                  <Input
-                    list="prod-purposes"
-                    aria-label={`Miscellaneous cost ${i + 1} purpose`}
-                    placeholder="কারণ"
-                    maxLength={80}
-                    value={m.purpose}
-                    onChange={(e) => setMiscRow(m.key, { purpose: e.target.value })}
-                  />
-                  <Input
-                    inputMode="numeric"
-                    aria-label={`Miscellaneous cost ${i + 1} amount`}
-                    placeholder="0"
-                    value={m.amount}
-                    onChange={(e) => setMiscRow(m.key, { amount: digits(e.target.value) })}
-                    className="tabular-nums"
-                  />
-                  <Input
-                    aria-label={`Miscellaneous cost ${i + 1} note`}
-                    placeholder="ঐচ্ছিক"
-                    maxLength={300}
-                    value={m.note}
-                    onChange={(e) => setMiscRow(m.key, { note: e.target.value })}
-                  />
-                  <RemoveButton
-                    label={`Remove miscellaneous cost ${i + 1}`}
-                    onClick={() => setMisc((rows) => rows.filter((r) => r.key !== m.key))}
-                  />
+              {/* --- The buttons --- */}
+              <div className="flex flex-col justify-end gap-2 @2xl:col-span-12 @4xl:col-span-3">
+                {(error || (tried && problems.length > 0)) && (
+                  <p className="text-sm text-destructive">{error ?? problems[0]}</p>
+                )}
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  {editing && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="mr-auto text-destructive hover:bg-destructive/10 hover:text-destructive @4xl:mr-0"
+                      onClick={() => setConfirmingDelete(true)}
+                      disabled={saving}
+                    >
+                      <Trash2 className="size-4" />
+                      Delete
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="lg"
+                    onClick={onReset}
+                    disabled={saving}
+                    className="gap-1.5"
+                  >
+                    <RotateCcw className="size-4" />
+                    Reset
+                  </Button>
+                  <Button type="submit" size="lg" disabled={saving} className="gap-1.5 px-5">
+                    <Save className="size-4" />
+                    {saving ? "Saving…" : editing ? "Save changes" : "Save & add"}
+                  </Button>
                 </div>
-              ))}
+              </div>
             </div>
-          )}
-          <AddButton onClick={() => setMisc((rows) => [...rows, emptyMisc()])}>
-            Add miscellaneous cost
-          </AddButton>
-          <Field label="Note (optional)">
-            <Textarea
-              placeholder="এই দিনের মনে রাখার মতো কিছু থাকলে লিখুন"
-              value={note}
-              maxLength={1000}
-              rows={2}
-              onChange={(e) => setNote(e.target.value)}
-            />
-          </Field>
-        </Step>
-
-        {/* --- 8. Where the money goes --- */}
-        <Step
-          n={8}
-          title="Total cost breakdown"
-          hint="লেখার সাথে সাথে হিসাব বদলায়; সেভ করার সময় আবার হিসাব করা হয়।"
-          className="@4xl:col-span-7 @7xl:col-span-5"
-        >
-          <CostBreakdown
-            parts={[
-              { label: "Raw materials (bazar)", amount: materialsCost, Icon: ShoppingBasket },
-              { label: "Labour (male + female)", amount: labourCost, Icon: Users },
-              { label: "Gas / fuel", amount: int(gas), Icon: Flame },
-              { label: "Packaging", amount: int(packaging), Icon: Package },
-              { label: "Miscellaneous", amount: miscCost, Icon: Shapes },
-            ]}
-            total={total}
-            jars={jars}
-          />
-        </Step>
-
-        {/* --- The buttons, always in reach --- */}
-        <div className="sticky bottom-0 z-10 -mx-4 border-t bg-background/95 px-4 py-3 backdrop-blur @4xl:col-span-12 sm:-mx-6 sm:px-6">
-          {(error || (tried && problems.length > 0)) && (
-            <p className="mb-2 text-sm text-destructive">{error ?? problems[0]}</p>
-          )}
-          <div className="flex items-center gap-2">
-            {editing && (
-              <Button
-                type="button"
-                variant="ghost"
-                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                onClick={() => setConfirmingDelete(true)}
-                disabled={saving}
-              >
-                <Trash2 className="size-4" />
-                <span className="hidden sm:inline">Delete</span>
-              </Button>
-            )}
-            <Button
-              type="button"
-              variant="outline"
-              size="lg"
-              onClick={onReset}
-              disabled={saving}
-              className="ml-auto gap-1.5"
-            >
-              <RotateCcw className="size-4" />
-              Reset
-            </Button>
-            <Button type="submit" size="lg" disabled={saving} className="min-w-44 px-6 text-base">
-              {saving ? "Saving…" : editing ? "Save changes" : "Save production"}
-            </Button>
-          </div>
+          </form>
         </div>
-      </form>
+
+        <div aria-hidden className="pointer-events-none hidden select-none gap-4 opacity-40 @[88rem]:grid">
+          <SummaryRail record={preview} />
+        </div>
+      </div>
 
       <ListManager
         kind="items"
@@ -902,133 +1072,91 @@ function FormBody({
 
 // --- Bits ------------------------------------------------------------------------
 
-/** One numbered part of the form, in its own card; cards side by side in
- *  the bento stretch to the same height. */
-function Step({
+/** One part of the form card: a numbered (or iconed) heading, then its
+ *  fields, in a light box like the dashboard card it fills. */
+function Box({
   n,
+  icon: Icon,
   title,
-  hint,
+  aside,
   action,
   className,
   children,
 }: {
-  n: number;
+  n?: number;
+  icon?: LucideIcon;
   title: string;
-  hint?: string;
+  aside?: string;
   action?: React.ReactNode;
   className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <Card className={cn("h-full gap-0 py-4", className)}>
-      <CardContent className="grid gap-4 px-4">
-        <div className="flex items-start gap-3">
-          <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+    <section className={cn("flex min-w-0 flex-col gap-3 rounded-xl border p-4", className)}>
+      <div className="flex items-center gap-2">
+        {n !== undefined ? (
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
             {n}
           </span>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="text-sm font-semibold">{title}</h3>
-              {action}
-            </div>
-            {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
-          </div>
-        </div>
-        {children}
-      </CardContent>
-    </Card>
-  );
-}
-
-/** Each part of the day's cost with its share, then the total. */
-function CostBreakdown({
-  parts,
-  total,
-  jars,
-}: {
-  parts: { label: string; amount: number; Icon: LucideIcon }[];
-  total: number;
-  jars: number;
-}) {
-  return (
-    <div className="grid gap-3">
-      <ul className="divide-y rounded-lg border">
-        {parts.map(({ label, amount, Icon }) => {
-          const share = total ? (amount / total) * 100 : 0;
-          return (
-            <li key={label} className="flex items-center gap-3 px-3 py-2.5">
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                <Icon className="size-4" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline justify-between gap-3 text-sm">
-                  <span className="truncate text-muted-foreground">{label}</span>
-                  <span className="font-medium tabular-nums">{taka(amount)}</span>
-                </div>
-                <div className="mt-1.5 flex items-center gap-2">
-                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                    <div className="h-full rounded-full bg-primary" style={{ width: `${share}%` }} />
-                  </div>
-                  <span className="w-12 text-right text-xs text-muted-foreground tabular-nums">
-                    {total ? `${share.toFixed(1)}%` : "—"}
-                  </span>
-                </div>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-      <div className="flex items-center justify-between rounded-lg bg-primary px-4 py-3 text-primary-foreground">
-        <div>
-          <div className="text-xs opacity-80">Total production cost</div>
-          <div className="text-xl font-semibold tabular-nums">{taka(total)}</div>
-        </div>
-        <div className="text-right">
-          <div className="text-xs opacity-80">Cost per jar</div>
-          <div className="text-base font-semibold tabular-nums">
-            {jars ? takaPaisa(total / jars) : "—"}
-          </div>
-        </div>
+        ) : (
+          Icon && <Icon className="size-5 shrink-0 text-primary" />
+        )}
+        <h3 className="text-sm font-semibold">{title}</h3>
+        {aside && <span className="truncate text-xs text-muted-foreground">{aside}</span>}
+        {action && <span className="ml-auto">{action}</span>}
       </div>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  className,
-  children,
-}: {
-  label: string;
-  className?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className={cn("grid gap-1.5", className)}>
-      <span className="text-xs text-muted-foreground">{label}</span>
       {children}
-    </label>
+    </section>
   );
 }
 
-function Subtotal({ label, children }: { label: string; children: React.ReactNode }) {
+/** A head count with − and + either side of it. */
+function Tally({
+  icon: Icon,
+  label,
+  value,
+  onChange,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const n = int(value);
   return (
-    <div className="flex items-center justify-between rounded-md bg-primary/5 px-3 py-2 text-sm">
-      <span className="font-medium">{label}</span>
-      <span className="font-semibold tabular-nums">{children}</span>
-    </div>
-  );
-}
-
-/** Column heads for a row grid; hidden on a narrow page, where rows stack. */
-function RowHead({ cols, labels }: { cols: string; labels: string[] }) {
-  return (
-    <div className={cn("hidden gap-2 text-xs text-muted-foreground @2xl:grid", cols)}>
-      {labels.map((l, i) => (
-        <span key={i} className="truncate">
-          {l}
-        </span>
-      ))}
+    <div className="flex flex-col items-center gap-1 rounded-lg bg-muted/50 p-2.5 text-center">
+      <span className="flex items-center gap-1 text-xs font-medium">
+        <Icon className="size-4 text-primary" />
+        {label}
+      </span>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          aria-label={`One fewer ${label.toLowerCase()}`}
+          disabled={n <= 0}
+          onClick={() => onChange(String(Math.max(0, n - 1)))}
+          className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-background disabled:opacity-30"
+        >
+          <Minus className="size-3.5" />
+        </button>
+        <Input
+          inputMode="numeric"
+          aria-label={label}
+          placeholder="0"
+          value={value}
+          onChange={(e) => onChange(digits(e.target.value))}
+          className="h-9 w-12 px-1 text-center text-lg font-bold tabular-nums"
+        />
+        <button
+          type="button"
+          aria-label={`One more ${label.toLowerCase()}`}
+          onClick={() => onChange(String(n + 1))}
+          className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-background"
+        >
+          <Plus className="size-3.5" />
+        </button>
+      </div>
+      <span className="text-[11px] text-muted-foreground">জন</span>
     </div>
   );
 }
@@ -1054,16 +1182,27 @@ function AddButton({ onClick, children }: { onClick: () => void; children: React
   );
 }
 
-function RemoveButton({ label, onClick }: { label: string; onClick: () => void }) {
+function RemoveButton({
+  label,
+  onClick,
+  className,
+}: {
+  label: string;
+  onClick: () => void;
+  className?: string;
+}) {
   return (
     <button
       type="button"
       aria-label={label}
       title={label}
       onClick={onClick}
-      className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+      className={cn(
+        "flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive",
+        className
+      )}
     >
-      <X className="size-4" />
+      <X className="size-3.5" />
     </button>
   );
 }

@@ -2,11 +2,10 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Pencil } from "lucide-react";
 import { CrmOnly } from "@/components/admin/production/access";
-import { DayDashboard } from "@/components/admin/production/day-dashboard";
-import { dayLabel } from "@/components/admin/production/format";
+import { DayDashboard, ProductionHeader } from "@/components/admin/production/day-dashboard";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -27,6 +26,7 @@ export default function ProductionDayPage() {
 
 function ProductionView() {
   const { day } = useParams<{ day: string }>();
+  const router = useRouter();
   // undefined while loading; null when the date has no production.
   const [record, setRecord] = React.useState<ProductionDay | null | undefined>(undefined);
   const [products, setProducts] = React.useState<ProductionProduct[]>([]);
@@ -57,21 +57,23 @@ function ProductionView() {
         <ArrowLeft className="size-4" />
         Back to productions
       </Link>
-      <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Production</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {/^\d{4}-\d{2}-\d{2}$/.test(day) ? dayLabel(day, { weekday: true }) : day}
-          </p>
-        </div>
+      <div className="mt-3">
+        <ProductionHeader
+          title="Production"
+          subtitle="এই দিনের প্রোডাকশন, কর্মী, কাঁচামাল আর মোট খরচ।"
+          day={record ? record.day : null}
+        >
         {record && (
-          <Button asChild size="lg" variant="outline" className="gap-1.5">
-            <Link href={`/admin/crm/production/${day}/edit`}>
-              <Pencil className="size-4" />
-              Edit
-            </Link>
+          <Button
+            size="lg"
+            className="h-12 gap-1.5 rounded-xl px-5"
+            onClick={() => router.push(`/admin/crm/production/${day}/edit`)}
+          >
+            <Pencil className="size-4" />
+            Edit
           </Button>
         )}
+        </ProductionHeader>
       </div>
 
       {error ? (

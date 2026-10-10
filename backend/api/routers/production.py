@@ -4,8 +4,13 @@ A day is a production day when it has a production_days row; saving the
 drawer creates or replaces that row, and removing it makes the day an
 ordinary day again. Every total — line amounts, labour, the day's cost, jars,
 cost per jar — is worked out here from what was typed, never taken from the
-browser. Same access as Expenses (tenancy.require_crm), and nothing here
-reads or writes expenses: this page is a costing, Expenses is what was paid.
+browser. Nothing here reads or writes expenses: this page is a costing,
+Expenses is what was paid.
+
+Who may do what (api.tenancy): production admins (PRODUCTION_ADMIN_EMAILS
+and super admins) everything, including choosing, per store, who else may
+record productions; those writers record today's production, add to the
+item and product lists, and read everything, but change nothing saved.
 
 The bazar list is picked from the store's raw-material items, and what is
 cooked from the store's products; both lists are kept by the same people on
@@ -15,13 +20,14 @@ editing or removing an item or product never rewrites a day already saved.
 from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import tenancy
 from api.db import get_session
+from api.services import production_report
 from api.models import (
     ProductionBatch,
     ProductionDay,
@@ -29,13 +35,17 @@ from api.models import (
     ProductionMaterial,
     ProductionMisc,
     ProductionProduct,
+    StoreUser,
+    User,
 )
 from api.schemas import (
+    ProductionAccessIn,
     ProductionDayIn,
     ProductionDayOut,
     ProductionDaySummary,
     ProductionItemIn,
     ProductionItemOut,
+    ProductionMemberOut,
     ProductionProductIn,
     ProductionProductOut,
     ProductionSuggestions,
@@ -60,7 +70,9 @@ DEFAULT_ITEMS = (
     ("মশলা (মিক্স)", "kg"),
 )
 
-_require = tenancy.require_crm
+# Who may open the Production pages, and who may change what is saved.
+_require = tenancy.require_production
+_admin = tenancy.require_production_admin
 
 
 def _today() -> date:
@@ -219,7 +231,7 @@ async def edit_product(
     product_id: int,
     body: ProductionProductIn,
     session: AsyncSession = Depends(get_session),
-    ctx: tenancy.StoreContext = Depends(_require),
+    ctx: tenancy.StoreContext = Depends(_admin),
 ) -> list[ProductionProduct]:
     """Rename a product or change its icon; returns the whole list. Days
     already saved keep the name they were saved with."""
@@ -234,7 +246,7 @@ async def edit_product(
 async def delete_product(
     product_id: int,
     session: AsyncSession = Depends(get_session),
-    ctx: tenancy.StoreContext = Depends(_require),
+    ctx: tenancy.StoreContext = Depends(_admin),
 ) -> list[ProductionProduct]:
     """Remove a product; returns the whole list. Days it was cooked on keep
     its name, so the past reads as it was."""
@@ -271,7 +283,7 @@ async def edit_item(
     item_id: int,
     body: ProductionItemIn,
     session: AsyncSession = Depends(get_session),
-    ctx: tenancy.StoreContext = Depends(_require),
+    ctx: tenancy.StoreContext = Depends(_admin),
 ) -> list[ProductionItem]:
     """Rename a raw material or change its unit; returns the whole list.
     Days already saved keep the name and unit they were saved with."""
@@ -286,7 +298,7 @@ async def edit_item(
 async def delete_item(
     item_id: int,
     session: AsyncSession = Depends(get_session),
-    ctx: tenancy.StoreContext = Depends(_require),
+    ctx: tenancy.StoreContext = Depends(_admin),
 ) -> list[ProductionItem]:
     """Remove a raw material; returns the whole list. Days that bought it
     keep it, so the past reads as it was."""
@@ -386,20 +398,22 @@ def _refuse_unknown(names: set[str], allowed: set[str], what: str) -> None:
 
 
 def date_refusal(
-    *, super_admin: bool, day: date, today: date, new: bool, moving: bool
+    *, admin: bool, day: date, today: date, new: bool, moving: bool
 ) -> str | None:
-    """Why this save may not happen on this date, or None. A production is
-    recorded for today; only a super admin may record an earlier day or move
-    a production to another date. Correcting a production keeps its date, so
-    anyone with CRM access may do that whenever it was."""
+    """Why this save may not happen, or None. Nobody records the future. A
+    production admin may record any earlier day, correct any production and
+    move it to another date; a writer only records a new production, for
+    today."""
     if day > today:
         return "That day has not happened yet"
-    if super_admin:
+    if admin:
         return None
     if moving:
-        return "Only a super admin can change a production's date"
-    if new and day != today:
-        return "Only a super admin can record a production for another day"
+        return "Only a production admin can change a production's date"
+    if not new:
+        return "Only a production admin can change a saved production"
+    if day != today:
+        return "Only a production admin can record a production for another day"
     return None
 
 
@@ -422,7 +436,7 @@ async def save_day(
     if moving and row is None:
         raise HTTPException(status_code=404, detail="No production on the date to move from")
     refusal = date_refusal(
-        super_admin=ctx.is_super_admin,
+        admin=tenancy.is_production_admin(ctx.user),
         day=day,
         today=_today(),
         new=row is None,
@@ -468,7 +482,7 @@ async def save_day(
 async def delete_day(
     day: date,
     session: AsyncSession = Depends(get_session),
-    ctx: tenancy.StoreContext = Depends(_require),
+    ctx: tenancy.StoreContext = Depends(_admin),
 ) -> None:
     """Delete the production recorded for the day."""
     row = await _load(session, ctx.store.id, day)
@@ -476,3 +490,79 @@ async def delete_day(
         raise HTTPException(status_code=404, detail="No production on that date")
     await session.delete(row)
     await session.commit()
+
+
+@router.get("/days/{day}/report")
+async def day_report(
+    day: date,
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(_require),
+) -> Response:
+    """The production as a PDF report, made from the Word template now."""
+    row = await _load(session, ctx.store.id, day)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No production on that date")
+    context = production_report.report_context(
+        row,
+        store=ctx.store.name,
+        generated_by=ctx.user.nickname or ctx.user.name,
+        now=datetime.now(DHAKA),
+    )
+    try:
+        pdf = await production_report.production_pdf(context)
+    except production_report.ReportUnavailable as err:
+        raise HTTPException(status_code=503, detail=str(err)) from err
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="production-{day}.pdf"'},
+    )
+
+# --- Who may record productions ---------------------------------------------------
+
+
+async def _members(session: AsyncSession, store_id: int) -> list[ProductionMemberOut]:
+    rows = await session.execute(
+        select(User, StoreUser.role, StoreUser.production_access)
+        .join(StoreUser, StoreUser.user_id == User.id)
+        .where(StoreUser.store_id == store_id)
+        .order_by(User.name, User.id)
+    )
+    return [
+        ProductionMemberOut(
+            user_id=user.id,
+            name=user.nickname or user.name,
+            email=user.email,
+            picture_url=user.picture_url,
+            role=role,
+            level=tenancy.production_level(user, access),
+        )
+        for user, role, access in rows
+    ]
+
+
+@router.get("/access", response_model=list[ProductionMemberOut])
+async def list_access(
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(_admin),
+) -> list[ProductionMemberOut]:
+    """The store's members and what each may do here. Super admins are not
+    members (they see every store) and so are not listed."""
+    return await _members(session, ctx.store.id)
+
+
+@router.put("/access/{user_id}", response_model=list[ProductionMemberOut])
+async def set_access(
+    user_id: int,
+    body: ProductionAccessIn,
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(_admin),
+) -> list[ProductionMemberOut]:
+    """Let a member record productions, or stop them; returns the list. A
+    production admin is one by address, so the flag changes nothing for them."""
+    membership = await session.get(StoreUser, (ctx.store.id, user_id))
+    if membership is None:
+        raise HTTPException(status_code=404, detail="Not a member of this store")
+    membership.production_access = body.write
+    await session.commit()
+    return await _members(session, ctx.store.id)

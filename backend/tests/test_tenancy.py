@@ -169,7 +169,7 @@ def test_my_stores_lists_only_memberships(app):
     res = get(app, "/api/me/stores")
     assert res.status_code == 200
     assert res.json() == [
-        {"store_id": 2, "slug": "b", "name": "B", "subtitle": None, "role": "manager", "template": "classic", "crm": False}
+        {"store_id": 2, "slug": "b", "name": "B", "subtitle": None, "role": "manager", "template": "classic", "crm": False, "production": None}
     ]
 
 
@@ -192,6 +192,8 @@ def test_super_admin_sees_every_active_store(app):
     ]
     # A super admin may open every store's CRM.
     assert all(s["crm"] for s in rows)
+    # ...and is a production admin in each.
+    assert all(s["production"] == tenancy.PRODUCTION_ADMIN for s in rows)
 
 
 # --- the pure rule -------------------------------------------------------------
@@ -238,3 +240,21 @@ def test_settings_super_admin_edits_any_store_from_the_path(app):
     assert app.get("/stores/2/settings-gate", headers={tenancy.ADMIN_STORE_HEADER: "1"}).status_code == 200
     assert app.get("/stores/2/settings-gate").json() == {"store": "b"}
     assert app.get("/stores/9/settings-gate").status_code == 404
+
+
+# --- Production pages -----------------------------------------------------------
+
+
+def _user(email: str, role: str = "member"):
+    return SimpleNamespace(email=email, role=role)
+
+
+def test_production_level(monkeypatch):
+    from api.config import settings
+
+    monkeypatch.setattr(settings, "production_admin_emails", frozenset({"boss@example.com"}), raising=False)
+    # A listed address is an admin whatever the flag; the check ignores case.
+    assert tenancy.production_level(_user("Boss@Example.com"), False) == tenancy.PRODUCTION_ADMIN
+    # Anyone else writes only when a production admin let them.
+    assert tenancy.production_level(_user("cook@example.com"), True) == tenancy.PRODUCTION_WRITE
+    assert tenancy.production_level(_user("cook@example.com"), False) is None

@@ -30,6 +30,7 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:-}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
       SUPER_ADMIN_EMAILS: ${SUPER_ADMIN_EMAILS:-}
+      PRODUCTION_ADMIN_EMAILS: ${PRODUCTION_ADMIN_EMAILS:-}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       # Header carrying the real client IP: cf-connecting-ip behind Cloudflare,
       # x-forwarded-for behind nginx/LiteSpeed. Runtime var.

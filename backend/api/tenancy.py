@@ -21,7 +21,7 @@ platform area (Stores, Users) that no store role can.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import stores
 from api.auth import get_current_user
+from api.config import settings
 from api.db import get_session
 from api.models import Store, StoreRole, StoreUser, User, UserRole
 
@@ -44,6 +45,11 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "members.write": frozenset({"owner"}),
 }
 # The CRM is not on this table: no store role carries it. See require_crm.
+# Nor are the Production pages: see production_level and require_production.
+
+# What a user may do on the Production pages of a store.
+PRODUCTION_ADMIN = "admin"  # everything, and choosing who writes
+PRODUCTION_WRITE = "write"  # record today's production; read the rest
 
 ROLE_ORDER = (StoreRole.owner.value, StoreRole.manager.value, StoreRole.staff.value)
 
@@ -67,6 +73,8 @@ class StoreAccess:
     # May open this store's CRM: always for a super admin, else as a super
     # admin set it on the membership (store_users.crm_access).
     crm: bool = False
+    # The Production pages: PRODUCTION_ADMIN, PRODUCTION_WRITE or None.
+    production: str | None = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +97,21 @@ def is_super_admin(user: User) -> bool:
     return user.role == UserRole.super_admin
 
 
+def is_production_admin(user: User) -> bool:
+    """Full control of the Production pages: a super admin, or an address in
+    PRODUCTION_ADMIN_EMAILS (whatever their role, in every store they are a
+    member of)."""
+    return is_super_admin(user) or user.email.lower() in settings.production_admin_emails
+
+
+def production_level(user: User, production_access: bool) -> str | None:
+    """What this user may do on a store's Production pages, given their
+    membership's production_access flag. Pure, so the rule is testable."""
+    if is_production_admin(user):
+        return PRODUCTION_ADMIN
+    return PRODUCTION_WRITE if production_access else None
+
+
 def accessible(user: User, memberships: list[StoreAccess], all_stores: list[StoreAccess]) -> list[StoreAccess]:
     """The stores this user may open: every active store for a super admin
     (as "super_admin"), else exactly the active stores they are a member of.
@@ -104,11 +127,18 @@ def accessible(user: User, memberships: list[StoreAccess], all_stores: list[Stor
                 s.template,
                 s.subtitle,
                 True,
+                PRODUCTION_ADMIN,
             )
             for s in all_stores
             if s.is_active
         ]
-    return [m for m in memberships if m.is_active]
+    # A production admin is one in every store they belong to.
+    admin = is_production_admin(user)
+    return [
+        replace(m, production=PRODUCTION_ADMIN) if admin else m
+        for m in memberships
+        if m.is_active
+    ]
 
 
 async def load_memberships(session: AsyncSession, user_id: int) -> list[StoreAccess]:
@@ -122,12 +152,17 @@ async def load_memberships(session: AsyncSession, user_id: int) -> list[StoreAcc
             Store.template,
             Store.subtitle,
             StoreUser.crm_access,
+            StoreUser.production_access,
         )
         .join(Store, Store.id == StoreUser.store_id)
         .where(StoreUser.user_id == user_id)
         .order_by(Store.id)
     )
-    return [StoreAccess(*row) for row in rows]
+    # The flag reads as a writer; accessible() raises production admins.
+    return [
+        StoreAccess(*row[:8], production=PRODUCTION_WRITE if row[8] else None)
+        for row in rows
+    ]
 
 
 async def load_all_stores(session: AsyncSession) -> list[StoreAccess]:
@@ -232,4 +267,35 @@ async def require_crm(
         raise HTTPException(
             status_code=403, detail="The CRM is open only to people a super admin chose"
         )
+    return ctx
+
+
+async def require_production(
+    ctx: StoreContext = Depends(admin_store),
+    session: AsyncSession = Depends(get_session),
+) -> StoreContext:
+    """The StoreContext for the store's Production pages, or 403: production
+    admins, and members a production admin let record productions
+    (store_users.production_access). Whether this one is an admin is
+    is_production_admin(ctx.user); require_production_admin insists on it."""
+    if is_production_admin(ctx.user):
+        return ctx
+    allowed = await session.scalar(
+        select(StoreUser.production_access).where(
+            StoreUser.user_id == ctx.user.id, StoreUser.store_id == ctx.store.id
+        )
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=403,
+            detail="Production is open only to the people a production admin chose",
+        )
+    return ctx
+
+
+async def require_production_admin(ctx: StoreContext = Depends(admin_store)) -> StoreContext:
+    """The StoreContext, for production admins only: correcting, deleting and
+    re-dating productions, editing the lists, and choosing who writes."""
+    if not is_production_admin(ctx.user):
+        raise HTTPException(status_code=403, detail="Only a production admin can do this")
     return ctx

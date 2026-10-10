@@ -646,6 +646,12 @@ class StoreUser(Base):
     crm_access: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false")
     )
+    # May record new productions in this store. Given by a production admin
+    # (PRODUCTION_ADMIN_EMAILS, or a super admin) from the Production page;
+    # correcting or deleting a production stays with the admins.
+    production_access: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

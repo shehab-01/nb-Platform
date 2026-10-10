@@ -3,30 +3,34 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Pencil } from "lucide-react";
-import { CrmOnly } from "@/components/admin/production/access";
+import { ArrowLeft, FileDown, Loader2, Pencil } from "lucide-react";
+import { useAuth } from "@/components/admin/auth-context";
+import { ProductionOnly } from "@/components/admin/production/access";
 import { DayDashboard, ProductionHeader } from "@/components/admin/production/day-dashboard";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   getProductionDay,
+  getProductionReport,
   listProductionProducts,
   type ProductionDay,
   type ProductionProduct,
 } from "@/lib/api";
 
-/** One production as a dashboard, read only, with an Edit button. */
+/** One production as a dashboard, read only: a PDF report for anyone who
+ *  can see it, and Edit for production admins. */
 export default function ProductionDayPage() {
   return (
-    <CrmOnly>
+    <ProductionOnly>
       <ProductionView />
-    </CrmOnly>
+    </ProductionOnly>
   );
 }
 
 function ProductionView() {
   const { day } = useParams<{ day: string }>();
   const router = useRouter();
+  const { can } = useAuth();
   // undefined while loading; null when the date has no production.
   const [record, setRecord] = React.useState<ProductionDay | null | undefined>(undefined);
   const [products, setProducts] = React.useState<ProductionProduct[]>([]);
@@ -48,6 +52,27 @@ function ProductionView() {
 
   const listHref = `/admin/crm/production?month=${day.slice(0, 7)}`;
 
+  // The report is made on the server (a Word template, then a PDF) and
+  // handed over as a download.
+  const [reporting, setReporting] = React.useState(false);
+  const [reportError, setReportError] = React.useState<string | null>(null);
+  const downloadReport = async () => {
+    setReporting(true);
+    setReportError(null);
+    try {
+      const url = URL.createObjectURL(await getProductionReport(day));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `production-${day}.pdf`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (err) {
+      setReportError(err instanceof Error ? err.message : "Could not make the report");
+    } finally {
+      setReporting(false);
+    }
+  };
+
   return (
     <div className="@container">
       <Link
@@ -63,17 +88,30 @@ function ProductionView() {
           subtitle="এই দিনের প্রোডাকশন, কর্মী, কাঁচামাল আর মোট খরচ।"
           day={record ? record.day : null}
         >
-        {record && (
-          <Button
-            size="lg"
-            className="h-12 gap-1.5 rounded-xl px-5"
-            onClick={() => router.push(`/admin/crm/production/${day}/edit`)}
-          >
-            <Pencil className="size-4" />
-            Edit
-          </Button>
-        )}
+          {record && (
+            <Button
+              variant="outline"
+              size="lg"
+              className="h-12 gap-1.5 rounded-xl px-5"
+              disabled={reporting}
+              onClick={downloadReport}
+            >
+              {reporting ? <Loader2 className="size-4 animate-spin" /> : <FileDown className="size-4" />}
+              {reporting ? "Making report…" : "Generate report"}
+            </Button>
+          )}
+          {record && can("production.admin") && (
+            <Button
+              size="lg"
+              className="h-12 gap-1.5 rounded-xl px-5"
+              onClick={() => router.push(`/admin/crm/production/${day}/edit`)}
+            >
+              <Pencil className="size-4" />
+              Edit
+            </Button>
+          )}
         </ProductionHeader>
+        {reportError && <p className="mt-2 text-right text-sm text-destructive">{reportError}</p>}
       </div>
 
       {error ? (

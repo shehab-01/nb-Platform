@@ -13,3 +13,6 @@ python-multipart==0.0.20
 cryptography==45.0.6
 # Resized WebP variants of uploaded pictures, made once at upload time.
 pillow==12.3.0
+# Production reports: a Word template filled in (docxtpl), then turned into a
+# PDF by LibreOffice (installed in the Dockerfile).
+docxtpl==0.20.2

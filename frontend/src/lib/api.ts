@@ -848,6 +848,7 @@ export async function getMyStores(): Promise<StoreAccess[]> {
       role: string;
       template: string;
       crm?: boolean;
+      production?: "admin" | "write" | null;
     }[]
   >("/api/me/stores");
   return rows.map((r) => ({
@@ -858,6 +859,7 @@ export async function getMyStores(): Promise<StoreAccess[]> {
     role: r.role,
     template: r.template,
     crm: r.crm ?? false,
+    production: r.production ?? null,
   }));
 }
 
@@ -2071,4 +2073,36 @@ export async function deleteProductionItem(id: number): Promise<ProductionItem[]
 
 export async function getProductionSuggestions(): Promise<ProductionSuggestions> {
   return request<ProductionSuggestions>("/api/production/suggestions");
+}
+
+/** A member of the store, and what they may do on the Production pages. */
+export type ProductionMember = {
+  user_id: number;
+  name: string;
+  email: string;
+  picture_url: string | null;
+  role: string;
+  /** "admin" by address (PRODUCTION_ADMIN_EMAILS), "write", or null. */
+  level: "admin" | "write" | null;
+};
+
+/** The store's members and their Production access (production admins only). */
+export async function listProductionAccess(): Promise<ProductionMember[]> {
+  return request<ProductionMember[]>("/api/production/access");
+}
+
+/** Lets a member record productions, or stops them; returns the list. */
+export async function setProductionAccess(
+  userId: number,
+  write: boolean
+): Promise<ProductionMember[]> {
+  return request<ProductionMember[]>(`/api/production/access/${userId}`, {
+    method: "PUT",
+    body: JSON.stringify({ write }),
+  });
+}
+
+/** A production as a PDF report, made on the server from the Word template. */
+export async function getProductionReport(day: string): Promise<Blob> {
+  return requestBlob(`/api/production/days/${day}/report`);
 }

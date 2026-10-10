@@ -129,28 +129,30 @@ YESTERDAY = datetime(2026, 10, 9).date()
 
 
 def refusal(**kw):
-    base = dict(super_admin=False, day=TODAY, today=TODAY, new=True, moving=False)
+    base = dict(admin=False, day=TODAY, today=TODAY, new=True, moving=False)
     return date_refusal(**(base | kw))
 
 
-def test_anyone_with_crm_records_today():
+def test_a_writer_records_today():
     assert refusal() is None
 
 
-def test_only_a_super_admin_records_an_earlier_day():
+def test_only_an_admin_records_an_earlier_day():
     assert refusal(day=YESTERDAY) is not None
-    assert refusal(day=YESTERDAY, super_admin=True) is None
+    assert refusal(day=YESTERDAY, admin=True) is None
 
 
-def test_correcting_keeps_its_date_so_anyone_may():
-    assert refusal(day=YESTERDAY, new=False) is None
+def test_only_an_admin_corrects_a_saved_production():
+    assert refusal(new=False) is not None
+    assert refusal(new=False, admin=True) is None
+    assert refusal(day=YESTERDAY, new=False, admin=True) is None
 
 
-def test_only_a_super_admin_moves_a_production():
+def test_only_an_admin_moves_a_production():
     assert refusal(day=YESTERDAY, new=False, moving=True) is not None
-    assert refusal(day=YESTERDAY, new=False, moving=True, super_admin=True) is None
+    assert refusal(day=YESTERDAY, new=False, moving=True, admin=True) is None
 
 
 def test_nobody_records_the_future():
     tomorrow = datetime(2026, 10, 11).date()
-    assert refusal(day=tomorrow, super_admin=True) is not None
+    assert refusal(day=tomorrow, admin=True) is not None

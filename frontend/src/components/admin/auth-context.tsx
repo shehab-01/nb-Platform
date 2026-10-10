@@ -28,8 +28,12 @@ type AuthContextValue = {
   logout: () => Promise<void>;
 };
 
-/** Mirrors PERMISSIONS in backend api/tenancy.py, plus "crm", which no role
- *  carries: it is given per store by a super admin (tenancy.require_crm). */
+/** Mirrors PERMISSIONS in backend api/tenancy.py, plus three no role carries:
+ *  "crm", given per store by a super admin (tenancy.require_crm), and the
+ *  Production pages — "production" to open them and record today's
+ *  production, "production.admin" for full control (tenancy.production_level:
+ *  PRODUCTION_ADMIN_EMAILS and super admins are admins; a production admin
+ *  picks the writers). */
 export type Permission =
   | "orders"
   | "catalogue.read"
@@ -37,9 +41,11 @@ export type Permission =
   | "settings"
   | "members.read"
   | "members.write"
-  | "crm";
+  | "crm"
+  | "production"
+  | "production.admin";
 
-type RolePermission = Exclude<Permission, "crm">;
+type RolePermission = Exclude<Permission, "crm" | "production" | "production.admin">;
 
 const PERMISSIONS: Record<RolePermission, ReadonlySet<string>> = {
   orders: new Set(["owner", "manager", "staff"]),
@@ -145,7 +151,13 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
   const can = (permission: Permission) =>
     isSuperAdmin ||
     (store !== null &&
-      (permission === "crm" ? store.crm : PERMISSIONS[permission].has(store.role)));
+      (permission === "crm"
+        ? store.crm
+        : permission === "production"
+          ? store.production !== null
+          : permission === "production.admin"
+            ? store.production === "admin"
+            : PERMISSIONS[permission].has(store.role)));
 
   return (
     <AuthContext.Provider

@@ -112,6 +112,14 @@ class Settings:
         for email in os.getenv("SUPER_ADMIN_EMAILS", "").split(",")
         if email.strip()
     )
+    # Full say over the Production pages in every store they belong to: add,
+    # correct, delete and re-date productions, keep the item and product
+    # lists, and choose who else may record productions (api.tenancy).
+    production_admin_emails: frozenset[str] = frozenset(
+        email.strip().lower()
+        for email in os.getenv("PRODUCTION_ADMIN_EMAILS", "").split(",")
+        if email.strip()
+    )
 
 
 settings = Settings()

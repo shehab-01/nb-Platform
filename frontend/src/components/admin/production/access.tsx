@@ -11,15 +11,29 @@ import {
   type ProductionSuggestions,
 } from "@/lib/api";
 
-/** The Production Cost pages are CRM pages: super admins, and whoever a
- *  super admin gave CRM access in this store. Switching store starts the
- *  page over. */
-export function CrmOnly({ children }: { children: React.ReactNode }) {
+/** The Production pages open to production admins (PRODUCTION_ADMIN_EMAILS
+ *  and super admins) and the people they chose to record productions in
+ *  this store. Switching store starts the page over. */
+export function ProductionOnly({ children }: { children: React.ReactNode }) {
   const { store, can } = useAuth();
-  if (!store || !can("crm")) {
+  if (!store || !can("production")) {
     return (
       <p className="text-sm text-muted-foreground">
-        The CRM is open to super admins and the people they give access to.
+        Production is open to production admins and the people they choose.
+      </p>
+    );
+  }
+  return <React.Fragment key={store.storeId}>{children}</React.Fragment>;
+}
+
+/** For production admins only: correcting or deleting a saved production.
+ *  The API refuses anyone else too; this only says so instead of a form. */
+export function ProductionAdminOnly({ children }: { children: React.ReactNode }) {
+  const { store, can } = useAuth();
+  if (!store || !can("production.admin")) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Only a production admin can change a saved production.
       </p>
     );
   }

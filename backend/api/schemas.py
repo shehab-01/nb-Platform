@@ -893,6 +893,8 @@ class StoreAccessOut(BaseModel):
     template: str
     # May open this store's CRM (always true for a super admin).
     crm: bool = False
+    # The Production pages: "admin", "write" or null (no access).
+    production: str | None = None
 
 
 class StoreOut(BaseModel):
@@ -1363,3 +1365,20 @@ class ProductionSuggestions(BaseModel):
     """Purposes other costs were given before, most recent first."""
 
     purposes: list[str]
+
+
+class ProductionMemberOut(BaseModel):
+    """A member of the store, and what they may do on the Production pages."""
+
+    user_id: int
+    name: str
+    email: str
+    picture_url: str | None = None
+    role: str
+    # "admin" (PRODUCTION_ADMIN_EMAILS), "write", or null for no access.
+    level: str | None = None
+
+
+class ProductionAccessIn(BaseModel):
+    # May this member record new productions in the store?
+    write: bool

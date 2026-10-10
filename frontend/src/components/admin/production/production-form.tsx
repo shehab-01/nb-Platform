@@ -155,7 +155,8 @@ function FormBody({
   onReset,
 }: FormProps & { onReset: () => void }) {
   const router = useRouter();
-  const { isSuperAdmin } = useAuth();
+  const { can } = useAuth();
+  const isAdmin = can("production.admin");
   const today = dhakaToday();
   // Only a production being corrected fills the form; a new one is empty.
   const start = editing;
@@ -355,7 +356,7 @@ function FormBody({
     setShifts((rows) => rows.map((r) => (r.key === k ? { ...r, ...patch } : r)));
 
   const canCopy = !editing && template !== null && template.materials.length > 0;
-  const canPickDate = isSuperAdmin;
+  const canPickDate = isAdmin;
 
   /** Shifts follow the "Total shift" picker: more adds empty ones, fewer
    *  drops the last. */
@@ -514,7 +515,7 @@ function FormBody({
                 <p className="text-xs text-muted-foreground">
                   {canPickDate
                     ? "তারিখ আজকের; আগের কোনো দিনের প্রোডাকশন লিখতে তারিখ বদলান।"
-                    : "তারিখ নিজে থেকেই আজকের। শুধু সুপার অ্যাডমিন অন্য তারিখ দিতে পারেন।"}
+                    : "তারিখ নিজে থেকেই আজকের। শুধু প্রোডাকশন অ্যাডমিন অন্য তারিখ দিতে পারেন।"}
                 </p>
                 {dateTaken && (
                   <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm">
@@ -1017,6 +1018,7 @@ function FormBody({
 
       <ListManager
         kind="items"
+        canEdit={isAdmin}
         open={managing?.kind === "items"}
         onOpenChange={(o) => !o && setManaging(null)}
         rows={items}
@@ -1041,6 +1043,7 @@ function FormBody({
       />
       <ListManager
         kind="products"
+        canEdit={isAdmin}
         open={managing?.kind === "products"}
         onOpenChange={(o) => !o && setManaging(null)}
         rows={products}
@@ -1242,8 +1245,11 @@ function ListManager({
   onAdded,
   onRenamed,
   onRemoved,
+  canEdit,
 }: {
   kind: "items" | "products";
+  /** May edit and delete entries (production admins); anyone may add. */
+  canEdit: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   rows: ListRow[];
@@ -1365,6 +1371,10 @@ function ListManager({
                         {unitLabel(r.unit)}
                       </span>
                     )}
+                    {/* Editing and deleting entries is for production admins;
+                        writers may only add. */}
+                    {canEdit && (
+                    <>
                     <button
                       type="button"
                       aria-label={`Edit ${r.name}`}
@@ -1403,6 +1413,8 @@ function ListManager({
                       >
                         <Trash2 className="size-3.5" />
                       </button>
+                    )}
+                    </>
                     )}
                   </li>
                 ))}

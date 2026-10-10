@@ -15,6 +15,9 @@ export type StoreAccess = {
   /** May open this store's CRM: always for a super admin, else as a super
    *  admin chose (Users → Assign CRM). */
   crm: boolean;
+  /** The Production pages: "admin" (full control, chooses who writes),
+   *  "write" (records today's production) or null for no access. */
+  production: "admin" | "write" | null;
 };
 
 const STORAGE_KEY = "nb_admin_store";

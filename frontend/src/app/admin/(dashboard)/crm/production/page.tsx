@@ -2,8 +2,10 @@
 
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronLeft, ChevronRight, CookingPot, Plus } from "lucide-react";
-import { CrmOnly } from "@/components/admin/production/access";
+import { ChevronLeft, ChevronRight, CookingPot, Plus, UserCog } from "lucide-react";
+import { useAuth } from "@/components/admin/auth-context";
+import { ProductionOnly } from "@/components/admin/production/access";
+import { AccessDialog } from "@/components/admin/production/access-dialog";
 import { dhakaToday, taka, takaPaisa } from "@/components/admin/production/format";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,12 +21,12 @@ import { cn } from "@/lib/utils";
  */
 export default function ProductionListPage() {
   return (
-    <CrmOnly>
+    <ProductionOnly>
       {/* useSearchParams needs a Suspense boundary above it. */}
       <React.Suspense fallback={<Skeleton className="h-64 w-full" />}>
         <ProductionList />
       </React.Suspense>
-    </CrmOnly>
+    </ProductionOnly>
   );
 }
 
@@ -64,6 +66,9 @@ function weekday(iso: string): string {
 
 function ProductionList() {
   const router = useRouter();
+  const { can } = useAuth();
+  const isAdmin = can("production.admin");
+  const [managing, setManaging] = React.useState(false);
   const params = useSearchParams();
   const thisMonth = dhakaToday().slice(0, 7);
   const asked = params.get("month") ?? "";
@@ -102,17 +107,26 @@ function ProductionList() {
     <div className="@container">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-bold tracking-tight">Production</h1>
-        {/* A button, not a styled <Link>: globals.css colours every <a>
-            outside Tailwind's layers, which would hide the label. */}
-        <Button
-          size="lg"
-          className="gap-1.5"
-          onClick={() => router.push("/admin/crm/production/new")}
-        >
-          <Plus className="size-4" />
-          Add production
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {isAdmin && (
+            <Button variant="outline" size="lg" className="gap-1.5" onClick={() => setManaging(true)}>
+              <UserCog className="size-4" />
+              Manage access
+            </Button>
+          )}
+          {/* A button, not a styled <Link>: globals.css colours every <a>
+              outside Tailwind's layers, which would hide the label. */}
+          <Button
+            size="lg"
+            className="gap-1.5"
+            onClick={() => router.push("/admin/crm/production/new")}
+          >
+            <Plus className="size-4" />
+            Add production
+          </Button>
+        </div>
       </div>
+      {isAdmin && <AccessDialog open={managing} onOpenChange={setManaging} />}
 
       {/* --- Which month --- */}
       <div className="mt-6 flex flex-wrap items-center gap-2">

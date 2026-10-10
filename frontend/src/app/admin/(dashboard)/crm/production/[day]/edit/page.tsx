@@ -3,17 +3,18 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { CrmOnly, useProductionLists } from "@/components/admin/production/access";
+import { ProductionAdminOnly, useProductionLists } from "@/components/admin/production/access";
 import { ProductionForm } from "@/components/admin/production/production-form";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getProductionDay, type ProductionDay } from "@/lib/api";
 
-/** Correcting a production: the entry page, filled in as it was saved. */
+/** Correcting a production (production admins only): the entry page,
+ *  filled in as it was saved. */
 export default function EditProductionPage() {
   return (
-    <CrmOnly>
+    <ProductionAdminOnly>
       <EditProduction />
-    </CrmOnly>
+    </ProductionAdminOnly>
   );
 }
 

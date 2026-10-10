@@ -160,6 +160,7 @@ async def my_stores(
             role=a.role,
             template=a.template,
             crm=a.crm,
+            production=a.production,
         )
         for a in await tenancy.accessible_stores(session, user)
     ]

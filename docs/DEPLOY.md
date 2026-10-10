@@ -25,6 +25,7 @@ example's value.
 | `APP_ENCRYPTION_KEY` | TODO — `docker run --rm python:3.12-slim sh -c "pip -q install cryptography && python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"`. **Back it up with `.env`**: without it every stored CAPI token, Pathao password and BDCourier key is unreadable. |
 | `ADMIN_HOST` | TODO — `admin.naturebazar.bd` |
 | `SUPER_ADMIN_EMAILS` | TODO — your Google address(es), comma-separated; always super admin |
+| `PRODUCTION_ADMIN_EMAILS` | Comma-separated Google addresses with full control of the Production pages (they choose who else may record productions); super admins always have it |
 | `GOOGLE_CLIENT_ID` | TODO — the OAuth client id (see §4) |
 | `COOKIE_SECURE` | `true` |
 | `CLIENT_IP_HEADER` | `x-forwarded-for` |

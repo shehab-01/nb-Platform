@@ -11,8 +11,10 @@ export type Membership = {
   name: string;
   subtitle: string | null;
   role: StoreRole;
-  /** May open this store's CRM (set by a super admin). */
+  /** May use this store's Expenses (Users → Assign Expenses, or a CRM admin). */
   crm: boolean;
+  /** May record productions in this store (Assign Production, or a CRM admin). */
+  production: boolean;
 };
 
 export const STORE_ROLE_LABELS: Record<StoreRole, string> = {

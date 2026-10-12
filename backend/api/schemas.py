@@ -526,10 +526,10 @@ class UserOut(BaseModel):
 
     @computed_field
     @property
-    def expense_approver(self) -> bool:
-        """Approves and deletes expenses: an address in SUPER_ADMIN_EMAILS
-        (tenancy.is_expense_approver), not merely the super admin role."""
-        return self.email.lower() in settings.super_admin_emails
+    def crm_admin(self) -> bool:
+        """A CRM admin (tenancy.is_crm_admin): an address in
+        PRODUCTION_ADMIN_EMAILS, not merely the super admin role."""
+        return self.email.lower() in settings.production_admin_emails
 
 
 class UserWithActivityOut(UserOut):
@@ -1026,13 +1026,15 @@ class MembershipOut(BaseModel):
     # So the admin can say "Nature Bazar — Ecotine" where two stores share a name.
     subtitle: str | None = None
     role: str
-    # May open this store's CRM; set with PUT /users/{id}/crm.
+    # May use this store's Expenses; set with PUT /users/{id}/crm.
     crm: bool = False
+    # May record productions in this store; set with PUT /users/{id}/production.
+    production: bool = False
 
 
 class CrmAccessUpdate(BaseModel):
-    """The stores whose CRM this person may open — all of them among the
-    stores they belong to. Stores left out lose it."""
+    """The stores where this person may use Expenses (or Production) — all
+    of them among the stores they belong to. Stores left out lose it."""
 
     store_ids: list[int] = Field(max_length=200)
 
@@ -1097,6 +1099,8 @@ class ExpenseOut(BaseModel):
     note: str | None = None
     added_by_name: str
     added_by_id: int | None = None
+    # Who typed it: they (and the CRM admins) may edit it.
+    created_by_id: int | None = None
     status: ExpenseStatus = "pending"
     approved_at: datetime | None = None
     # The production day this expense was filed by, as its date; null for an
@@ -1407,18 +1411,19 @@ class ProductionSuggestions(BaseModel):
     purposes: list[str]
 
 
-class ProductionMemberOut(BaseModel):
-    """A member of the store, and what they may do on the Production pages."""
+class MemberAccessOut(BaseModel):
+    """A member of the store, and what they may do on the Production or the
+    Expenses page."""
 
     user_id: int
     name: str
     email: str
     picture_url: str | None = None
     role: str
-    # "admin" (PRODUCTION_ADMIN_EMAILS), "write", or null for no access.
+    # "admin" (by address: always has it), "write" (given it), or null.
     level: str | None = None
 
 
-class ProductionAccessIn(BaseModel):
-    # May this member record new productions in the store?
+class MemberAccessIn(BaseModel):
+    # May this member use the page (record productions; add expenses)?
     write: bool

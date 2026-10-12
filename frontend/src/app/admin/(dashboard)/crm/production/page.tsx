@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, CookingPot, Plus, UserCog } from "lucide-react";
 import { useAuth } from "@/components/admin/auth-context";
 import { ProductionOnly } from "@/components/admin/production/access";
-import { AccessDialog } from "@/components/admin/production/access-dialog";
+import { AccessDialog } from "@/components/admin/crm/access-dialog";
 import { dhakaToday, taka, takaPaisa } from "@/components/admin/production/format";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -67,7 +67,8 @@ function weekday(iso: string): string {
 function ProductionList() {
   const router = useRouter();
   const { can } = useAuth();
-  const isAdmin = can("production.admin");
+  // Choosing who records productions: the CRM admins (PRODUCTION_ADMIN_EMAILS).
+  const crmAdmin = can("crm.admin");
   const [managing, setManaging] = React.useState(false);
   const params = useSearchParams();
   const thisMonth = dhakaToday().slice(0, 7);
@@ -108,7 +109,7 @@ function ProductionList() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-bold tracking-tight">Production</h1>
         <div className="flex flex-wrap items-center gap-2">
-          {isAdmin && (
+          {crmAdmin && (
             <Button variant="outline" size="lg" className="gap-1.5" onClick={() => setManaging(true)}>
               <UserCog className="size-4" />
               Manage access
@@ -126,7 +127,7 @@ function ProductionList() {
           </Button>
         </div>
       </div>
-      {isAdmin && <AccessDialog open={managing} onOpenChange={setManaging} />}
+      {crmAdmin && <AccessDialog page="production" open={managing} onOpenChange={setManaging} />}
 
       {/* --- Which month --- */}
       <div className="mt-6 flex flex-wrap items-center gap-2">

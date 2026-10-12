@@ -104,11 +104,13 @@ def is_production_admin(user: User) -> bool:
     return is_super_admin(user) or user.email.lower() in settings.production_admin_emails
 
 
-def is_expense_approver(user: User) -> bool:
-    """May approve and delete expenses, and edit an approved one without
-    sending it back to pending: the addresses in SUPER_ADMIN_EMAILS only.
-    Not the super admin role, which the Users page can give to others."""
-    return user.email.lower() in settings.super_admin_emails
+def is_crm_admin(user: User) -> bool:
+    """The CRM's own admins: the addresses in PRODUCTION_ADMIN_EMAILS, and
+    nobody else — not the super admin role, which the Users page can give
+    to others. Only they approve and delete expenses (and edit an approved
+    one without sending it back to pending), delete productions, and choose
+    on the Expenses and Production pages who else may use them."""
+    return user.email.lower() in settings.production_admin_emails
 
 
 def production_level(user: User, production_access: bool) -> str | None:
@@ -139,10 +141,12 @@ def accessible(user: User, memberships: list[StoreAccess], all_stores: list[Stor
             for s in all_stores
             if s.is_active
         ]
-    # A production admin is one in every store they belong to.
+    # A production admin is one in every store they belong to; a CRM admin
+    # also opens every such store's Expenses.
     admin = is_production_admin(user)
+    crm = is_crm_admin(user)
     return [
-        replace(m, production=PRODUCTION_ADMIN) if admin else m
+        replace(m, production=PRODUCTION_ADMIN, crm=m.crm or crm) if admin else m
         for m in memberships
         if m.is_active
     ]
@@ -259,11 +263,12 @@ async def require_crm(
     ctx: StoreContext = Depends(admin_store),
     session: AsyncSession = Depends(get_session),
 ) -> StoreContext:
-    """The StoreContext for the store's CRM, or 403. A super admin always
-    passes; anyone else needs crm_access on their membership of this store,
-    which only a super admin can set (Users → Assign CRM). Looked up here,
-    not in admin_store, so the rest of the admin pays nothing for it."""
-    if ctx.is_super_admin:
+    """The StoreContext for the store's Expenses, or 403. Super admins and
+    CRM admins always pass; anyone else needs crm_access on their membership
+    of this store, set by a super admin (Users → Assign Expenses) or a CRM
+    admin (Expenses → Manage access). Looked up here, not in admin_store, so
+    the rest of the admin pays nothing for it."""
+    if ctx.is_super_admin or is_crm_admin(ctx.user):
         return ctx
     allowed = await session.scalar(
         select(StoreUser.crm_access).where(
@@ -296,6 +301,15 @@ async def require_production(
         raise HTTPException(
             status_code=403,
             detail="Production is open only to the people a production admin chose",
+        )
+    return ctx
+
+
+async def require_crm_admin(ctx: StoreContext = Depends(admin_store)) -> StoreContext:
+    """The StoreContext, for CRM admins (PRODUCTION_ADMIN_EMAILS) only."""
+    if not is_crm_admin(ctx.user):
+        raise HTTPException(
+            status_code=403, detail="Only the CRM admins (PRODUCTION_ADMIN_EMAILS) can do this"
         )
     return ctx
 

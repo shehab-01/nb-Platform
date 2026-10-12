@@ -1,15 +1,16 @@
 """The CRM's Expenses page: what a store spends, by day.
 
-Per store like everything else, for super admins and the people a super
-admin gave CRM access in this store (tenancy.require_crm). The moment an
-expense is spent is the
-moment it is saved — the browser never names it. An expense is put down to
+Per store like everything else, for super admins, the CRM admins
+(PRODUCTION_ADMIN_EMAILS) and the people either gave Expenses access in this
+store (tenancy.require_crm). The moment an expense is spent is the moment
+it is saved — the browser never names it. An expense is put down to
 the person who adds it; only a super admin may write in another name, for
 money someone else paid out.
 
-Every expense starts pending. The approver — the addresses in
-SUPER_ADMIN_EMAILS, not everyone with the super admin role — approves it,
-and is the only one who may delete one. A production day files its own
+Every expense starts pending. The CRM admins — the addresses in
+PRODUCTION_ADMIN_EMAILS, not everyone with the super admin role — approve
+it, are the only ones who may delete one, and choose who else may use the
+page (GET/PUT /expenses/access). A production day files its own
 expenses (api.services.production_expenses); those are changed only there.
 """
 import io
@@ -27,7 +28,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api import tenancy
 from api.config import settings
 from api.db import get_session
-from api.models import Expense, ExpenseCategory, ExpenseProof, ProductionDay, Store
+from api.models import (
+    Expense,
+    ExpenseCategory,
+    ExpenseProof,
+    ProductionDay,
+    Store,
+    StoreUser,
+    User,
+)
 from api.services import expense_report, gdrive, production_report
 from api.schemas import (
     ExpenseAmount,
@@ -40,6 +49,8 @@ from api.schemas import (
     ExpenseReportIn,
     ExpenseStatusIn,
     ExpenseSummaryOut,
+    MemberAccessIn,
+    MemberAccessOut,
 )
 
 log = logging.getLogger(__name__)
@@ -252,6 +263,20 @@ def _not_from_production(expense: Expense) -> None:
         )
 
 
+def may_edit(expense: Expense, ctx: tenancy.StoreContext) -> bool:
+    """A CRM admin may edit any expense; anyone else only one they typed
+    themselves (created_by_id, whoever it is put down to)."""
+    return tenancy.is_crm_admin(ctx.user) or expense.created_by_id == ctx.user.id
+
+
+def check_may_edit(expense: Expense, ctx: tenancy.StoreContext) -> None:
+    """403 unless may_edit. Covers the expense and its proofs."""
+    if not may_edit(expense, ctx):
+        raise HTTPException(
+            status_code=403, detail="Only the person who added this expense can change it"
+        )
+
+
 @router.post("", response_model=ExpenseOut, status_code=201)
 async def add_expense(
     body: ExpenseIn,
@@ -277,17 +302,69 @@ async def edit_expense(
 ) -> ExpenseOut:
     """Correct an expense. When it was spent never changes; who it is put
     down to changes only when a super admin writes in a name. An approved
-    expense corrected by anyone but the approver goes back to pending: what
+    expense corrected by anyone but a CRM admin goes back to pending: what
     was approved is no longer what it says."""
     expense = await _get(session, ctx.store.id, expense_id)
     _not_from_production(expense)
+    check_may_edit(expense, ctx)
     await _check_category(session, ctx.store.id, body.category)
     _apply(expense, body, ctx, new=False)
-    if expense.status == "approved" and not tenancy.is_expense_approver(ctx.user):
+    if expense.status == "approved" and not tenancy.is_crm_admin(ctx.user):
         expense.status, expense.approved_by_id, expense.approved_at = "pending", None, None
     await session.commit()
     await session.refresh(expense)
     return (await _out(session, ctx.store.id, [expense]))[0]
+
+
+# --- Who may use the page ----------------------------------------------------------
+
+
+async def _members(session: AsyncSession, store_id: int) -> list[MemberAccessOut]:
+    rows = await session.execute(
+        select(User, StoreUser.role, StoreUser.crm_access)
+        .join(StoreUser, StoreUser.user_id == User.id)
+        .where(StoreUser.store_id == store_id)
+        .order_by(User.name, User.id)
+    )
+    return [
+        MemberAccessOut(
+            user_id=user.id,
+            name=user.nickname or user.name,
+            email=user.email,
+            picture_url=user.picture_url,
+            role=role,
+            level="admin" if tenancy.is_crm_admin(user) else "write" if access else None,
+        )
+        for user, role, access in rows
+    ]
+
+
+@router.get("/access", response_model=list[MemberAccessOut])
+async def list_access(
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.require_crm_admin),
+) -> list[MemberAccessOut]:
+    """The store's members and whether each may use Expenses: CRM admins
+    only. Super admins are not members (they see every store) and so are
+    not listed."""
+    return await _members(session, ctx.store.id)
+
+
+@router.put("/access/{user_id}", response_model=list[MemberAccessOut])
+async def set_access(
+    user_id: int,
+    body: MemberAccessIn,
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.require_crm_admin),
+) -> list[MemberAccessOut]:
+    """Let a member use Expenses in this store, or stop them; returns the
+    list. The same flag Users → Assign Expenses sets."""
+    membership = await session.get(StoreUser, (ctx.store.id, user_id))
+    if membership is None:
+        raise HTTPException(status_code=404, detail="Not a member of this store")
+    membership.crm_access = body.write
+    await session.commit()
+    return await _members(session, ctx.store.id)
 
 
 @router.put("/{expense_id}/status", response_model=ExpenseOut)
@@ -297,9 +374,9 @@ async def set_status(
     session: AsyncSession = Depends(get_session),
     ctx: tenancy.StoreContext = Depends(_require),
 ) -> ExpenseOut:
-    """Approve an expense, or put it back to pending: the approver only."""
-    if not tenancy.is_expense_approver(ctx.user):
-        raise HTTPException(status_code=403, detail="Only the approver can approve expenses")
+    """Approve an expense, or put it back to pending: CRM admins only."""
+    if not tenancy.is_crm_admin(ctx.user):
+        raise HTTPException(status_code=403, detail="Only the CRM admins can approve expenses")
     expense = await _get(session, ctx.store.id, expense_id)
     if body.status != expense.status:
         expense.status = body.status
@@ -353,11 +430,11 @@ async def delete_expense(
     ctx: tenancy.StoreContext = Depends(_require),
 ) -> None:
     """Delete an expense and move its proofs to Drive's bin (recoverable
-    there for 30 days): the approver only. A Drive hiccup does not stop the
+    there for 30 days): CRM admins only. A Drive hiccup does not stop the
     delete: the rows go regardless, and the files are only left in the
     folder. One a production day filed goes when the day does, not here."""
-    if not tenancy.is_expense_approver(ctx.user):
-        raise HTTPException(status_code=403, detail="Only the approver can delete expenses")
+    if not tenancy.is_crm_admin(ctx.user):
+        raise HTTPException(status_code=403, detail="Only the CRM admins can delete expenses")
     expense = await _get(session, ctx.store.id, expense_id)
     _not_from_production(expense)
     file_ids = (
@@ -446,6 +523,7 @@ async def add_proofs(
     nbPlatform / <store> / Expenses / <day the expense was spent>; only their
     ids are kept here. Returns all of the expense's proofs."""
     expense = await _get(session, ctx.store.id, expense_id)
+    check_may_edit(expense, ctx)
     have = await session.scalar(
         select(func.count()).where(
             ExpenseProof.store_id == ctx.store.id, ExpenseProof.expense_id == expense.id
@@ -598,8 +676,10 @@ async def delete_proof(
     session: AsyncSession = Depends(get_session),
     ctx: tenancy.StoreContext = Depends(_require),
 ) -> None:
-    """Detach a proof and move its file to Drive's bin."""
+    """Detach a proof and move its file to Drive's bin: for whoever may
+    edit its expense."""
     proof = await _get_proof(session, ctx.store.id, proof_id)
+    check_may_edit(await _get(session, ctx.store.id, proof.expense_id), ctx)
     try:
         await gdrive.trash(session, proof.drive_file_id)
     except gdrive.DriveError as err:

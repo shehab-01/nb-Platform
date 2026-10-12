@@ -33,9 +33,10 @@ type AuthContextValue = {
  *  Production pages — "production" to open them and record today's
  *  production, "production.admin" for full control (tenancy.production_level:
  *  PRODUCTION_ADMIN_EMAILS and super admins are admins; a production admin
- *  picks the writers). "expenses.approve" — approving and deleting expenses —
- *  goes by address alone (SUPER_ADMIN_EMAILS, tenancy.is_expense_approver),
- *  not by the super admin role. */
+ *  picks the writers). "crm.admin" — approving and deleting expenses,
+ *  deleting productions and choosing who uses Expenses and Production — goes
+ *  by address alone (PRODUCTION_ADMIN_EMAILS, tenancy.is_crm_admin), not by
+ *  the super admin role. */
 export type Permission =
   | "orders"
   | "catalogue.read"
@@ -46,11 +47,11 @@ export type Permission =
   | "crm"
   | "production"
   | "production.admin"
-  | "expenses.approve";
+  | "crm.admin";
 
 type RolePermission = Exclude<
   Permission,
-  "crm" | "production" | "production.admin" | "expenses.approve"
+  "crm" | "production" | "production.admin" | "crm.admin"
 >;
 
 const PERMISSIONS: Record<RolePermission, ReadonlySet<string>> = {
@@ -155,8 +156,8 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
   const { user, stores, store } = gate;
   const isSuperAdmin = user.role === "super_admin";
   const can = (permission: Permission) =>
-    permission === "expenses.approve"
-      ? user.expenseApprover
+    permission === "crm.admin"
+      ? user.crmAdmin
       : isSuperAdmin ||
         (store !== null &&
           (permission === "crm"

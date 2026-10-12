@@ -23,7 +23,7 @@ STORE = SimpleNamespace(id=2)
 
 
 def ctx(role: str, uid: int = 7, name: str = "Shehab Uddin", nickname: str | None = "Shehab"):
-    user = SimpleNamespace(id=uid, name=name, nickname=nickname)
+    user = SimpleNamespace(id=uid, name=name, nickname=nickname, email="staff@example.com")
     return tenancy.StoreContext(store=STORE, role=role, user=user)
 
 

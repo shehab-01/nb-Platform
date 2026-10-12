@@ -67,6 +67,7 @@ async def _memberships(
             Store.subtitle,
             StoreUser.role,
             StoreUser.crm_access,
+            StoreUser.production_access,
         )
         .join(Store, Store.id == StoreUser.store_id)
         .order_by(Store.id)
@@ -74,10 +75,18 @@ async def _memberships(
     if user_id is not None:
         query = query.where(StoreUser.user_id == user_id)
     out: dict[int, list[MembershipOut]] = {}
-    for uid, store_id, slug, name, subtitle, role, crm in await session.execute(query):
+    for uid, store_id, slug, name, subtitle, role, crm, production in await session.execute(
+        query
+    ):
         out.setdefault(uid, []).append(
             MembershipOut(
-                store_id=store_id, slug=slug, name=name, subtitle=subtitle, role=role, crm=crm
+                store_id=store_id,
+                slug=slug,
+                name=name,
+                subtitle=subtitle,
+                role=role,
+                crm=crm,
+                production=production,
             )
         )
     return out
@@ -133,22 +142,18 @@ async def set_memberships(
     return await _with_activity(session, user)
 
 
-@router.put("/{user_id}/crm", response_model=UserWithActivityOut)
-async def set_crm_access(
-    user_id: int,
-    payload: CrmAccessUpdate,
-    session: AsyncSession = Depends(get_session),
+async def _set_flag(
+    session: AsyncSession, user_id: int, store_ids: list[int], flag: str
 ) -> UserWithActivityOut:
-    """Choose whose CRM this person may open: exactly the listed stores,
-    which must be among the stores they belong to. Super admins need none —
-    they always have it."""
+    """Set a membership flag (crm_access or production_access) on exactly
+    the listed stores, which must be among the stores the user belongs to."""
     user = await session.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     rows = (
         await session.scalars(select(StoreUser).where(StoreUser.user_id == user_id))
     ).all()
-    wanted = set(payload.store_ids)
+    wanted = set(store_ids)
     outside = sorted(wanted - {r.store_id for r in rows})
     if outside:
         raise HTTPException(
@@ -156,9 +161,32 @@ async def set_crm_access(
             detail=f"Not a member of store(s) {outside}: assign the store first",
         )
     for row in rows:
-        row.crm_access = row.store_id in wanted
+        setattr(row, flag, row.store_id in wanted)
     await session.commit()
     return await _with_activity(session, user)
+
+
+@router.put("/{user_id}/crm", response_model=UserWithActivityOut)
+async def set_crm_access(
+    user_id: int,
+    payload: CrmAccessUpdate,
+    session: AsyncSession = Depends(get_session),
+) -> UserWithActivityOut:
+    """Choose where this person may use Expenses: exactly the listed stores.
+    Super admins and CRM admins need none — they always have it."""
+    return await _set_flag(session, user_id, payload.store_ids, "crm_access")
+
+
+@router.put("/{user_id}/production", response_model=UserWithActivityOut)
+async def set_production_access(
+    user_id: int,
+    payload: CrmAccessUpdate,
+    session: AsyncSession = Depends(get_session),
+) -> UserWithActivityOut:
+    """Choose where this person may record productions: exactly the listed
+    stores. The same flag Production → Manage access sets; production admins
+    need none."""
+    return await _set_flag(session, user_id, payload.store_ids, "production_access")
 
 
 @router.patch("/{user_id}", response_model=UserWithActivityOut)

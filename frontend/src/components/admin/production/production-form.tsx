@@ -492,7 +492,7 @@ function FormBody({
                   {editing ? "Update production costing" : "Add production costing"}
                 </h2>
                 <p className="text-sm opacity-90">
-                  এই দিনের সব তথ্য লিখুন। সেভ করলে প্রোডাকশনের তালিকায় যোগ হবে, আর খরচগুলো ভাগে ভাগে Expenses-এ চলে যাবে।
+                  এই দিনের সব তথ্য লিখুন। সেভ করলে প্রোডাকশনের তালিকায় যোগ হবে, আর কাঁচামালের মোট খরচ ও রাঁধুনিদের মোট মজুরি দুটি খরচ হিসেবে Expenses-এ চলে যাবে।
                 </p>
               </div>
               <Link
@@ -1054,7 +1054,8 @@ function FormBody({
                   <p className="text-sm text-destructive">{error ?? problems[0]}</p>
                 )}
                 <div className="flex flex-wrap items-center justify-end gap-2">
-                  {editing && (
+                  {/* Deleting a production: the CRM admins only. */}
+                  {editing && can("crm.admin") && (
                     <Button
                       type="button"
                       variant="ghost"

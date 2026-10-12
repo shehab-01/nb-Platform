@@ -33,6 +33,7 @@ from api.routers.expenses import (
     _drive_http,
     _get,
     _safe_name,
+    check_may_edit,
     _sniff,
     preview,
 )
@@ -220,6 +221,7 @@ async def attach_drop(
     one of its proofs. The drop is then used up."""
     drop = await _admin_drop(session, ctx.store.id, drop_id)
     expense = await _get(session, ctx.store.id, expense_id)
+    check_may_edit(expense, ctx)
     files = await _files(session, drop)
     have = await session.scalar(
         select(func.count()).where(

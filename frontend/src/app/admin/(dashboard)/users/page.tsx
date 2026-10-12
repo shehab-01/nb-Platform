@@ -14,6 +14,8 @@ import {
   listStores,
   listUsers,
   setUserCrm,
+  setUserProduction,
+  type AccessPage,
   setUserMemberships,
   updateUser,
   type Store,
@@ -101,14 +103,18 @@ export default function UsersPage() {
 
   const [nicknameFor, setNicknameFor] = React.useState<TeamMember | null>(null);
   const [membershipsFor, setMembershipsFor] = React.useState<TeamMember | null>(null);
-  const [crmFor, setCrmFor] = React.useState<TeamMember | null>(null);
+  // Whose Expenses or Production assignment is open.
+  const [crmFor, setCrmFor] = React.useState<{ member: TeamMember; page: AccessPage } | null>(
+    null
+  );
+  const crmPage = crmFor?.page ?? "expenses";
 
   const handleCrm = React.useCallback(
     async (id: number, storeIds: number[]) => {
-      await setUserCrm(id, storeIds);
+      await (crmPage === "expenses" ? setUserCrm : setUserProduction)(id, storeIds);
       await refresh();
     },
-    [refresh]
+    [crmPage, refresh]
   );
 
   const handleMemberships = React.useCallback(
@@ -139,7 +145,7 @@ export default function UsersPage() {
         onRoleChange: handleRoleChange,
         onEditNickname: setNicknameFor,
         onEditMemberships: setMembershipsFor,
-        onEditCrm: setCrmFor,
+        onEditCrm: (member, page) => setCrmFor({ member, page }),
       }),
     [currentUser.id, handleStatusChange, handleRoleChange]
   );
@@ -198,7 +204,8 @@ export default function UsersPage() {
         onSave={handleMemberships}
       />
       <CrmDialog
-        member={crmFor}
+        member={crmFor?.member ?? null}
+        page={crmPage}
         onOpenChange={(open) => !open && setCrmFor(null)}
         onSave={handleCrm}
       />

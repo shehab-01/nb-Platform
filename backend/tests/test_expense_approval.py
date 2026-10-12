@@ -1,8 +1,8 @@
 """
 Expense approval, the expenses a production day files, and the expense PDF.
 
-Who approves and deletes (the SUPER_ADMIN_EMAILS addresses, not the super
-admin role), what each production part's expense says, when it counts as
+Who approves, deletes and edits (the CRM admins — PRODUCTION_ADMIN_EMAILS,
+not the super admin role — and an expense's own author), what each production part's expense says, when it counts as
 spent, and what the expense report shows. No database, no LibreOffice.
 
 Run from backend/:  python -m pytest tests -q
@@ -19,7 +19,7 @@ from fastapi import HTTPException
 from api import tenancy
 from api.config import settings
 from api.models import Expense, ProductionDay
-from api.routers.expenses import delete_expense, edit_expense, set_status
+from api.routers.expenses import delete_expense, edit_expense, may_edit, set_status
 from api.routers.production import _apply, totals
 from api.schemas import ExpenseIn, ExpenseStatusIn, ProductionDayIn, UserOut
 from api.services import expense_report, production_expenses
@@ -31,11 +31,11 @@ OWNER_EMAIL = "owner@example.com"
 
 @pytest.fixture(autouse=True)
 def approver(monkeypatch):
-    monkeypatch.setattr(settings, "super_admin_emails", frozenset({OWNER_EMAIL}))
+    monkeypatch.setattr(settings, "production_admin_emails", frozenset({OWNER_EMAIL}))
 
 
-def ctx(email: str, role: str = "super_admin"):
-    user = SimpleNamespace(id=7, email=email, name="Someone", nickname=None)
+def ctx(email: str, role: str = "super_admin", uid: int = 7):
+    user = SimpleNamespace(id=uid, email=email, name="Someone", nickname=None)
     return tenancy.StoreContext(store=STORE, role=role, user=user)
 
 
@@ -53,19 +53,19 @@ class OneExpense:
 # --- Who approves ----------------------------------------------------------------
 
 
-def test_only_the_configured_address_approves():
-    assert tenancy.is_expense_approver(SimpleNamespace(email="Owner@Example.com"))
+def test_only_the_production_admin_addresses_are_crm_admins():
+    assert tenancy.is_crm_admin(SimpleNamespace(email="Owner@Example.com"))
     # The super admin role alone, given from the Users page, is not enough.
-    assert not tenancy.is_expense_approver(SimpleNamespace(email="other-admin@example.com"))
+    assert not tenancy.is_crm_admin(SimpleNamespace(email="other-admin@example.com"))
 
 
-def test_the_admin_learns_whether_it_is_the_approver():
+def test_the_admin_learns_whether_it_is_a_crm_admin():
     base = dict(
         id=1, name="X", picture_url=None, role="super_admin", status="active",
         created_at=datetime(2026, 1, 1), last_active_at=None,
     )
-    assert UserOut(email=OWNER_EMAIL, **base).expense_approver
-    assert not UserOut(email="other@example.com", **base).expense_approver
+    assert UserOut(email=OWNER_EMAIL, **base).crm_admin
+    assert not UserOut(email="other@example.com", **base).crm_admin
 
 
 def test_another_super_admin_cannot_approve():
@@ -81,14 +81,14 @@ def test_another_super_admin_cannot_delete():
 
 
 def test_a_production_expense_is_not_deleted_from_expenses():
-    linked = Expense(id=1, store_id=2, production_day_id=5, production_part="gas")
+    linked = Expense(id=1, store_id=2, production_day_id=5, production_part="materials")
     with pytest.raises(HTTPException) as err:
         asyncio.run(delete_expense(1, OneExpense(linked), ctx(OWNER_EMAIL)))
     assert err.value.status_code == 409
 
 
 def test_a_production_expense_is_not_edited_from_expenses():
-    linked = Expense(id=1, store_id=2, production_day_id=5, production_part="gas")
+    linked = Expense(id=1, store_id=2, production_day_id=5, production_part="materials")
     body = ExpenseIn(category="Utilities", item="Gas", amount=100, payment_method="cash")
     with pytest.raises(HTTPException) as err:
         asyncio.run(edit_expense(1, body, OneExpense(linked), ctx(OWNER_EMAIL)))
@@ -136,16 +136,21 @@ def saved(body: ProductionDayIn, d: date = date(2026, 10, 9)) -> ProductionDay:
 # --- What a production files -----------------------------------------------------
 
 
-def test_a_day_files_one_expense_per_part_that_cost_anything():
+def test_a_day_files_raw_materials_and_cook_salary_only():
     lines = production_expenses.lines(saved(a_day()))
-    # No packaging this day, so no packaging expense.
-    assert set(lines) == {"materials", "labour", "gas", "misc"}
+    # Gas and other costs stay on the production.
+    assert set(lines) == {"materials", "labour"}
     assert lines["materials"].amount == 12 * 220 + 800
     assert lines["materials"].category == "Market & Grocery"
     assert lines["labour"].category == "Salary"
     assert lines["labour"].amount == 6400
-    assert lines["gas"].note is None
     assert lines["materials"].item == "Production 9 Oct 2026 · Raw materials"
+    assert lines["labour"].item == "Production 9 Oct 2026 · Cook salary"
+
+
+def test_a_part_that_cost_nothing_files_nothing():
+    lines = production_expenses.lines(saved(a_day(materials=[])))
+    assert set(lines) == {"labour"}
 
 
 def test_a_parts_note_lists_what_it_is_made_of():
@@ -154,7 +159,6 @@ def test_a_parts_note_lists_what_it_is_made_of():
     assert lines["labour"].note == (
         "Male 6 × ৳450; Female 4 × ৳400; Head cook 1 × ৳900; Other rate 2 × ৳600"
     )
-    assert lines["misc"].note == "Transport ৳2,500 (van)"
 
 
 def test_todays_production_is_spent_now_an_earlier_one_on_its_day():
@@ -213,3 +217,35 @@ def test_a_one_day_report_names_the_day():
     )
     assert c["period"] == "12 Oct 2026"
     assert c["filename"] == "expenses-2026-10-12.pdf"
+
+
+# --- Who edits ----------------------------------------------------------------------
+
+
+def test_the_author_and_crm_admins_may_edit_an_expense():
+    mine = Expense(id=1, store_id=2, created_by_id=7)
+    assert may_edit(mine, ctx("staff@example.com", role="staff", uid=7))
+    assert not may_edit(mine, ctx("staff@example.com", role="staff", uid=8))
+    # A super admin by role is no exception; a CRM admin is.
+    assert not may_edit(mine, ctx("other@example.com", uid=8))
+    assert may_edit(mine, ctx(OWNER_EMAIL, uid=8))
+
+
+def test_someone_elses_expense_is_not_edited():
+    theirs = Expense(id=1, store_id=2, created_by_id=99)
+    body = ExpenseIn(category="Utilities", item="Gas", amount=100, payment_method="cash")
+    with pytest.raises(HTTPException) as err:
+        asyncio.run(edit_expense(1, body, OneExpense(theirs), ctx("staff@example.com", role="staff")))
+    assert err.value.status_code == 403
+
+
+def test_a_crm_admin_opens_expenses_without_the_flag():
+    access = tenancy.StoreAccess(1, "s", "S", "staff", crm=False)
+    got = tenancy.accessible(SimpleNamespace(email=OWNER_EMAIL, role="staff"), [access], [])
+    assert got[0].crm and got[0].production == tenancy.PRODUCTION_ADMIN
+
+
+def test_another_super_admin_cannot_manage_access():
+    with pytest.raises(HTTPException) as err:
+        asyncio.run(tenancy.require_crm_admin(ctx("other@example.com")))
+    assert err.value.status_code == 403

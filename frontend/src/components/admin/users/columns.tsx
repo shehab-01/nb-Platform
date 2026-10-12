@@ -7,6 +7,7 @@ import { SortableHeader } from "@/components/admin/data-table/data-table-sort-he
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { storeTitle } from "@/lib/admin-store";
+import type { AccessPage } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -38,7 +39,8 @@ export function getTeamColumns({
   onRoleChange: (id: number, role: UserRole) => void;
   onEditNickname: (member: TeamMember) => void;
   onEditMemberships: (member: TeamMember) => void;
-  onEditCrm: (member: TeamMember) => void;
+  /** Opens the Expenses or Production assignment for the member. */
+  onEditCrm: (member: TeamMember, page: AccessPage) => void;
 }): ColumnDef<TeamMember>[] {
   return [
     {
@@ -120,7 +122,12 @@ export function getTeamColumns({
                 <span className="ml-1 text-muted-foreground">{STORE_ROLE_LABELS[x.role].toLowerCase()}</span>
                 {x.crm && (
                   <span className="ml-1 rounded bg-primary/10 px-1 text-[10px] font-medium text-primary">
-                    CRM
+                    Expenses
+                  </span>
+                )}
+                {x.production && (
+                  <span className="ml-1 rounded bg-primary/10 px-1 text-[10px] font-medium text-primary">
+                    Production
                   </span>
                 )}
               </Badge>
@@ -219,8 +226,11 @@ export function getTeamColumns({
               <DropdownMenuItem onClick={() => onEditMemberships(row.original)}>
                 Assign stores
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onEditCrm(row.original)}>
-                Assign CRM
+              <DropdownMenuItem onClick={() => onEditCrm(row.original, "expenses")}>
+                Assign Expenses
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onEditCrm(row.original, "production")}>
+                Assign Production
               </DropdownMenuItem>
               {canChangeRole && <DropdownMenuSeparator />}
               {canChangeRole &&

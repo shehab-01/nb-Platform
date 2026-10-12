@@ -1,18 +1,18 @@
 """
 The expenses a production day files for itself.
 
-Saving a production day files its costs on the Expenses page, one expense
-per part rather than one per bazar line: all the raw materials together, all
-the cooks together, the gas, the packaging, the other costs. Saving the day
-again updates those same expenses (found by production_day_id and
-production_part), adds a part that now has a cost and removes one that no
-longer has; deleting the day removes them. They are changed only through the
+Saving a production day files two of its costs on the Expenses page, each as
+one expense rather than one per line: all the raw materials (bazar) together,
+and all the cooks' pay together. Gas, packaging and other costs stay on the
+production only. Saving the day again updates those same expenses (found by
+production_day_id and production_part), adds one that now has a cost and
+removes one that no longer has; deleting the day removes them. They are changed only through the
 day: the Expenses page shows them but will not edit or delete them.
 
-They follow the Expenses rules otherwise. Each starts pending; one the
-approver (SUPER_ADMIN_EMAILS, tenancy.is_expense_approver) approved goes back
-to pending when anyone else changes what it says, and a day whose expenses
-include an approved one can be deleted only by the approver.
+They follow the Expenses rules otherwise. Each starts pending, and one a
+CRM admin (PRODUCTION_ADMIN_EMAILS, tenancy.is_crm_admin) approved goes back
+to pending when anyone else changes what it says. Only a CRM admin deletes a
+day, and with it its expenses.
 """
 from __future__ import annotations
 
@@ -38,10 +38,7 @@ DHAKA = timezone(timedelta(hours=6), "Asia/Dhaka")
 # its item reads.
 PARTS = (
     ("materials", "Market & Grocery", "Raw materials"),
-    ("labour", "Salary", "Cooks' pay"),
-    ("gas", "Utilities", "Gas / fuel"),
-    ("packaging", "Packaging", "Packaging"),
-    ("misc", "Miscellaneous", "Other costs"),
+    ("labour", "Salary", "Cook salary"),
 )
 
 NOTE_MAX = 1000
@@ -84,18 +81,10 @@ def lines(day: ProductionDay) -> dict[str, Line]:
             + [(c.get("label") or "Other rate", c["cooks"], c["rate"]) for c in day.extra_cooks or []]
             if n
         ),
-        "gas": "",
-        "packaging": "",
-        "misc": "; ".join(
-            f"{m.purpose} {taka(m.amount)}" + (f" ({m.note})" if m.note else "") for m in day.misc
-        ),
     }
     amounts = {
         "materials": day.materials_cost,
         "labour": day.labour_cost,
-        "gas": day.gas_cost,
-        "packaging": day.packaging_cost,
-        "misc": day.misc_cost,
     }
     return {
         part: Line(
@@ -159,10 +148,10 @@ async def sync(session: AsyncSession, day: ProductionDay, ctx: tenancy.StoreCont
     gone = [e for part, e in have.items() if part not in want]
     # Refused before anything is touched, Drive included.
     for expense in gone:
-        if expense.status == "approved" and not tenancy.is_expense_approver(ctx.user):
+        if expense.status == "approved" and not tenancy.is_crm_admin(ctx.user):
             raise HTTPException(
                 status_code=403,
-                detail=f"“{expense.item}” is approved; only the approver can remove it",
+                detail=f"“{expense.item}” is approved; only a CRM admin can remove it",
             )
     for expense in gone:
         await _discard(session, expense)
@@ -199,18 +188,12 @@ async def sync(session: AsyncSession, day: ProductionDay, ctx: tenancy.StoreCont
         # A production moved to another date takes its expenses with it.
         if expense.spent_at.astimezone(DHAKA).date() != day.day:
             expense.spent_at = when
-        if changed and not tenancy.is_expense_approver(ctx.user):
+        if changed and not tenancy.is_crm_admin(ctx.user):
             expense.status, expense.approved_by_id, expense.approved_at = "pending", None, None
 
 
 async def remove(session: AsyncSession, day: ProductionDay, ctx: tenancy.StoreContext) -> None:
-    """Delete the day's expenses along with it (the caller commits). An
-    approved one stops the delete unless the approver is doing it."""
-    linked = await _linked(session, ctx.store.id, day.id)
-    if not tenancy.is_expense_approver(ctx.user) and any(e.status == "approved" for e in linked):
-        raise HTTPException(
-            status_code=403,
-            detail="This production's expenses include an approved one; only the approver can delete it",
-        )
-    for expense in linked:
+    """Delete the day's expenses along with it (the caller commits; only a
+    CRM admin deletes a day: api.routers.production.delete_day)."""
+    for expense in await _linked(session, ctx.store.id, day.id):
         await _discard(session, expense)

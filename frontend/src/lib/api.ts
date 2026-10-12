@@ -749,9 +749,10 @@ export type AuthUser = {
   pictureUrl: string | null;
   role: UserRole;
   status: UserStatus;
-  /** Approves and deletes expenses: an address in SUPER_ADMIN_EMAILS, not
-   *  merely the super admin role. */
-  expenseApprover: boolean;
+  /** A CRM admin: an address in PRODUCTION_ADMIN_EMAILS (not merely the
+   *  super admin role). Approves and deletes expenses, deletes productions
+   *  and chooses who uses those pages. */
+  crmAdmin: boolean;
 };
 
 type ApiUser = {
@@ -766,7 +767,7 @@ type ApiUser = {
   last_active_at: string | null;
   orders_confirmed?: number;
   orders_shipped?: number;
-  expense_approver?: boolean;
+  crm_admin?: boolean;
   pinned?: boolean;
   memberships?: ApiMembership[];
 };
@@ -778,6 +779,7 @@ type ApiMembership = {
   subtitle?: string | null;
   role: StoreRole;
   crm?: boolean;
+  production?: boolean;
 };
 
 function mapMembership(m: ApiMembership): Membership {
@@ -788,6 +790,7 @@ function mapMembership(m: ApiMembership): Membership {
     subtitle: m.subtitle ?? null,
     role: m.role,
     crm: m.crm ?? false,
+    production: m.production ?? false,
   };
 }
 
@@ -800,7 +803,7 @@ function mapAuthUser(user: ApiUser): AuthUser {
     pictureUrl: user.picture_url,
     role: user.role,
     status: user.status,
-    expenseApprover: user.expense_approver ?? false,
+    crmAdmin: user.crm_admin ?? false,
   };
 }
 
@@ -820,6 +823,15 @@ function mapTeamMember(user: ApiUser): TeamMember {
  *  exactly these, all among the stores they belong to. */
 export async function setUserCrm(userId: number, storeIds: number[]): Promise<TeamMember> {
   const user = await request<ApiUser>(`/api/users/${userId}/crm`, {
+    method: "PUT",
+    body: JSON.stringify({ store_ids: storeIds }),
+  });
+  return mapTeamMember(user);
+}
+
+/** The stores where a user may record productions (super admin). */
+export async function setUserProduction(userId: number, storeIds: number[]): Promise<TeamMember> {
+  const user = await request<ApiUser>(`/api/users/${userId}/production`, {
     method: "PUT",
     body: JSON.stringify({ store_ids: storeIds }),
   });
@@ -1692,7 +1704,9 @@ export type Expense = {
   note: string | null;
   added_by_name: string;
   added_by_id: number | null;
-  /** Pending until the approver (SUPER_ADMIN_EMAILS) approves it. */
+  /** Who typed it: they and the CRM admins may edit it. */
+  created_by_id: number | null;
+  /** Pending until a CRM admin (PRODUCTION_ADMIN_EMAILS) approves it. */
   status: ExpenseStatus;
   approved_at: string | null;
   /** The production day that filed this expense (its date), or null for one
@@ -1757,7 +1771,7 @@ export async function listExpenses(
   return request<Expense[]>(`/api/expenses?${q}`);
 }
 
-/** Approves an expense or puts it back to pending (the approver only). */
+/** Approves an expense or puts it back to pending (CRM admins only). */
 export async function setExpenseStatus(id: number, status: ExpenseStatus): Promise<Expense> {
   return request<Expense>(`/api/expenses/${id}/status`, {
     method: "PUT",
@@ -2111,28 +2125,33 @@ export async function getProductionSuggestions(): Promise<ProductionSuggestions>
   return request<ProductionSuggestions>("/api/production/suggestions");
 }
 
-/** A member of the store, and what they may do on the Production pages. */
-export type ProductionMember = {
+/** A member of the store, and what they may do on the Production or the
+ *  Expenses page. */
+export type MemberAccess = {
   user_id: number;
   name: string;
   email: string;
   picture_url: string | null;
   role: string;
-  /** "admin" by address (PRODUCTION_ADMIN_EMAILS), "write", or null. */
+  /** "admin" by address (always has it), "write" (given it), or null. */
   level: "admin" | "write" | null;
 };
 
-/** The store's members and their Production access (production admins only). */
-export async function listProductionAccess(): Promise<ProductionMember[]> {
-  return request<ProductionMember[]>("/api/production/access");
+/** The two pages whose users the CRM admins choose. */
+export type AccessPage = "production" | "expenses";
+
+/** The store's members and their access to the page (CRM admins only). */
+export async function listPageAccess(page: AccessPage): Promise<MemberAccess[]> {
+  return request<MemberAccess[]>(`/api/${page}/access`);
 }
 
-/** Lets a member record productions, or stops them; returns the list. */
-export async function setProductionAccess(
+/** Lets a member use the page, or stops them; returns the list. */
+export async function setPageAccess(
+  page: AccessPage,
   userId: number,
   write: boolean
-): Promise<ProductionMember[]> {
-  return request<ProductionMember[]>(`/api/production/access/${userId}`, {
+): Promise<MemberAccess[]> {
+  return request<MemberAccess[]>(`/api/${page}/access/${userId}`, {
     method: "PUT",
     body: JSON.stringify({ write }),
   });

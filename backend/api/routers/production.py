@@ -8,9 +8,11 @@ browser. Saving a day also files its costs on the Expenses page, one
 expense per part, kept in step with the day (api.services.production_expenses).
 
 Who may do what (api.tenancy): production admins (PRODUCTION_ADMIN_EMAILS
-and super admins) everything, including choosing, per store, who else may
-record productions; those writers record today's production, add to the
-item and product lists, and read everything, but change nothing saved.
+and super admins) correct and re-date productions and edit the lists; only
+the CRM admins (PRODUCTION_ADMIN_EMAILS alone) delete a production and
+choose, per store, who else may record productions. Those writers record
+today's production, add to the item and product lists, and read everything,
+but change nothing saved.
 
 The bazar list is picked from the store's raw-material items, and what is
 cooked from the store's products; both lists are kept by the same people on
@@ -39,13 +41,13 @@ from api.models import (
     User,
 )
 from api.schemas import (
-    ProductionAccessIn,
+    MemberAccessIn,
     ProductionDayIn,
     ProductionDayOut,
     ProductionDaySummary,
     ProductionItemIn,
     ProductionItemOut,
-    ProductionMemberOut,
+    MemberAccessOut,
     ProductionProductIn,
     ProductionProductOut,
     ProductionSuggestions,
@@ -73,6 +75,8 @@ DEFAULT_ITEMS = (
 # Who may open the Production pages, and who may change what is saved.
 _require = tenancy.require_production
 _admin = tenancy.require_production_admin
+# Deleting, and choosing who records: PRODUCTION_ADMIN_EMAILS only.
+_crm_admin = tenancy.require_crm_admin
 
 
 def _today() -> date:
@@ -490,7 +494,7 @@ async def save_day(
 async def delete_day(
     day: date,
     session: AsyncSession = Depends(get_session),
-    ctx: tenancy.StoreContext = Depends(_admin),
+    ctx: tenancy.StoreContext = Depends(_crm_admin),
 ) -> None:
     """Delete the production recorded for the day."""
     row = await _load(session, ctx.store.id, day)
@@ -530,7 +534,7 @@ async def day_report(
 # --- Who may record productions ---------------------------------------------------
 
 
-async def _members(session: AsyncSession, store_id: int) -> list[ProductionMemberOut]:
+async def _members(session: AsyncSession, store_id: int) -> list[MemberAccessOut]:
     rows = await session.execute(
         select(User, StoreUser.role, StoreUser.production_access)
         .join(StoreUser, StoreUser.user_id == User.id)
@@ -538,7 +542,7 @@ async def _members(session: AsyncSession, store_id: int) -> list[ProductionMembe
         .order_by(User.name, User.id)
     )
     return [
-        ProductionMemberOut(
+        MemberAccessOut(
             user_id=user.id,
             name=user.nickname or user.name,
             email=user.email,
@@ -550,23 +554,23 @@ async def _members(session: AsyncSession, store_id: int) -> list[ProductionMembe
     ]
 
 
-@router.get("/access", response_model=list[ProductionMemberOut])
+@router.get("/access", response_model=list[MemberAccessOut])
 async def list_access(
     session: AsyncSession = Depends(get_session),
-    ctx: tenancy.StoreContext = Depends(_admin),
-) -> list[ProductionMemberOut]:
+    ctx: tenancy.StoreContext = Depends(_crm_admin),
+) -> list[MemberAccessOut]:
     """The store's members and what each may do here. Super admins are not
     members (they see every store) and so are not listed."""
     return await _members(session, ctx.store.id)
 
 
-@router.put("/access/{user_id}", response_model=list[ProductionMemberOut])
+@router.put("/access/{user_id}", response_model=list[MemberAccessOut])
 async def set_access(
     user_id: int,
-    body: ProductionAccessIn,
+    body: MemberAccessIn,
     session: AsyncSession = Depends(get_session),
-    ctx: tenancy.StoreContext = Depends(_admin),
-) -> list[ProductionMemberOut]:
+    ctx: tenancy.StoreContext = Depends(_crm_admin),
+) -> list[MemberAccessOut]:
     """Let a member record productions, or stop them; returns the list. A
     production admin is one by address, so the flag changes nothing for them."""
     membership = await session.get(StoreUser, (ctx.store.id, user_id))

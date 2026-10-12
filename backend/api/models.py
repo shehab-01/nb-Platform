@@ -779,7 +779,7 @@ class Expense(Base):
     production_day_id: Mapped[int | None] = mapped_column(
         ForeignKey("production_days.id", ondelete="SET NULL")
     )
-    # "materials", "labour", "gas", "packaging" or "misc".
+    # "materials" or "labour" (api.services.production_expenses.PARTS).
     production_part: Mapped[str | None] = mapped_column(String(20))
 
     __table_args__ = (

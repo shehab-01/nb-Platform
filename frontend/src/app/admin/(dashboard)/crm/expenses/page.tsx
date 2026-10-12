@@ -15,6 +15,7 @@ import {
   Plus,
   Receipt,
   Trash2,
+  UserCog,
   Wallet,
   X,
 } from "lucide-react";
@@ -31,6 +32,7 @@ import {
   YAxis,
 } from "recharts";
 import { useAuth } from "@/components/admin/auth-context";
+import { AccessDialog } from "@/components/admin/crm/access-dialog";
 import { EXPENSE_ICONS, ExpenseIcon } from "@/components/admin/expense-icons";
 import {
   MAX_PROOFS,
@@ -133,11 +135,14 @@ function change(now: number, before: number): string | null {
 
 // --- The page ----------------------------------------------------------------
 
+// The category filter's "everything" value (a Select item cannot be "").
+const ALL = "__all";
+
 type DrawerState = { mode: "add" } | { mode: "edit"; expense: Expense } | null;
 
 /**
- * Expenses, per store, for super admins and whoever they gave CRM access
- * (Users → Assign CRM). A bento of the day's
+ * Expenses, per store, for super admins, the CRM admins and whoever was
+ * given access (Users → Assign Expenses, or Manage access here). A bento of the day's
  * figures; "Add expense" opens a drawer on the right that the bento makes
  * room for rather than hides behind, so the day stays in view while adding.
  */
@@ -146,7 +151,7 @@ export default function ExpensesPage() {
   if (!store || !can("crm")) {
     return (
       <p className="text-sm text-muted-foreground">
-        The CRM is open to super admins and the people they give access to.
+        Expenses is open to the CRM admins and the people they give access to.
       </p>
     );
   }
@@ -172,9 +177,13 @@ function byCategory(rows: Expense[]): { label: string; amount: number }[] {
 }
 
 function ExpensesView() {
-  const { can } = useAuth();
-  // Approving and deleting: SUPER_ADMIN_EMAILS only.
-  const approver = can("expenses.approve");
+  const { can, user } = useAuth();
+  // Approving, deleting and choosing who uses the page: the CRM admins
+  // (PRODUCTION_ADMIN_EMAILS) only.
+  const crmAdmin = can("crm.admin");
+  // Editing: a CRM admin, or whoever typed the expense.
+  const mayEdit = (e: Expense) => crmAdmin || e.created_by_id === user.id;
+  const [managingAccess, setManagingAccess] = React.useState(false);
   const today = dhakaToday();
   // One day, or every day from start to end.
   const [ranged, setRanged] = React.useState(false);
@@ -190,6 +199,8 @@ function ExpensesView() {
   const [viewing, setViewing] = React.useState<Expense | null>(null);
   // Ticked for the PDF.
   const [selected, setSelected] = React.useState<ReadonlySet<number>>(new Set());
+  // The table shows only this category's expenses; "" for all of them.
+  const [category, setCategory] = React.useState("");
   const [exporting, setExporting] = React.useState(false);
   const [version, setVersion] = React.useState(0);
   const reload = React.useCallback(() => setVersion((v) => v + 1), []);
@@ -235,6 +246,21 @@ function ExpensesView() {
     : summary?.by_category;
   const categoryTotal = ranged ? total : summary?.day_total;
 
+  // The table, its ticks and the PDF follow the category filter; the
+  // figures and charts above and below stay the whole day or range.
+  const shown = expenses && (category ? expenses.filter((e) => e.category === category) : expenses);
+  const ticked: ReadonlySet<number> = new Set(
+    (shown ?? []).filter((e) => selected.has(e.id)).map((e) => e.id)
+  );
+  // Offered in the filter: the categories these expenses use, in the
+  // store's order, and the one picked even if none is left.
+  const used = new Set(expenses?.map((e) => e.category));
+  if (category) used.add(category);
+  const filterOptions = [
+    ...categories.map((c) => c.name).filter((n) => used.has(n)),
+    ...[...used].filter((n) => !categories.some((c) => c.name === n)).sort(),
+  ];
+
   const showDay = (d: string) => {
     setRanged(false);
     setDay(d);
@@ -247,15 +273,22 @@ function ExpensesView() {
       else next.add(id);
       return next;
     });
+  // Ticks or unticks every row shown; ticks on rows filtered out stay.
   const toggleAll = () =>
-    setSelected((was) =>
-      expenses && was.size < expenses.length ? new Set(expenses.map((e) => e.id)) : new Set()
-    );
+    setSelected((was) => {
+      const next = new Set(was);
+      const all = (shown ?? []).every((e) => was.has(e.id));
+      for (const e of shown ?? []) {
+        if (all) next.delete(e.id);
+        else next.add(e.id);
+      }
+      return next;
+    });
 
   // The PDF is made on the server and handed over as a download, its rows
   // in the order the table shows them.
   const exportPdf = async () => {
-    const ids = (expenses ?? []).filter((e) => selected.has(e.id)).map((e) => e.id);
+    const ids = (shown ?? []).filter((e) => ticked.has(e.id)).map((e) => e.id);
     if (!ids.length || exporting) return;
     setExporting(true);
     setError(null);
@@ -289,12 +322,23 @@ function ExpensesView() {
           and reflows by its own width (container queries), not the
           screen's. */}
       <div className="@container min-w-0 flex-1 pb-20 lg:pb-0">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Expenses</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            What the store spends, day by day.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Expenses</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              What the store spends, day by day.
+            </p>
+          </div>
+          {crmAdmin && (
+            <Button variant="outline" className="gap-1.5" onClick={() => setManagingAccess(true)}>
+              <UserCog className="size-4" />
+              Manage access
+            </Button>
+          )}
         </div>
+        {crmAdmin && (
+          <AccessDialog page="expenses" open={managingAccess} onOpenChange={setManagingAccess} />
+        )}
 
         {error && (
           <div className="mt-4 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-2 text-sm text-destructive">
@@ -397,6 +441,26 @@ function ExpensesView() {
                 ) : (
                   <DateField label="Day" value={day} max={today} onChange={setDay} />
                 )}
+                <Select
+                  value={category || ALL}
+                  onValueChange={(v) => setCategory(v === ALL ? "" : v)}
+                >
+                  <SelectTrigger aria-label="Category" className="w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL}>All categories</SelectItem>
+                    {filterOptions.map((name) => (
+                      <SelectItem key={name} value={name}>
+                        <ExpenseIcon
+                          icon={categories.find((c) => c.name === name)?.icon}
+                          className="size-4 text-muted-foreground"
+                        />
+                        {name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               {badRange && (
                 <p className="text-xs text-destructive">The range ends before it starts.</p>
@@ -406,7 +470,7 @@ function ExpensesView() {
               <Button
                 variant="outline"
                 onClick={exportPdf}
-                disabled={selected.size === 0 || exporting}
+                disabled={ticked.size === 0 || exporting}
                 className="gap-1.5"
               >
                 {exporting ? (
@@ -416,8 +480,8 @@ function ExpensesView() {
                 )}
                 {exporting
                   ? "Making PDF…"
-                  : selected.size
-                    ? `Export PDF (${selected.size})`
+                  : ticked.size
+                    ? `Export PDF (${ticked.size})`
                     : "Export PDF"}
               </Button>
               {/* On phones the floating + button does this. */}
@@ -432,10 +496,12 @@ function ExpensesView() {
           </CardHeader>
           <CardContent className="px-3 sm:px-6">
             <ExpenseTable
-              rows={expenses}
+              rows={shown}
+              filtered={category !== ""}
               ranged={ranged}
-              selected={selected}
-              approver={approver}
+              selected={ticked}
+              crmAdmin={crmAdmin}
+              mayEdit={mayEdit}
               onToggle={toggle}
               onToggleAll={toggleAll}
               onStatus={changeStatus}
@@ -533,7 +599,8 @@ function ExpensesView() {
       <ExpenseDetails
         expense={viewing}
         categories={categories}
-        approver={approver}
+        crmAdmin={crmAdmin}
+        mayEdit={mayEdit}
         onStatus={changeStatus}
         onClose={() => setViewing(null)}
         onEdit={(e) => {
@@ -600,20 +667,20 @@ const STATUS_TONE: Record<ExpenseStatus, string> = {
   approved: "border-emerald-600/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
 };
 
-/** Pending or Approved: a dropdown for the approver, a badge for everyone
+/** Pending or Approved: a dropdown for a CRM admin, a badge for everyone
  *  else. */
 function StatusControl({
   expense,
-  approver,
+  crmAdmin,
   onStatus,
   className,
 }: {
   expense: Expense;
-  approver: boolean;
+  crmAdmin: boolean;
   onStatus: (e: Expense, status: ExpenseStatus) => void;
   className?: string;
 }) {
-  if (!approver) {
+  if (!crmAdmin) {
     return (
       <span
         className={cn(
@@ -724,10 +791,14 @@ function Cols() {
 
 type TableProps = {
   rows: Expense[] | null;
+  /** A category filter hides some rows: says so when none is left. */
+  filtered: boolean;
   /** Rows from several days: each shows its date as well as its time. */
   ranged: boolean;
   selected: ReadonlySet<number>;
-  approver: boolean;
+  crmAdmin: boolean;
+  /** May this user edit the expense: a CRM admin, or its author. */
+  mayEdit: (e: Expense) => boolean;
   onToggle: (id: number) => void;
   onToggleAll: () => void;
   onStatus: (e: Expense, status: ExpenseStatus) => void;
@@ -746,9 +817,11 @@ type TableProps = {
  */
 function ExpenseTable({
   rows,
+  filtered,
   ranged,
   selected,
-  approver,
+  crmAdmin,
+  mayEdit,
   onToggle,
   onToggleAll,
   onStatus,
@@ -762,7 +835,13 @@ function ExpenseTable({
     return (
       <div className="flex h-96 flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-center">
         <Wallet className="size-8 text-muted-foreground" />
-        <p className="font-medium">{ranged ? "Nothing spent on these days" : "Nothing spent this day"}</p>
+        <p className="font-medium">
+          {filtered
+            ? "Nothing in this category"
+            : ranged
+              ? "Nothing spent on these days"
+              : "Nothing spent this day"}
+        </p>
         <Button variant="outline" size="sm" onClick={onAdd} className="mt-1 gap-1.5">
           <Plus className="size-4" />
           Add expense
@@ -870,7 +949,7 @@ function ExpenseTable({
                     <td className="px-3 py-2" {...own}>
                       <StatusControl
                         expense={e}
-                        approver={approver}
+                        crmAdmin={crmAdmin}
                         onStatus={onStatus}
                         className="w-full"
                       />
@@ -878,7 +957,7 @@ function ExpenseTable({
                     <td className="px-4 py-1.5">
                       <div className="flex justify-end gap-1" {...own}>
                         {/* One a production filed is changed on that day. */}
-                        {!e.production_day && (
+                        {!e.production_day && mayEdit(e) && (
                           <Button
                             variant="ghost"
                             size="icon"
@@ -888,7 +967,7 @@ function ExpenseTable({
                             <Pencil className="size-4" />
                           </Button>
                         )}
-                        {approver && !e.production_day && (
+                        {crmAdmin && !e.production_day && (
                           <Button
                             variant="ghost"
                             size="icon"
@@ -1014,7 +1093,7 @@ function ExpenseCards({
               <div className="flex shrink-0 flex-col items-end gap-2">
                 <span className="text-base font-semibold tabular-nums">{taka(e.amount)}</span>
                 {/* Changed in the details: a dropdown cannot sit in a button. */}
-                <StatusControl expense={e} approver={false} onStatus={() => {}} />
+                <StatusControl expense={e} crmAdmin={false} onStatus={() => {}} />
                 {e.proofs.length > 0 && <ProofCell proofs={e.proofs} />}
               </div>
             </button>
@@ -1029,7 +1108,8 @@ function ExpenseCards({
 function ExpenseDetails({
   expense,
   categories,
-  approver,
+  crmAdmin,
+  mayEdit,
   onStatus,
   onClose,
   onEdit,
@@ -1037,7 +1117,8 @@ function ExpenseDetails({
 }: {
   expense: Expense | null;
   categories: ExpenseCategory[];
-  approver: boolean;
+  crmAdmin: boolean;
+  mayEdit: (e: Expense) => boolean;
   onStatus: (e: Expense, status: ExpenseStatus) => void;
   onClose: () => void;
   onEdit: (e: Expense) => void;
@@ -1089,7 +1170,7 @@ function ExpenseDetails({
                   <DetailField label="Added by">{e.added_by_name}</DetailField>
                   <DetailField label="Entry">#{e.id}</DetailField>
                   <DetailField label="Status">
-                    <StatusControl expense={e} approver={approver} onStatus={onStatus} />
+                    <StatusControl expense={e} crmAdmin={crmAdmin} onStatus={onStatus} />
                   </DetailField>
                   {e.production_day && (
                     <DetailField label="From">
@@ -1115,7 +1196,7 @@ function ExpenseDetails({
                 </p>
               ) : (
                 <>
-                  {approver && (
+                  {crmAdmin && (
                     <Button
                       variant="outline"
                       className="gap-1.5 text-destructive hover:text-destructive"
@@ -1125,10 +1206,12 @@ function ExpenseDetails({
                       Delete
                     </Button>
                   )}
-                  <Button className="gap-1.5" onClick={() => onEdit(e)}>
-                    <Pencil className="size-4" />
-                    Edit
-                  </Button>
+                  {mayEdit(e) && (
+                    <Button className="gap-1.5" onClick={() => onEdit(e)}>
+                      <Pencil className="size-4" />
+                      Edit
+                    </Button>
+                  )}
                 </>
               )}
             </DialogFooter>
@@ -1697,7 +1780,7 @@ function ExpenseDrawer({
             <PhoneDropPanel phone={phone} disabled={saving} />
           </div>
 
-          {editing?.status === "approved" && !can("expenses.approve") && (
+          {editing?.status === "approved" && !can("crm.admin") && (
             <p className="rounded-md border border-amber-600/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-500">
               This expense is approved. Saving a change puts it back to Pending.
             </p>

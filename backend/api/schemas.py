@@ -524,6 +524,13 @@ class UserOut(BaseModel):
     created_at: datetime
     last_active_at: datetime | None
 
+    @computed_field
+    @property
+    def expense_approver(self) -> bool:
+        """Approves and deletes expenses: an address in SUPER_ADMIN_EMAILS
+        (tenancy.is_expense_approver), not merely the super admin role."""
+        return self.email.lower() in settings.super_admin_emails
+
 
 class UserWithActivityOut(UserOut):
     memberships: list["MembershipOut"] = Field(default_factory=list)
@@ -1046,6 +1053,17 @@ class MembershipsUpdate(BaseModel):
 # --- Expenses (CRM) ------------------------------------------------------------
 
 PaymentMethod = Literal["cash", "bkash", "nagad", "bank_transfer", "card", "other"]
+ExpenseStatus = Literal["pending", "approved"]
+
+
+class ExpenseStatusIn(BaseModel):
+    status: ExpenseStatus
+
+
+class ExpenseReportIn(BaseModel):
+    """The expenses ticked on the page, to be put in a PDF."""
+
+    ids: list[int] = Field(min_length=1, max_length=5000)
 
 
 class ExpenseIn(BaseModel):
@@ -1079,6 +1097,12 @@ class ExpenseOut(BaseModel):
     note: str | None = None
     added_by_name: str
     added_by_id: int | None = None
+    status: ExpenseStatus = "pending"
+    approved_at: datetime | None = None
+    # The production day this expense was filed by, as its date; null for an
+    # expense typed by hand. Such an expense is changed only through the day.
+    production_day: date | None = None
+    production_part: str | None = None
     # How many proofs (receipts, screenshots) are attached, kept in Drive.
     proof_count: int = 0
     # Which ones, oldest first, so the table can show a thumbnail.
@@ -1166,6 +1190,20 @@ class ProductionShift(BaseModel):
     cooks: int | None = Field(default=None, ge=0, le=500)
 
 
+class ProductionExtraCooks(BaseModel):
+    """Cooks paid neither the male nor the female rate: so many at this rate,
+    with an optional label ("Head cook")."""
+
+    label: str | None = Field(default=None, max_length=60)
+    cooks: int = Field(ge=1, le=500)
+    rate: int = Field(ge=0, le=100_000)
+
+    @field_validator("label")
+    @classmethod
+    def _clean(cls, v: str | None) -> str | None:
+        return _squash(v)
+
+
 class ProductionMaterialIn(BaseModel):
     """A bazar-list line: one of the store's items (its unit is taken from the
     item list, not from here) and what was paid for it that day. With a
@@ -1227,6 +1265,7 @@ class ProductionDayIn(BaseModel):
     male_rate: int = Field(default=0, ge=0, le=100_000)
     female_cooks: int = Field(default=0, ge=0, le=500)
     female_rate: int = Field(default=0, ge=0, le=100_000)
+    extra_cooks: list[ProductionExtraCooks] = Field(default=[], max_length=10)
     gas_cost: int = Field(default=0, ge=0, le=100_000_000)
     packaging_cost: int = Field(default=0, ge=0, le=100_000_000)
     materials: list[ProductionMaterialIn] = Field(default=[], max_length=100)
@@ -1281,6 +1320,7 @@ class ProductionDayOut(BaseModel):
     male_rate: int
     female_cooks: int
     female_rate: int
+    extra_cooks: list[ProductionExtraCooks] = []
     gas_cost: int
     packaging_cost: int
     note: str | None = None

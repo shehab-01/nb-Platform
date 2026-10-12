@@ -33,7 +33,9 @@ type AuthContextValue = {
  *  Production pages — "production" to open them and record today's
  *  production, "production.admin" for full control (tenancy.production_level:
  *  PRODUCTION_ADMIN_EMAILS and super admins are admins; a production admin
- *  picks the writers). */
+ *  picks the writers). "expenses.approve" — approving and deleting expenses —
+ *  goes by address alone (SUPER_ADMIN_EMAILS, tenancy.is_expense_approver),
+ *  not by the super admin role. */
 export type Permission =
   | "orders"
   | "catalogue.read"
@@ -43,9 +45,13 @@ export type Permission =
   | "members.write"
   | "crm"
   | "production"
-  | "production.admin";
+  | "production.admin"
+  | "expenses.approve";
 
-type RolePermission = Exclude<Permission, "crm" | "production" | "production.admin">;
+type RolePermission = Exclude<
+  Permission,
+  "crm" | "production" | "production.admin" | "expenses.approve"
+>;
 
 const PERMISSIONS: Record<RolePermission, ReadonlySet<string>> = {
   orders: new Set(["owner", "manager", "staff"]),
@@ -149,15 +155,17 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
   const { user, stores, store } = gate;
   const isSuperAdmin = user.role === "super_admin";
   const can = (permission: Permission) =>
-    isSuperAdmin ||
-    (store !== null &&
-      (permission === "crm"
-        ? store.crm
-        : permission === "production"
-          ? store.production !== null
-          : permission === "production.admin"
-            ? store.production === "admin"
-            : PERMISSIONS[permission].has(store.role)));
+    permission === "expenses.approve"
+      ? user.expenseApprover
+      : isSuperAdmin ||
+        (store !== null &&
+          (permission === "crm"
+            ? store.crm
+            : permission === "production"
+              ? store.production !== null
+              : permission === "production.admin"
+                ? store.production === "admin"
+                : PERMISSIONS[permission].has(store.role)));
 
   return (
     <AuthContext.Provider

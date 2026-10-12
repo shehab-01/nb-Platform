@@ -6,6 +6,11 @@ expense is spent is the
 moment it is saved — the browser never names it. An expense is put down to
 the person who adds it; only a super admin may write in another name, for
 money someone else paid out.
+
+Every expense starts pending. The approver — the addresses in
+SUPER_ADMIN_EMAILS, not everyone with the super admin role — approves it,
+and is the only one who may delete one. A production day files its own
+expenses (api.services.production_expenses); those are changed only there.
 """
 import io
 import logging
@@ -22,8 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api import tenancy
 from api.config import settings
 from api.db import get_session
-from api.models import Expense, ExpenseCategory, ExpenseProof, Store
-from api.services import gdrive
+from api.models import Expense, ExpenseCategory, ExpenseProof, ProductionDay, Store
+from api.services import expense_report, gdrive, production_report
 from api.schemas import (
     ExpenseAmount,
     ExpenseCategoryIn,
@@ -32,6 +37,8 @@ from api.schemas import (
     ExpenseOut,
     ExpenseProofOut,
     ExpenseProofRef,
+    ExpenseReportIn,
+    ExpenseStatusIn,
     ExpenseSummaryOut,
 )
 
@@ -162,43 +169,87 @@ async def delete_category(
     return await _categories(session, ctx.store.id)
 
 
-@router.get("", response_model=list[ExpenseOut])
-async def list_expenses(
-    day: date | None = Query(None),
-    session: AsyncSession = Depends(get_session),
-    ctx: tenancy.StoreContext = Depends(_require),
-) -> list[ExpenseOut]:
-    """One Dhaka day's expenses (today by default), in the order spent."""
-    start, end = _day_bounds(day or _today())
-    rows = await session.scalars(
-        select(Expense)
-        .where(
-            Expense.store_id == ctx.store.id,
-            Expense.spent_at >= start,
-            Expense.spent_at < end,
-        )
-        .order_by(Expense.spent_at, Expense.id)
-    )
-    expenses = list(rows)
+async def _out(session: AsyncSession, store_id: int, expenses: list[Expense]) -> list[ExpenseOut]:
+    """The expenses as the page shows them: with their proofs, and the date
+    of the production day that filed any of them."""
+    ids = [e.id for e in expenses]
     proofs: dict[int, list[ExpenseProofRef]] = {}
-    if expenses:
+    days: dict[int, date] = {}
+    if ids:
         for expense_id, proof_id, mime in await session.execute(
             select(ExpenseProof.expense_id, ExpenseProof.id, ExpenseProof.mime_type)
-            .where(
-                ExpenseProof.store_id == ctx.store.id,
-                ExpenseProof.expense_id.in_([e.id for e in expenses]),
-            )
+            .where(ExpenseProof.store_id == store_id, ExpenseProof.expense_id.in_(ids))
             .order_by(ExpenseProof.created_at, ExpenseProof.id)
         ):
             proofs.setdefault(expense_id, []).append(
                 ExpenseProofRef(id=proof_id, mime_type=mime)
             )
+        day_ids = {e.production_day_id for e in expenses if e.production_day_id is not None}
+        if day_ids:
+            days = dict(
+                (
+                    await session.execute(
+                        select(ProductionDay.id, ProductionDay.day).where(
+                            ProductionDay.store_id == store_id, ProductionDay.id.in_(day_ids)
+                        )
+                    )
+                ).all()
+            )
     return [
         ExpenseOut.model_validate(e).model_copy(
-            update={"proofs": proofs.get(e.id, []), "proof_count": len(proofs.get(e.id, []))}
+            update={
+                "proofs": proofs.get(e.id, []),
+                "proof_count": len(proofs.get(e.id, [])),
+                "production_day": days.get(e.production_day_id) if e.production_day_id else None,
+            }
         )
         for e in expenses
     ]
+
+
+# The longest span the list shows at once: a year and a day, so a leap year fits.
+MAX_RANGE_DAYS = 366
+
+
+@router.get("", response_model=list[ExpenseOut])
+async def list_expenses(
+    day: date | None = Query(None),
+    start: date | None = Query(None, description="First day of a range (with end)"),
+    end: date | None = Query(None, description="Last day of a range, inclusive"),
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(_require),
+) -> list[ExpenseOut]:
+    """One Dhaka day's expenses (today by default), or with start and end
+    every day from one to the other, in the order spent."""
+    if start is not None or end is not None:
+        if start is None or end is None:
+            raise HTTPException(status_code=400, detail="Give both ends of the range")
+        if end < start:
+            raise HTTPException(status_code=400, detail="The range ends before it starts")
+        if (end - start).days >= MAX_RANGE_DAYS:
+            raise HTTPException(status_code=400, detail="Pick at most a year at a time")
+        lo, _ = _day_bounds(start)
+        _, hi = _day_bounds(end)
+    else:
+        lo, hi = _day_bounds(day or _today())
+    rows = await session.scalars(
+        select(Expense)
+        .where(
+            Expense.store_id == ctx.store.id,
+            Expense.spent_at >= lo,
+            Expense.spent_at < hi,
+        )
+        .order_by(Expense.spent_at, Expense.id)
+    )
+    return await _out(session, ctx.store.id, list(rows))
+
+
+def _not_from_production(expense: Expense) -> None:
+    if expense.production_day_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="This expense comes from a production day; change it there",
+        )
 
 
 @router.post("", response_model=ExpenseOut, status_code=201)
@@ -207,9 +258,9 @@ async def add_expense(
     session: AsyncSession = Depends(get_session),
     ctx: tenancy.StoreContext = Depends(_require),
 ) -> ExpenseOut:
-    """Record an expense, spent now."""
+    """Record an expense, spent now. It starts pending."""
     await _check_category(session, ctx.store.id, body.category)
-    expense = Expense(store_id=ctx.store.id, created_by_id=ctx.user.id)
+    expense = Expense(store_id=ctx.store.id, created_by_id=ctx.user.id, status="pending")
     _apply(expense, body, ctx, new=True)
     session.add(expense)
     await session.commit()
@@ -225,13 +276,74 @@ async def edit_expense(
     ctx: tenancy.StoreContext = Depends(_require),
 ) -> ExpenseOut:
     """Correct an expense. When it was spent never changes; who it is put
-    down to changes only when a super admin writes in a name."""
+    down to changes only when a super admin writes in a name. An approved
+    expense corrected by anyone but the approver goes back to pending: what
+    was approved is no longer what it says."""
     expense = await _get(session, ctx.store.id, expense_id)
+    _not_from_production(expense)
     await _check_category(session, ctx.store.id, body.category)
     _apply(expense, body, ctx, new=False)
+    if expense.status == "approved" and not tenancy.is_expense_approver(ctx.user):
+        expense.status, expense.approved_by_id, expense.approved_at = "pending", None, None
     await session.commit()
     await session.refresh(expense)
-    return ExpenseOut.model_validate(expense)
+    return (await _out(session, ctx.store.id, [expense]))[0]
+
+
+@router.put("/{expense_id}/status", response_model=ExpenseOut)
+async def set_status(
+    expense_id: int,
+    body: ExpenseStatusIn,
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(_require),
+) -> ExpenseOut:
+    """Approve an expense, or put it back to pending: the approver only."""
+    if not tenancy.is_expense_approver(ctx.user):
+        raise HTTPException(status_code=403, detail="Only the approver can approve expenses")
+    expense = await _get(session, ctx.store.id, expense_id)
+    if body.status != expense.status:
+        expense.status = body.status
+        approved = body.status == "approved"
+        expense.approved_by_id = ctx.user.id if approved else None
+        expense.approved_at = datetime.now(timezone.utc) if approved else None
+        await session.commit()
+        await session.refresh(expense)
+    return (await _out(session, ctx.store.id, [expense]))[0]
+
+
+@router.post("/report")
+async def report(
+    body: ExpenseReportIn,
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(_require),
+) -> Response:
+    """The ticked expenses as a PDF: category, item, who added it and the
+    amount of each, in the order spent, and the total. Ids not of this store
+    are left out, as if not sent."""
+    rows = list(
+        await session.scalars(
+            select(Expense)
+            .where(Expense.store_id == ctx.store.id, Expense.id.in_(set(body.ids)))
+            .order_by(Expense.spent_at, Expense.id)
+        )
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="None of those expenses is in this store")
+    context = expense_report.report_context(
+        rows,
+        store=ctx.store.name,
+        generated_by=_display_name(ctx),
+        now=datetime.now(DHAKA),
+    )
+    try:
+        pdf = await expense_report.expense_pdf(context)
+    except production_report.ReportUnavailable as err:
+        raise HTTPException(status_code=503, detail=str(err)) from err
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{context["filename"]}"'},
+    )
 
 
 @router.delete("/{expense_id}", status_code=204)
@@ -241,9 +353,13 @@ async def delete_expense(
     ctx: tenancy.StoreContext = Depends(_require),
 ) -> None:
     """Delete an expense and move its proofs to Drive's bin (recoverable
-    there for 30 days). A Drive hiccup does not stop the delete: the rows go
-    regardless, and the files are only left in the folder."""
+    there for 30 days): the approver only. A Drive hiccup does not stop the
+    delete: the rows go regardless, and the files are only left in the
+    folder. One a production day filed goes when the day does, not here."""
+    if not tenancy.is_expense_approver(ctx.user):
+        raise HTTPException(status_code=403, detail="Only the approver can delete expenses")
     expense = await _get(session, ctx.store.id, expense_id)
+    _not_from_production(expense)
     file_ids = (
         await session.scalars(
             select(ExpenseProof.drive_file_id).where(

@@ -79,6 +79,8 @@ type ShiftRow = { key: number; starts: string; ends: string; cooks: string };
 type MaterialRow = { key: number; item: string; quantity: string; unitPrice: string; amount: string };
 type BatchRow = { key: number; product: string; patils: string; jarsPerPatil: string };
 type MiscRow = { key: number; purpose: string; amount: string; note: string };
+/** Cooks paid neither the male nor the female rate. */
+type ExtraRow = { key: number; label: string; cooks: string; rate: string };
 
 let nextKey = 1;
 const key = () => nextKey++;
@@ -101,6 +103,8 @@ const emptyMaterial = (): MaterialRow => ({
 });
 const emptyBatch = (): BatchRow => ({ key: key(), product: "", patils: "1", jarsPerPatil: "" });
 const emptyMisc = (): MiscRow => ({ key: key(), purpose: "", amount: "", note: "" });
+const emptyExtra = (): ExtraRow => ({ key: key(), label: "", cooks: "", rate: "" });
+const isBlankExtra = (x: ExtraRow) => !x.label.trim() && !x.cooks && !x.rate;
 
 /** What a bazar line comes to, as the server will work it out: quantity ×
  *  unit price rounded half up, or the lump sum. null while incomplete. */
@@ -177,6 +181,15 @@ function FormBody({
   const [maleRate, setMaleRate] = React.useState(String(start?.male_rate ?? ""));
   const [femaleCooks, setFemaleCooks] = React.useState(String(start?.female_cooks ?? ""));
   const [femaleRate, setFemaleRate] = React.useState(String(start?.female_rate ?? ""));
+  const [extras, setExtras] = React.useState<ExtraRow[]>(
+    () =>
+      start?.extra_cooks.map((x) => ({
+        key: key(),
+        label: x.label ?? "",
+        cooks: String(x.cooks),
+        rate: String(x.rate),
+      })) ?? []
+  );
   const [gas, setGas] = React.useState(editing ? String(editing.gas_cost) : "");
   const [packaging, setPackaging] = React.useState(editing ? String(editing.packaging_cost) : "");
   const [materials, setMaterials] = React.useState<MaterialRow[]>(() =>
@@ -254,7 +267,18 @@ function FormBody({
 
   // --- Live preview of the figures ---
   const materialsCost = materials.reduce((s, m) => s + (lineTotal(m) ?? 0), 0);
-  const labourCost = int(maleCooks) * int(maleRate) + int(femaleCooks) * int(femaleRate);
+  const filledExtras = extras.filter((x) => !isBlankExtra(x));
+  const extraCooks = filledExtras.map((x) => ({
+    label: x.label.trim() || null,
+    cooks: int(x.cooks),
+    rate: int(x.rate),
+  }));
+  const labourCost =
+    int(maleCooks) * int(maleRate) +
+    int(femaleCooks) * int(femaleRate) +
+    extraCooks.reduce((s, x) => s + x.cooks * x.rate, 0);
+  const totalCooks =
+    int(maleCooks) + int(femaleCooks) + extraCooks.reduce((s, x) => s + x.cooks, 0);
   const miscCost = misc.reduce((s, m) => s + int(m.amount), 0);
   const total = materialsCost + labourCost + int(gas) + int(packaging) + miscCost;
   const jars = batches.reduce((s, b) => s + int(b.patils) * int(b.jarsPerPatil), 0);
@@ -274,6 +298,8 @@ function FormBody({
   if (filledMisc.some((m) => !m.purpose.trim() || int(m.amount) < 1))
     problems.push("প্রতিটি অন্যান্য খরচের কারণ ও টাকার পরিমাণ দিন।");
   if (shifts.some((s) => !s.starts || !s.ends)) problems.push("প্রতিটি শিফটের শুরু ও শেষের সময় দিন।");
+  if (filledExtras.some((x) => int(x.cooks) < 1))
+    problems.push("ভিন্ন হাজিরার প্রতিটি লাইনে কতজন রাঁধুনি, তা দিন।");
 
   const backTo = editing ? `/admin/crm/production/${editing.day}` : "/admin/crm/production";
 
@@ -297,6 +323,7 @@ function FormBody({
       male_rate: int(maleRate),
       female_cooks: int(femaleCooks),
       female_rate: int(femaleRate),
+      extra_cooks: extraCooks,
       gas_cost: int(gas),
       packaging_cost: int(packaging),
       materials: filledMaterials.map((m) => {
@@ -354,6 +381,8 @@ function FormBody({
     setMisc((rows) => rows.map((r) => (r.key === k ? { ...r, ...patch } : r)));
   const setShift = (k: number, patch: Partial<ShiftRow>) =>
     setShifts((rows) => rows.map((r) => (r.key === k ? { ...r, ...patch } : r)));
+  const setExtra = (k: number, patch: Partial<ExtraRow>) =>
+    setExtras((rows) => rows.map((r) => (r.key === k ? { ...r, ...patch } : r)));
 
   const canCopy = !editing && template !== null && template.materials.length > 0;
   const canPickDate = isAdmin;
@@ -389,6 +418,7 @@ function FormBody({
     male_rate: int(maleRate),
     female_cooks: int(femaleCooks),
     female_rate: int(femaleRate),
+    extra_cooks: extraCooks,
     gas_cost: int(gas),
     packaging_cost: int(packaging),
     note: note.trim() || null,
@@ -418,6 +448,7 @@ function FormBody({
     endsAt,
     shifts.map((s) => [s.starts, s.ends, s.cooks]),
     [maleCooks, maleRate, femaleCooks, femaleRate, gas, packaging, note],
+    extras.map((x) => [x.label, x.cooks, x.rate]),
     materials.map((m) => [m.item, m.quantity, m.unitPrice, m.amount]),
     batches.map((b) => [b.product, b.patils, b.jarsPerPatil]),
     misc.map((m) => [m.purpose, m.amount, m.note]),
@@ -461,7 +492,7 @@ function FormBody({
                   {editing ? "Update production costing" : "Add production costing"}
                 </h2>
                 <p className="text-sm opacity-90">
-                  এই দিনের সব তথ্য লিখুন। সেভ করলে প্রোডাকশনের তালিকায় যোগ হবে।
+                  এই দিনের সব তথ্য লিখুন। সেভ করলে প্রোডাকশনের তালিকায় যোগ হবে, আর খরচগুলো ভাগে ভাগে Expenses-এ চলে যাবে।
                 </p>
               </div>
               <Link
@@ -614,7 +645,7 @@ function FormBody({
                       Total cook
                     </span>
                     <span className="flex h-9 items-center text-xl font-bold tabular-nums">
-                      {int(maleCooks) + int(femaleCooks)}
+                      {totalCooks}
                     </span>
                     <span className="text-[11px] text-muted-foreground">জন</span>
                   </div>
@@ -653,7 +684,52 @@ function FormBody({
                       </span>
                     </div>
                   ))}
+                  {/* Cooks whose day's pay is not the usual rate: a line
+                      each, so many at this rate. */}
+                  {extras.map((x, i) => (
+                    <div
+                      key={x.key}
+                      className="grid grid-cols-[minmax(0,1fr)_3rem_auto_5.5rem_auto_4.5rem_1.25rem] items-center gap-2 text-sm"
+                    >
+                      <Input
+                        aria-label={`Other rate ${i + 1} label`}
+                        placeholder="যেমন হেড কুক"
+                        maxLength={60}
+                        value={x.label}
+                        onChange={(e) => setExtra(x.key, { label: e.target.value })}
+                        className="h-8 px-2"
+                      />
+                      <Input
+                        inputMode="numeric"
+                        aria-label={`Other rate ${i + 1} cooks`}
+                        placeholder="জন"
+                        value={x.cooks}
+                        onChange={(e) => setExtra(x.key, { cooks: digits(e.target.value) })}
+                        className="h-8 px-2 text-center tabular-nums"
+                      />
+                      <span className="text-muted-foreground">× ৳</span>
+                      <Input
+                        inputMode="numeric"
+                        aria-label={`Other rate ${i + 1} pay each`}
+                        placeholder="0"
+                        value={x.rate}
+                        onChange={(e) => setExtra(x.key, { rate: digits(e.target.value) })}
+                        className="h-8 tabular-nums"
+                      />
+                      <span className="text-muted-foreground">=</span>
+                      <span className="text-right font-semibold tabular-nums">
+                        {taka(int(x.cooks) * int(x.rate))}
+                      </span>
+                      <RemoveButton
+                        label={`Remove other rate ${i + 1}`}
+                        onClick={() => setExtras((rows) => rows.filter((r) => r.key !== x.key))}
+                      />
+                    </div>
+                  ))}
                 </div>
+                <AddButton onClick={() => setExtras((rows) => [...rows, emptyExtra()])}>
+                  ভিন্ন হাজিরা যোগ করুন
+                </AddButton>
                 <TotalBar className="mt-auto" label="Total labour cost">{taka(labourCost)}</TotalBar>
               </Box>
 

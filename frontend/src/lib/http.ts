@@ -80,10 +80,16 @@ export async function requestForm<T>(
  * A file the API serves only to the signed-in admin of a store (an expense
  * proof). An <img src> cannot send the store header, so the file is fetched
  * here and shown from a local blob: URL, which lives only in this tab and
- * means nothing anywhere else.
+ * means nothing anywhere else. With a body (a report of chosen rows) it is a
+ * JSON request.
  */
-export async function requestBlob(path: string): Promise<Blob> {
-  const res = await fetch(path, { headers: adminHeaders() });
+export async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
+  const res = await fetch(path, {
+    ...init,
+    headers: init?.body
+      ? { "Content-Type": "application/json", ...adminHeaders() }
+      : adminHeaders(),
+  });
   if (!res.ok) await throwForStatus(res);
   return res.blob();
 }

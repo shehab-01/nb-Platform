@@ -41,7 +41,7 @@ UNIT_LABELS = {
     "bottle": "বোতল",
 }
 
-_SLOTS = asyncio.Semaphore(2)
+SLOTS = asyncio.Semaphore(2)
 _TIMEOUT = 120  # seconds; a first run also builds the profile
 
 
@@ -145,10 +145,21 @@ def report_context(
         {"label": "Packaging", "note": "", "amount": taka(day.packaging_cost)},
     ] + [{"label": m.purpose, "note": m.note or "", "amount": taka(m.amount)} for m in day.misc]
 
+    extra_cooks = [
+        {
+            "label": c.get("label") or "Other rate",
+            "cooks": inr(c["cooks"]),
+            "rate": taka(c["rate"]),
+            "total": taka(c["cooks"] * c["rate"]),
+        }
+        for c in day.extra_cooks or []
+    ]
+    all_cooks = day.male_cooks + day.female_cooks + sum(c["cooks"] for c in day.extra_cooks or [])
+
     total = day.total_cost
     parts = [
         ("Raw materials (bazar)", day.materials_cost),
-        ("Labour cost (male + female)", day.labour_cost),
+        ("Labour cost (cooks)", day.labour_cost),
         ("Gas / fuel", day.gas_cost),
         ("Packaging", day.packaging_cost),
         ("Miscellaneous", day.misc_cost),
@@ -168,7 +179,8 @@ def report_context(
         "female_cooks": inr(day.female_cooks),
         "female_rate": taka(day.female_rate),
         "female_total": taka(day.female_cooks * day.female_rate),
-        "total_cooks": inr(day.male_cooks + day.female_cooks),
+        "extra_cooks": extra_cooks,
+        "total_cooks": inr(all_cooks),
         "labour_cost": taka(day.labour_cost),
         "shifts": shifts,
         "materials": materials,
@@ -235,5 +247,5 @@ def docx_to_pdf(docx: bytes) -> bytes:
 
 async def production_pdf(context: dict) -> bytes:
     """The report as a PDF, made off the event loop, two at a time at most."""
-    async with _SLOTS:
+    async with SLOTS:
         return await run_in_threadpool(lambda: docx_to_pdf(render_docx(context)))

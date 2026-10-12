@@ -4,8 +4,8 @@ A day is a production day when it has a production_days row; saving the
 drawer creates or replaces that row, and removing it makes the day an
 ordinary day again. Every total — line amounts, labour, the day's cost, jars,
 cost per jar — is worked out here from what was typed, never taken from the
-browser. Nothing here reads or writes expenses: this page is a costing,
-Expenses is what was paid.
+browser. Saving a day also files its costs on the Expenses page, one
+expense per part, kept in step with the day (api.services.production_expenses).
 
 Who may do what (api.tenancy): production admins (PRODUCTION_ADMIN_EMAILS
 and super admins) everything, including choosing, per store, who else may
@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import tenancy
 from api.db import get_session
-from api.services import production_report
+from api.services import production_expenses, production_report
 from api.models import (
     ProductionBatch,
     ProductionDay,
@@ -98,7 +98,11 @@ def line_amount(quantity: Decimal | None, unit_price: int | None, amount: int | 
 def totals(body: ProductionDayIn) -> dict[str, int]:
     """The day's figures, as stored on production_days."""
     materials = sum(line_amount(m.quantity, m.unit_price, m.amount) for m in body.materials)
-    labour = body.male_cooks * body.male_rate + body.female_cooks * body.female_rate
+    labour = (
+        body.male_cooks * body.male_rate
+        + body.female_cooks * body.female_rate
+        + sum(c.cooks * c.rate for c in body.extra_cooks)
+    )
     misc = sum(m.amount for m in body.misc)
     return {
         "materials_cost": materials,
@@ -120,6 +124,7 @@ def _apply(
     row.shifts = [s.model_dump(mode="json") for s in body.shifts]
     row.male_cooks, row.male_rate = body.male_cooks, body.male_rate
     row.female_cooks, row.female_rate = body.female_cooks, body.female_rate
+    row.extra_cooks = [c.model_dump(mode="json") for c in body.extra_cooks]
     row.gas_cost = body.gas_cost
     row.packaging_cost = body.packaging_cost
     row.note = body.note
@@ -466,6 +471,9 @@ async def save_day(
     row.updated_by_id = ctx.user.id
     _apply(row, body, store_id, units)
     try:
+        # The id first: the day's expenses point at it.
+        await session.flush()
+        await production_expenses.sync(session, row, ctx)
         await session.commit()
     except IntegrityError:
         # Someone else recorded a production for this date at the same moment.
@@ -488,6 +496,7 @@ async def delete_day(
     row = await _load(session, ctx.store.id, day)
     if row is None:
         raise HTTPException(status_code=404, detail="No production on that date")
+    await production_expenses.remove(session, row, ctx)
     await session.delete(row)
     await session.commit()
 

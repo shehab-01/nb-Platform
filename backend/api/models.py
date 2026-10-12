@@ -735,6 +735,12 @@ class Expense(Base):
     who typed it, or — for a super admin only — any name they enter, such as
     a staff member who paid in cash. added_by_id is set when that person is the
     signed-in user; created_by_id always records who actually typed it.
+
+    status is "pending" until a super admin makes it "approved";
+    an edit by anyone else puts it back to pending. production_day_id and
+    production_part are set on the expenses a production day files for
+    itself (api.routers.production): one per part, kept in step with the day
+    and changed only through it.
     """
 
     __tablename__ = "expenses"
@@ -765,8 +771,28 @@ class Expense(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    status: Mapped[str] = mapped_column(String(10), default="pending", server_default="pending")
+    approved_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    production_day_id: Mapped[int | None] = mapped_column(
+        ForeignKey("production_days.id", ondelete="SET NULL")
+    )
+    # "materials", "labour", "gas", "packaging" or "misc".
+    production_part: Mapped[str | None] = mapped_column(String(20))
 
-    __table_args__ = (Index("ix_expenses_store_spent_at", "store_id", "spent_at"),)
+    __table_args__ = (
+        Index("ix_expenses_store_spent_at", "store_id", "spent_at"),
+        Index(
+            "ix_expenses_store_production",
+            "store_id",
+            "production_day_id",
+            "production_part",
+            unique=True,
+            postgresql_where=text("production_day_id IS NOT NULL"),
+        ),
+    )
 
 
 class ExpenseCategory(Base):
@@ -923,7 +949,9 @@ class ProductionDay(Base):
     (materials_cost … jars) are worked out by api.routers.production when the
     day is saved, so a past day reads exactly as it was saved and lists of
     days need no joins. shifts is informational only — pay is cooks × rate —
-    as [{"starts": "08:00", "ends": "14:00", "cooks": 6}].
+    as [{"starts": "08:00", "ends": "14:00", "cooks": 6}]. extra_cooks are
+    cooks paid neither the male nor the female rate, each line counted into
+    labour_cost: [{"label": "Head cook", "cooks": 1, "rate": 900}].
     """
 
     __tablename__ = "production_days"
@@ -939,6 +967,7 @@ class ProductionDay(Base):
     male_rate: Mapped[int] = mapped_column(Integer, default=0)
     female_cooks: Mapped[int] = mapped_column(Integer, default=0)
     female_rate: Mapped[int] = mapped_column(Integer, default=0)
+    extra_cooks: Mapped[list] = mapped_column(JSONB, default=list)
     gas_cost: Mapped[int] = mapped_column(Integer, default=0)
     packaging_cost: Mapped[int] = mapped_column(Integer, default=0)
     note: Mapped[str | None] = mapped_column(Text)

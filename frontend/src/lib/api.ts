@@ -749,6 +749,9 @@ export type AuthUser = {
   pictureUrl: string | null;
   role: UserRole;
   status: UserStatus;
+  /** Approves and deletes expenses: an address in SUPER_ADMIN_EMAILS, not
+   *  merely the super admin role. */
+  expenseApprover: boolean;
 };
 
 type ApiUser = {
@@ -763,6 +766,7 @@ type ApiUser = {
   last_active_at: string | null;
   orders_confirmed?: number;
   orders_shipped?: number;
+  expense_approver?: boolean;
   pinned?: boolean;
   memberships?: ApiMembership[];
 };
@@ -796,6 +800,7 @@ function mapAuthUser(user: ApiUser): AuthUser {
     pictureUrl: user.picture_url,
     role: user.role,
     status: user.status,
+    expenseApprover: user.expense_approver ?? false,
   };
 }
 
@@ -1674,6 +1679,8 @@ export const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: "other", label: "Other" },
 ];
 
+export type ExpenseStatus = "pending" | "approved";
+
 export type Expense = {
   id: number;
   /** Stamped by the server when the expense was added. */
@@ -1685,6 +1692,13 @@ export type Expense = {
   note: string | null;
   added_by_name: string;
   added_by_id: number | null;
+  /** Pending until the approver (SUPER_ADMIN_EMAILS) approves it. */
+  status: ExpenseStatus;
+  approved_at: string | null;
+  /** The production day that filed this expense (its date), or null for one
+   *  typed by hand. Such an expense is changed only on that day. */
+  production_day: string | null;
+  production_part: string | null;
   /** Receipts or screenshots attached, kept in Google Drive. */
   proof_count: number;
   /** Which ones, oldest first (the table shows the first as a thumbnail). */
@@ -1735,8 +1749,25 @@ export async function getExpenseTrend(day: string, days: number): Promise<Expens
   return request<ExpenseAmount[]>(`/api/expenses/trend?day=${day}&days=${days}`);
 }
 
-export async function listExpenses(day: string): Promise<Expense[]> {
-  return request<Expense[]>(`/api/expenses?day=${day}`);
+/** One day's expenses, or every day from start to end (inclusive). */
+export async function listExpenses(
+  span: { day: string } | { start: string; end: string }
+): Promise<Expense[]> {
+  const q = new URLSearchParams(span);
+  return request<Expense[]>(`/api/expenses?${q}`);
+}
+
+/** Approves an expense or puts it back to pending (the approver only). */
+export async function setExpenseStatus(id: number, status: ExpenseStatus): Promise<Expense> {
+  return request<Expense>(`/api/expenses/${id}/status`, {
+    method: "PUT",
+    body: JSON.stringify({ status }),
+  });
+}
+
+/** The given expenses as a PDF, made on the server. */
+export async function getExpenseReport(ids: number[]): Promise<Blob> {
+  return requestBlob("/api/expenses/report", { method: "POST", body: JSON.stringify({ ids }) });
 }
 
 export async function getExpenseSummary(day: string): Promise<ExpenseSummary> {
@@ -1902,6 +1933,9 @@ export type ProductionBatch = {
 
 export type ProductionMisc = { purpose: string; amount: number; note: string | null };
 
+/** Cooks paid neither the male nor the female rate: so many at this rate. */
+export type ProductionExtraCooks = { label: string | null; cooks: number; rate: number };
+
 /** A production day as saved; every total was worked out by the server. */
 export type ProductionDay = {
   day: string;
@@ -1912,6 +1946,7 @@ export type ProductionDay = {
   male_rate: number;
   female_cooks: number;
   female_rate: number;
+  extra_cooks: ProductionExtraCooks[];
   gas_cost: number;
   packaging_cost: number;
   note: string | null;
@@ -1939,6 +1974,7 @@ export type ProductionDayInput = {
   male_rate: number;
   female_cooks: number;
   female_rate: number;
+  extra_cooks: ProductionExtraCooks[];
   gas_cost: number;
   packaging_cost: number;
   materials: {

@@ -203,7 +203,12 @@ function WorkforceCard({ record }: { record: ProductionDay }) {
   const tiles: [LucideIcon, string, number, string][] = [
     [User, "Male cook", record.male_cooks, "bg-muted/60"],
     [UserRound, "Female cook", record.female_cooks, "bg-muted/60"],
-    [Users, "Total cook", record.male_cooks + record.female_cooks, "bg-primary/10"],
+    [
+      Users,
+      "Total cook",
+      record.male_cooks + record.female_cooks + record.extra_cooks.reduce((s, x) => s + x.cooks, 0),
+      "bg-primary/10",
+    ],
   ];
   return (
     <Panel icon={Users} title="Workforce" aside="(Today)">
@@ -260,12 +265,16 @@ function SalaryCard({ record }: { record: ProductionDay }) {
   const rows: [LucideIcon, string, number, number][] = [
     [User, "Male cook", record.male_cooks, record.male_rate],
     [UserRound, "Female cook", record.female_cooks, record.female_rate],
+    // Cooks paid a rate of their own.
+    ...record.extra_cooks.map(
+      (x): [LucideIcon, string, number, number] => [User, x.label || "অন্য হাজিরা", x.cooks, x.rate]
+    ),
   ];
   return (
     <Panel icon={Coins} title="Cook salary" aside="(Today)">
       <div className="grid gap-2.5 text-sm">
-        {rows.map(([Icon, label, n, rate]) => (
-          <div key={label} className="flex items-center gap-2">
+        {rows.map(([Icon, label, n, rate], i) => (
+          <div key={i} className="flex items-center gap-2">
             <Icon className="size-4 text-primary" />
             <span className="min-w-0 flex-1 truncate">{label}</span>
             <span className="text-muted-foreground tabular-nums">
@@ -407,7 +416,7 @@ function Line({ label, note, amount }: { label: string; note?: string | null; am
 export function costParts(record: ProductionDay) {
   return [
     { label: "Raw materials (bazar)", short: "Raw materials", amount: record.materials_cost, Icon: ShoppingBasket, slot: 1 },
-    { label: "Labour cost (male + female)", short: "Labour cost", amount: record.labour_cost, Icon: Users, slot: 2 },
+    { label: "Labour cost (cooks)", short: "Labour cost", amount: record.labour_cost, Icon: Users, slot: 2 },
     { label: "Gas / fuel", short: "Gas / fuel", amount: record.gas_cost, Icon: Flame, slot: 3 },
     { label: "Packaging", short: "Packaging", amount: record.packaging_cost, Icon: Package, slot: 4 },
     { label: "Miscellaneous", short: "Miscellaneous", amount: record.misc_cost, Icon: Shapes, slot: 5 },

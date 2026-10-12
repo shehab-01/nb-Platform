@@ -104,6 +104,13 @@ def is_production_admin(user: User) -> bool:
     return is_super_admin(user) or user.email.lower() in settings.production_admin_emails
 
 
+def is_expense_approver(user: User) -> bool:
+    """May approve and delete expenses, and edit an approved one without
+    sending it back to pending: the addresses in SUPER_ADMIN_EMAILS only.
+    Not the super admin role, which the Users page can give to others."""
+    return user.email.lower() in settings.super_admin_emails
+
+
 def production_level(user: User, production_access: bool) -> str | None:
     """What this user may do on a store's Production pages, given their
     membership's production_access flag. Pure, so the rule is testable."""

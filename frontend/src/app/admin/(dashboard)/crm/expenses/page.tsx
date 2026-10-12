@@ -1,11 +1,15 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
   BarChart3,
   CalendarDays,
+  ChefHat,
   Clock3,
+  FileDown,
   LayoutGrid,
+  Loader2,
   Pencil,
   PieChart as PieChartIcon,
   Plus,
@@ -38,6 +42,7 @@ import {
 import { PhoneDropPanel, usePhoneDrop } from "@/components/admin/expenses/phone-drop";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -63,14 +68,17 @@ import {
   deleteExpenseCategory,
   deleteExpense,
   editExpense,
+  getExpenseReport,
   getExpenseSummary,
   getExpenseTrend,
+  setExpenseStatus,
   uploadExpenseProofs,
   listExpenseCategories,
   listExpenses,
   PAYMENT_METHODS,
   type Expense,
   type ExpenseCategory,
+  type ExpenseStatus,
   type ExpenseSummary,
   type PaymentMethod,
 } from "@/lib/api";
@@ -145,9 +153,34 @@ export default function ExpensesPage() {
   return <ExpensesView key={store.storeId} />;
 }
 
+/** The first of the month a Dhaka day is in. */
+const monthStart = (iso: string) => `${iso.slice(0, 8)}01`;
+
+/** How many days from one ISO date to another, both counted. */
+function daysBetween(start: string, end: string): number {
+  return Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000) + 1;
+}
+
+/** The expenses' spend per category, largest first: what the summary
+ *  endpoint gives for one day, worked out here for a range. */
+function byCategory(rows: Expense[]): { label: string; amount: number }[] {
+  const sums = new Map<string, number>();
+  for (const e of rows) sums.set(e.category, (sums.get(e.category) ?? 0) + e.amount);
+  return [...sums]
+    .map(([label, amount]) => ({ label, amount }))
+    .sort((a, b) => b.amount - a.amount || a.label.localeCompare(b.label));
+}
+
 function ExpensesView() {
+  const { can } = useAuth();
+  // Approving and deleting: SUPER_ADMIN_EMAILS only.
+  const approver = can("expenses.approve");
   const today = dhakaToday();
+  // One day, or every day from start to end.
+  const [ranged, setRanged] = React.useState(false);
   const [day, setDay] = React.useState(today);
+  const [start, setStart] = React.useState(() => monthStart(today));
+  const [end, setEnd] = React.useState(today);
   const [expenses, setExpenses] = React.useState<Expense[] | null>(null);
   const [summary, setSummary] = React.useState<ExpenseSummary | null>(null);
   const [categories, setCategories] = React.useState<ExpenseCategory[]>([]);
@@ -155,17 +188,29 @@ function ExpensesView() {
   const [drawer, setDrawer] = React.useState<DrawerState>(null);
   const [deleting, setDeleting] = React.useState<Expense | null>(null);
   const [viewing, setViewing] = React.useState<Expense | null>(null);
+  // Ticked for the PDF.
+  const [selected, setSelected] = React.useState<ReadonlySet<number>>(new Set());
+  const [exporting, setExporting] = React.useState(false);
   const [version, setVersion] = React.useState(0);
   const reload = React.useCallback(() => setVersion((v) => v + 1), []);
 
+  const badRange = ranged && start > end;
   React.useEffect(() => {
+    if (badRange) return;
     let cancelled = false;
-    Promise.all([listExpenses(day), getExpenseSummary(day), listExpenseCategories()])
+    Promise.all([
+      listExpenses(ranged ? { start, end } : { day }),
+      // A range's figures are worked out from its rows.
+      ranged ? Promise.resolve(null) : getExpenseSummary(day),
+      listExpenseCategories(),
+    ])
       .then(([e, s, c]) => {
         if (cancelled) return;
         setExpenses(e);
         setSummary(s);
         setCategories(c);
+        // Only rows still shown can stay ticked.
+        setSelected((was) => new Set(e.filter((x) => was.has(x.id)).map((x) => x.id)));
         setError(null);
       })
       .catch((err) => {
@@ -174,12 +219,69 @@ function ExpensesView() {
     return () => {
       cancelled = true;
     };
-  }, [day, version]);
+  }, [ranged, day, start, end, badRange, version]);
 
-  const isToday = day === today;
+  const isToday = !ranged && day === today;
+  const rangeLabel = start === end ? dayLabel(start) : `${dayLabel(start)} – ${dayLabel(end)}`;
+  // What the figures and charts are about: the day, or the range.
+  const spanLabel = ranged ? rangeLabel : isToday ? "today" : dayLabel(day);
   const largest = expenses?.length
     ? expenses.reduce((a, b) => (b.amount > a.amount ? b : a))
     : null;
+  const total = expenses?.reduce((n, e) => n + e.amount, 0);
+  const approved = expenses?.filter((e) => e.status === "approved");
+  const categoryRows = ranged
+    ? expenses && byCategory(expenses)
+    : summary?.by_category;
+  const categoryTotal = ranged ? total : summary?.day_total;
+
+  const showDay = (d: string) => {
+    setRanged(false);
+    setDay(d);
+  };
+
+  const toggle = (id: number) =>
+    setSelected((was) => {
+      const next = new Set(was);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleAll = () =>
+    setSelected((was) =>
+      expenses && was.size < expenses.length ? new Set(expenses.map((e) => e.id)) : new Set()
+    );
+
+  // The PDF is made on the server and handed over as a download, its rows
+  // in the order the table shows them.
+  const exportPdf = async () => {
+    const ids = (expenses ?? []).filter((e) => selected.has(e.id)).map((e) => e.id);
+    if (!ids.length || exporting) return;
+    setExporting(true);
+    setError(null);
+    try {
+      const url = URL.createObjectURL(await getExpenseReport(ids));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = ranged ? `expenses-${start}_${end}.pdf` : `expenses-${day}.pdf`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not make the PDF");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const changeStatus = async (e: Expense, status: ExpenseStatus) => {
+    try {
+      const saved = await setExpenseStatus(e.id, status);
+      setExpenses((rows) => rows && rows.map((r) => (r.id === saved.id ? saved : r)));
+      setViewing((v) => (v && v.id === saved.id ? saved : v));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not change the status");
+    }
+  };
 
   return (
     <div className="flex items-start gap-6">
@@ -202,33 +304,46 @@ function ExpensesView() {
 
         {/* --- Four figures -------------------------------------------- */}
         <div className="mt-6 grid grid-cols-2 gap-4 @3xl:grid-cols-4">
-          <StatTile
-            label={isToday ? "Today's total" : `Total, ${dayLabel(day)}`}
-            value={summary?.day_total}
-            note={
-              summary &&
-              (change(summary.day_total, summary.previous_day_total)
-                ? `${change(summary.day_total, summary.previous_day_total)} vs the day before`
-                : "Nothing the day before")
-            }
-            emphasis
-          />
-          <StatTile
-            label="This month so far"
-            value={summary?.month_total}
-            note={
-              summary &&
-              (change(summary.month_total, summary.previous_month_total)
-                ? `${change(summary.month_total, summary.previous_month_total)} vs same days last month`
-                : "Nothing the same days last month")
-            }
-          />
-          <StatTile
-            label="Entries"
-            value={summary?.day_count}
-            plain
-            note={isToday ? "today" : dayLabel(day)}
-          />
+          {ranged ? (
+            <>
+              <StatTile
+                label={`Total, ${rangeLabel}`}
+                value={total}
+                note={badRange ? null : `${daysBetween(start, end)} days`}
+                emphasis
+              />
+              <StatTile
+                label="Approved"
+                value={approved?.reduce((n, e) => n + e.amount, 0)}
+                note={expenses && `${approved?.length ?? 0} of ${expenses.length} entries`}
+              />
+            </>
+          ) : (
+            <>
+              <StatTile
+                label={isToday ? "Today's total" : `Total, ${dayLabel(day)}`}
+                value={summary?.day_total}
+                note={
+                  summary &&
+                  (change(summary.day_total, summary.previous_day_total)
+                    ? `${change(summary.day_total, summary.previous_day_total)} vs the day before`
+                    : "Nothing the day before")
+                }
+                emphasis
+              />
+              <StatTile
+                label="This month so far"
+                value={summary?.month_total}
+                note={
+                  summary &&
+                  (change(summary.month_total, summary.previous_month_total)
+                    ? `${change(summary.month_total, summary.previous_month_total)} vs same days last month`
+                    : "Nothing the same days last month")
+                }
+              />
+            </>
+          )}
+          <StatTile label="Entries" value={expenses?.length} plain note={spanLabel} />
           <StatTile
             label="Largest"
             value={expenses ? (largest?.amount ?? 0) : undefined}
@@ -236,38 +351,94 @@ function ExpensesView() {
           />
         </div>
 
-        {/* --- The day's expenses, a table inside its own card ----------- */}
+        {/* --- The expenses, a table inside its own card ----------------- */}
         <Card className="mt-4">
           <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 px-3 sm:px-6">
             <div className="grid gap-2">
               <CardTitle className="flex items-center gap-2">
                 <Receipt className="size-4 text-muted-foreground" />
-                {isToday ? "Today's expenses" : `Expenses, ${dayLabel(day)}`}
+                {ranged
+                  ? `Expenses, ${rangeLabel}`
+                  : isToday
+                    ? "Today's expenses"
+                    : `Expenses, ${dayLabel(day)}`}
               </CardTitle>
-              <div className="relative">
-                <CalendarDays className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  type="date"
-                  aria-label="Day"
-                  value={day}
-                  max={today}
-                  onChange={(e) => e.target.value && setDay(e.target.value)}
-                  className="w-44 pl-8"
-                />
+              <div className="flex flex-wrap items-center gap-2">
+                <div role="radiogroup" aria-label="Show" className="flex rounded-md border p-0.5">
+                  {(
+                    [
+                      [false, "One day"],
+                      [true, "Date range"],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={label}
+                      type="button"
+                      role="radio"
+                      aria-checked={ranged === value}
+                      onClick={() => setRanged(value)}
+                      className={cn(
+                        "rounded px-2.5 py-1 text-xs font-medium transition-colors",
+                        ranged === value
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {ranged ? (
+                  <div className="flex items-center gap-1.5">
+                    <DateField label="From" value={start} max={end} onChange={setStart} />
+                    <span className="text-muted-foreground">–</span>
+                    <DateField label="To" value={end} min={start} max={today} onChange={setEnd} />
+                  </div>
+                ) : (
+                  <DateField label="Day" value={day} max={today} onChange={setDay} />
+                )}
               </div>
+              {badRange && (
+                <p className="text-xs text-destructive">The range ends before it starts.</p>
+              )}
             </div>
-            {/* On phones the floating + button does this. */}
-            <Button
-              onClick={() => setDrawer({ mode: "add" })}
-              className="hidden gap-1.5 lg:inline-flex"
-            >
-              <Plus className="size-4" />
-              Add expense
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={exportPdf}
+                disabled={selected.size === 0 || exporting}
+                className="gap-1.5"
+              >
+                {exporting ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <FileDown className="size-4" />
+                )}
+                {exporting
+                  ? "Making PDF…"
+                  : selected.size
+                    ? `Export PDF (${selected.size})`
+                    : "Export PDF"}
+              </Button>
+              {/* On phones the floating + button does this. */}
+              <Button
+                onClick={() => setDrawer({ mode: "add" })}
+                className="hidden gap-1.5 lg:inline-flex"
+              >
+                <Plus className="size-4" />
+                Add expense
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="px-3 sm:px-6">
             <ExpenseTable
               rows={expenses}
+              ranged={ranged}
+              selected={selected}
+              approver={approver}
+              onToggle={toggle}
+              onToggleAll={toggleAll}
+              onStatus={changeStatus}
               onAdd={() => setDrawer({ mode: "add" })}
               onOpen={setViewing}
               onEdit={(e) => setDrawer({ mode: "edit", expense: e })}
@@ -282,14 +453,14 @@ function ExpensesView() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <PieChartIcon className="size-4 text-muted-foreground" />
-                {isToday ? "Today's breakdown" : `Breakdown, ${dayLabel(day)}`}
+                {isToday ? "Today's breakdown" : `Breakdown, ${spanLabel}`}
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {summary ? (
+              {categoryRows && categoryTotal !== undefined ? (
                 <CategoryDonut
-                  rows={summary.by_category}
-                  total={summary.day_total}
+                  rows={categoryRows}
+                  total={categoryTotal}
                   categories={categories}
                 />
               ) : (
@@ -299,28 +470,28 @@ function ExpensesView() {
           </Card>
           <TrendCard
             className="@4xl:col-span-3"
-            day={day}
+            day={ranged ? end : day}
             version={version}
-            onPick={setDay}
+            onPick={showDay}
           />
         </div>
 
-        {/* --- Every category's spend for the day ------------------------ */}
+        {/* --- Every category's spend for the day or range --------------- */}
         <Card className="mt-4">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <LayoutGrid className="size-4 text-muted-foreground" />
               Recent expenses
               <span className="text-sm font-normal text-muted-foreground">
-                · {isToday ? "today" : dayLabel(day)}, by category
+                · {spanLabel}, by category
               </span>
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {summary ? (
+            {categoryRows && categoryTotal !== undefined ? (
               <CategoryTiles
-                rows={summary.by_category}
-                total={summary.day_total}
+                rows={categoryRows}
+                total={categoryTotal}
                 categories={categories}
               />
             ) : (
@@ -352,7 +523,7 @@ function ExpensesView() {
           onClose={() => setDrawer(null)}
           onSaved={() => {
             // A new expense is spent now, so show today.
-            if (drawer.mode === "add") setDay(today);
+            if (drawer.mode === "add") showDay(today);
             setDrawer(null);
             reload();
           }}
@@ -362,6 +533,8 @@ function ExpensesView() {
       <ExpenseDetails
         expense={viewing}
         categories={categories}
+        approver={approver}
+        onStatus={changeStatus}
         onClose={() => setViewing(null)}
         onEdit={(e) => {
           setViewing(null);
@@ -386,6 +559,106 @@ function ExpensesView() {
 }
 
 // --- Cells -----------------------------------------------------------------------
+
+/** A date picker with the calendar icon inside it. */
+function DateField({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  min?: string;
+  max?: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="relative">
+      <CalendarDays className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        type="date"
+        aria-label={label}
+        value={value}
+        min={min}
+        max={max}
+        onChange={(e) => e.target.value && onChange(e.target.value)}
+        className="w-44 pl-8"
+      />
+    </div>
+  );
+}
+
+const STATUS_LABEL: Record<ExpenseStatus, string> = {
+  pending: "Pending",
+  approved: "Approved",
+};
+
+const STATUS_TONE: Record<ExpenseStatus, string> = {
+  pending: "border-amber-600/30 bg-amber-500/10 text-amber-700 dark:text-amber-500",
+  approved: "border-emerald-600/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+};
+
+/** Pending or Approved: a dropdown for the approver, a badge for everyone
+ *  else. */
+function StatusControl({
+  expense,
+  approver,
+  onStatus,
+  className,
+}: {
+  expense: Expense;
+  approver: boolean;
+  onStatus: (e: Expense, status: ExpenseStatus) => void;
+  className?: string;
+}) {
+  if (!approver) {
+    return (
+      <span
+        className={cn(
+          "inline-flex rounded-full border px-2 py-0.5 text-xs font-medium",
+          STATUS_TONE[expense.status],
+          className
+        )}
+      >
+        {STATUS_LABEL[expense.status]}
+      </span>
+    );
+  }
+  return (
+    <Select
+      value={expense.status}
+      onValueChange={(v) => v !== expense.status && onStatus(expense, v as ExpenseStatus)}
+    >
+      <SelectTrigger
+        size="sm"
+        aria-label={`Status of ${expense.item}`}
+        className={cn("h-7 gap-1 px-2 text-xs font-medium", STATUS_TONE[expense.status], className)}
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="pending">Pending</SelectItem>
+        <SelectItem value="approved">Approved</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+
+/** "Production" on an expense a production day filed, linking to the day. */
+function ProductionTag({ day }: { day: string }) {
+  return (
+    <Link
+      href={`/admin/crm/production/${day}`}
+      onClick={(e) => e.stopPropagation()}
+      className="mt-1 inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary hover:underline"
+    >
+      <ChefHat className="size-3" />
+      Production
+    </Link>
+  );
+}
 
 function StatTile({
   label,
@@ -425,16 +698,18 @@ function StatTile({
  *  scrolling rows and the pinned total so the two line up (both tables are
  *  table-fixed); the table's min-width keeps them usable when narrow. */
 const COL_WIDTHS = [
-  "4%", // #
-  "8%", // Time
-  "12%", // Category
-  "17%", // Item / details
-  "9%", // Amount
-  "10%", // Payment method
-  "10%", // Added by
-  "16%", // Note
+  "3%", // Tick
+  "3%", // #
+  "8%", // Time (and date, for a range)
+  "11%", // Category
+  "16%", // Item / details
+  "8%", // Amount
+  "8%", // Payment method
+  "9%", // Added by
+  "12%", // Note
   "6%", // Proof
-  "8%", // Actions
+  "9%", // Status
+  "7%", // Actions
 ];
 
 function Cols() {
@@ -447,31 +722,47 @@ function Cols() {
   );
 }
 
-/**
- * The day's expenses. The rows scroll inside a tall box with the column
- * heads pinned on top and the total pinned underneath, so a long day never
- * pushes the total out of sight. Long items and notes wrap (up to three
- * lines); clicking a row opens all of it.
- */
-function ExpenseTable({
-  rows,
-  onAdd,
-  onOpen,
-  onEdit,
-  onDelete,
-}: {
+type TableProps = {
   rows: Expense[] | null;
+  /** Rows from several days: each shows its date as well as its time. */
+  ranged: boolean;
+  selected: ReadonlySet<number>;
+  approver: boolean;
+  onToggle: (id: number) => void;
+  onToggleAll: () => void;
+  onStatus: (e: Expense, status: ExpenseStatus) => void;
   onAdd: () => void;
   onOpen: (e: Expense) => void;
   onEdit: (e: Expense) => void;
   onDelete: (e: Expense) => void;
-}) {
+};
+
+/**
+ * The day's (or range's) expenses. The rows scroll inside a tall box with
+ * the column heads pinned on top and the total pinned underneath, so a long
+ * day never pushes the total out of sight. Long items and notes wrap (up to
+ * three lines); clicking a row opens all of it. The boxes on the left tick
+ * rows for the PDF; the one in the head ticks them all.
+ */
+function ExpenseTable({
+  rows,
+  ranged,
+  selected,
+  approver,
+  onToggle,
+  onToggleAll,
+  onStatus,
+  onAdd,
+  onOpen,
+  onEdit,
+  onDelete,
+}: TableProps) {
   if (rows === null) return <Skeleton className="h-96 w-full" />;
   if (rows.length === 0) {
     return (
       <div className="flex h-96 flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-center">
         <Wallet className="size-8 text-muted-foreground" />
-        <p className="font-medium">Nothing spent this day</p>
+        <p className="font-medium">{ranged ? "Nothing spent on these days" : "Nothing spent this day"}</p>
         <Button variant="outline" size="sm" onClick={onAdd} className="mt-1 gap-1.5">
           <Plus className="size-4" />
           Add expense
@@ -481,20 +772,44 @@ function ExpenseTable({
   }
   const total = rows.reduce((n, e) => n + e.amount, 0);
   const wrap = "line-clamp-3 whitespace-normal wrap-break-word";
+  const all: boolean | "indeterminate" =
+    selected.size === 0 ? false : selected.size === rows.length ? true : "indeterminate";
+  // Clicks on these act on their own; a click on the rest of the row opens
+  // the details.
+  const own = {
+    onClick: (k: React.MouseEvent) => k.stopPropagation(),
+    onKeyDown: (k: React.KeyboardEvent) => k.stopPropagation(),
+  };
   return (
     <>
       {/* Narrow (a phone, or a laptop with the drawer open): cards. The
           switch follows the page's own width, not the screen's. */}
-      <ExpenseCards rows={rows} total={total} onOpen={onOpen} />
+      <ExpenseCards
+        rows={rows}
+        total={total}
+        ranged={ranged}
+        selected={selected}
+        all={all}
+        onToggle={onToggle}
+        onToggleAll={onToggleAll}
+        onOpen={onOpen}
+      />
       <div className="hidden overflow-x-auto rounded-lg border @3xl:block">
-        <div className="flex h-96 min-w-5xl flex-col @5xl:h-120">
+        <div className="flex h-96 min-w-6xl flex-col @5xl:h-120">
           <div className="min-h-0 flex-1 overflow-y-auto">
             <table className="w-full table-fixed text-sm">
               <Cols />
               <thead className="sticky top-0 z-10 bg-muted text-left text-xs text-muted-foreground shadow-[0_1px_0_var(--border)]">
                 <tr>
-                  <th className="px-4 py-2.5 font-medium">#</th>
-                  <th className="px-3 py-2.5 font-medium">Time</th>
+                  <th className="py-2.5 pl-4">
+                    <Checkbox
+                      checked={all}
+                      onCheckedChange={onToggleAll}
+                      aria-label="Tick every expense"
+                    />
+                  </th>
+                  <th className="px-2 py-2.5 font-medium">#</th>
+                  <th className="px-3 py-2.5 font-medium">{ranged ? "Date" : "Time"}</th>
                   <th className="px-3 py-2.5 font-medium">Category</th>
                   <th className="px-3 py-2.5 font-medium">Item / details</th>
                   <th className="px-3 py-2.5 text-right font-medium">Amount (৳)</th>
@@ -502,6 +817,7 @@ function ExpenseTable({
                   <th className="px-3 py-2.5 font-medium">Added by</th>
                   <th className="px-3 py-2.5 font-medium">Note</th>
                   <th className="px-3 py-2.5 font-medium">Proof</th>
+                  <th className="px-3 py-2.5 font-medium">Status</th>
                   <th className="px-4 py-2.5 text-right font-medium">Actions</th>
                 </tr>
               </thead>
@@ -512,17 +828,29 @@ function ExpenseTable({
                     tabIndex={0}
                     onClick={() => onOpen(e)}
                     onKeyDown={(k) => k.key === "Enter" && onOpen(e)}
-                    className="cursor-pointer align-top outline-none hover:bg-muted/40 focus-visible:bg-muted/40"
+                    data-state={selected.has(e.id) ? "selected" : undefined}
+                    className="cursor-pointer align-top outline-none hover:bg-muted/40 focus-visible:bg-muted/40 data-[state=selected]:bg-primary/5"
                   >
-                    <td className="px-4 py-2.5 text-muted-foreground tabular-nums">{i + 1}</td>
-                    <td className="whitespace-nowrap px-3 py-2.5 tabular-nums">
-                      {timeOf(e.spent_at)}
+                    <td className="py-2.5 pl-4" {...own}>
+                      <Checkbox
+                        checked={selected.has(e.id)}
+                        onCheckedChange={() => onToggle(e.id)}
+                        aria-label={`Tick ${e.item}`}
+                      />
+                    </td>
+                    <td className="px-2 py-2.5 text-muted-foreground tabular-nums">{i + 1}</td>
+                    <td className="px-3 py-2.5 tabular-nums">
+                      {ranged && <div className="whitespace-nowrap">{dateOf(e.spent_at)}</div>}
+                      <div className={cn("whitespace-nowrap", ranged && "text-xs text-muted-foreground")}>
+                        {timeOf(e.spent_at)}
+                      </div>
                     </td>
                     <td className="px-3 py-2.5">
                       <div className={wrap}>{e.category}</div>
                     </td>
                     <td className="px-3 py-2.5">
                       <div className={wrap}>{e.item}</div>
+                      {e.production_day && <ProductionTag day={e.production_day} />}
                     </td>
                     <td className="px-3 py-2.5 text-right font-medium tabular-nums">
                       {e.amount.toLocaleString("en-IN")}
@@ -539,31 +867,38 @@ function ExpenseTable({
                     <td className="px-3 py-2">
                       <ProofCell proofs={e.proofs} />
                     </td>
+                    <td className="px-3 py-2" {...own}>
+                      <StatusControl
+                        expense={e}
+                        approver={approver}
+                        onStatus={onStatus}
+                        className="w-full"
+                      />
+                    </td>
                     <td className="px-4 py-1.5">
-                      {/* The buttons act on their own; a click on the rest of
-                          the row opens the details. */}
-                      <div
-                        className="flex justify-end gap-1"
-                        onClick={(k) => k.stopPropagation()}
-                        onKeyDown={(k) => k.stopPropagation()}
-                      >
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={`Edit ${e.item}`}
-                          onClick={() => onEdit(e)}
-                        >
-                          <Pencil className="size-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={`Delete ${e.item}`}
-                          onClick={() => onDelete(e)}
-                          className="text-muted-foreground hover:text-destructive"
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
+                      <div className="flex justify-end gap-1" {...own}>
+                        {/* One a production filed is changed on that day. */}
+                        {!e.production_day && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Edit ${e.item}`}
+                            onClick={() => onEdit(e)}
+                          >
+                            <Pencil className="size-4" />
+                          </Button>
+                        )}
+                        {approver && !e.production_day && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Delete ${e.item}`}
+                            onClick={() => onDelete(e)}
+                            className="text-muted-foreground hover:text-destructive"
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -575,14 +910,15 @@ function ExpenseTable({
             <Cols />
             <tfoot>
               <tr className="bg-muted font-semibold">
-                <td className="px-4 py-3" colSpan={4}>
+                <td className="px-4 py-3" colSpan={5}>
                   Total{" "}
                   <span className="font-normal text-muted-foreground">
                     · {rows.length} {rows.length === 1 ? "entry" : "entries"}
+                    {selected.size > 0 && `, ${selected.size} ticked`}
                   </span>
                 </td>
                 <td className="px-3 py-3 text-right tabular-nums">{taka(total)}</td>
-                <td colSpan={5} />
+                <td colSpan={6} />
               </tr>
             </tfoot>
           </table>
@@ -610,36 +946,58 @@ function DetailField({ label, children }: { label: string; children: React.React
 function ExpenseCards({
   rows,
   total,
+  ranged,
+  selected,
+  all,
+  onToggle,
+  onToggleAll,
   onOpen,
 }: {
   rows: Expense[];
   total: number;
+  ranged: boolean;
+  selected: ReadonlySet<number>;
+  all: boolean | "indeterminate";
+  onToggle: (id: number) => void;
+  onToggleAll: () => void;
   onOpen: (e: Expense) => void;
 }) {
   return (
     <div className="flex flex-col gap-2 @3xl:hidden">
-      <div className="flex items-baseline justify-between rounded-lg bg-muted px-3 py-2.5 text-sm">
-        <span className="font-semibold">
+      <div className="flex items-center gap-3 rounded-lg bg-muted px-3 py-2.5 text-sm">
+        <Checkbox checked={all} onCheckedChange={onToggleAll} aria-label="Tick every expense" />
+        <span className="flex-1 font-semibold">
           Total{" "}
           <span className="font-normal text-muted-foreground">
             · {rows.length} {rows.length === 1 ? "entry" : "entries"}
+            {selected.size > 0 && `, ${selected.size} ticked`}
           </span>
         </span>
         <span className="font-semibold tabular-nums">{taka(total)}</span>
       </div>
       <ul className="flex flex-col gap-2">
         {rows.map((e, i) => (
-          <li key={e.id}>
+          <li key={e.id} className="flex items-start gap-3">
+            {/* Beside the card, not in it: the card is a button. */}
+            <Checkbox
+              checked={selected.has(e.id)}
+              onCheckedChange={() => onToggle(e.id)}
+              aria-label={`Tick ${e.item}`}
+              className="mt-4 ml-3"
+            />
             <button
               type="button"
               onClick={() => onOpen(e)}
-              className="flex w-full items-start gap-3 rounded-lg border bg-card p-3 text-left transition-colors hover:bg-muted/40 active:bg-muted/60"
+              className="flex min-w-0 flex-1 items-start gap-3 rounded-lg border bg-card p-3 text-left transition-colors hover:bg-muted/40 active:bg-muted/60"
             >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <span className="tabular-nums">#{i + 1}</span>
                   <span aria-hidden>·</span>
-                  <span className="tabular-nums">{timeOf(e.spent_at)}</span>
+                  <span className="tabular-nums">
+                    {ranged ? `${dateOf(e.spent_at)}, ` : ""}
+                    {timeOf(e.spent_at)}
+                  </span>
                   <span aria-hidden>·</span>
                   <span className="truncate">{e.category}</span>
                 </div>
@@ -655,6 +1013,8 @@ function ExpenseCards({
               </div>
               <div className="flex shrink-0 flex-col items-end gap-2">
                 <span className="text-base font-semibold tabular-nums">{taka(e.amount)}</span>
+                {/* Changed in the details: a dropdown cannot sit in a button. */}
+                <StatusControl expense={e} approver={false} onStatus={() => {}} />
                 {e.proofs.length > 0 && <ProofCell proofs={e.proofs} />}
               </div>
             </button>
@@ -669,12 +1029,16 @@ function ExpenseCards({
 function ExpenseDetails({
   expense,
   categories,
+  approver,
+  onStatus,
   onClose,
   onEdit,
   onDelete,
 }: {
   expense: Expense | null;
   categories: ExpenseCategory[];
+  approver: boolean;
+  onStatus: (e: Expense, status: ExpenseStatus) => void;
   onClose: () => void;
   onEdit: (e: Expense) => void;
   onDelete: (e: Expense) => void;
@@ -724,6 +1088,14 @@ function ExpenseDetails({
                   </DetailField>
                   <DetailField label="Added by">{e.added_by_name}</DetailField>
                   <DetailField label="Entry">#{e.id}</DetailField>
+                  <DetailField label="Status">
+                    <StatusControl expense={e} approver={approver} onStatus={onStatus} />
+                  </DetailField>
+                  {e.production_day && (
+                    <DetailField label="From">
+                      <ProductionTag day={e.production_day} />
+                    </DetailField>
+                  )}
                   <div className="col-span-2">
                     <DetailField label="Note">
                       {e.note ? (
@@ -737,18 +1109,28 @@ function ExpenseDetails({
               </div>
             </div>
             <DialogFooter>
-              <Button
-                variant="outline"
-                className="gap-1.5 text-destructive hover:text-destructive"
-                onClick={() => onDelete(e)}
-              >
-                <Trash2 className="size-4" />
-                Delete
-              </Button>
-              <Button className="gap-1.5" onClick={() => onEdit(e)}>
-                <Pencil className="size-4" />
-                Edit
-              </Button>
+              {e.production_day ? (
+                <p className="text-xs text-muted-foreground sm:mr-auto sm:self-center">
+                  Filed by the production of {dayLabel(e.production_day)}; change it there.
+                </p>
+              ) : (
+                <>
+                  {approver && (
+                    <Button
+                      variant="outline"
+                      className="gap-1.5 text-destructive hover:text-destructive"
+                      onClick={() => onDelete(e)}
+                    >
+                      <Trash2 className="size-4" />
+                      Delete
+                    </Button>
+                  )}
+                  <Button className="gap-1.5" onClick={() => onEdit(e)}>
+                    <Pencil className="size-4" />
+                    Edit
+                  </Button>
+                </>
+              )}
             </DialogFooter>
           </>
         )}
@@ -1061,7 +1443,7 @@ function ExpenseDrawer({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const { user, isSuperAdmin } = useAuth();
+  const { user, isSuperAdmin, can } = useAuth();
   const ownName = user.nickname || user.name;
   const editing = state.mode === "edit" ? state.expense : null;
 
@@ -1314,6 +1696,12 @@ function ExpenseDrawer({
             />
             <PhoneDropPanel phone={phone} disabled={saving} />
           </div>
+
+          {editing?.status === "approved" && !can("expenses.approve") && (
+            <p className="rounded-md border border-amber-600/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-500">
+              This expense is approved. Saving a change puts it back to Pending.
+            </p>
+          )}
 
           {error && <p className="text-sm text-destructive">{error}</p>}
         </form>

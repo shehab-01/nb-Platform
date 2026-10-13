@@ -83,7 +83,7 @@ export function MembershipsDialog({
           <DialogTitle>Stores for {member.nickname || member.name}</DialogTitle>
           <DialogDescription>
             {member.role === "super_admin"
-              ? "A super admin already sees every store; memberships here only matter if the role is ever removed."
+              ? "A super admin already sees every store. Membership here lets them be assigned to Production (to send productions to Expenses), and matters if the role is ever removed."
               : "Tick the stores this person works in and pick a role in each."}
           </DialogDescription>
         </DialogHeader>

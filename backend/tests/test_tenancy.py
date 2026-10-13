@@ -169,7 +169,7 @@ def test_my_stores_lists_only_memberships(app):
     res = get(app, "/api/me/stores")
     assert res.status_code == 200
     assert res.json() == [
-        {"store_id": 2, "slug": "b", "name": "B", "subtitle": None, "role": "manager", "template": "classic", "crm": False, "production": None}
+        {"store_id": 2, "slug": "b", "name": "B", "subtitle": None, "role": "manager", "template": "classic", "crm": False, "production": None, "production_send": False}
     ]
 
 

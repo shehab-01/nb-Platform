@@ -757,7 +757,8 @@ class Expense(Base):
     item: Mapped[str] = mapped_column(String(1000))
     # Whole taka.
     amount: Mapped[int] = mapped_column(Integer)
-    payment_method: Mapped[str] = mapped_column(String(20))
+    # Null on the expenses a production sends (migration 0043).
+    payment_method: Mapped[str | None] = mapped_column(String(20))
     note: Mapped[str | None] = mapped_column(Text)
     added_by_name: Mapped[str] = mapped_column(String(120))
     added_by_id: Mapped[int | None] = mapped_column(
@@ -780,7 +781,7 @@ class Expense(Base):
     production_day_id: Mapped[int | None] = mapped_column(
         ForeignKey("production_days.id", ondelete="SET NULL")
     )
-    # "materials" or "labour" (api.services.production_expenses.PARTS).
+    # "materials", "labour" or "misc" (api.services.production_expenses.PARTS).
     production_part: Mapped[str | None] = mapped_column(String(20))
 
     __table_args__ = (
@@ -983,6 +984,11 @@ class ProductionDay(Base):
         ForeignKey("users.id", ondelete="SET NULL")
     )
     updated_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    # When "Send to Expenses" filed its expenses; from then on it is locked.
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_by_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
     created_at: Mapped[datetime] = mapped_column(

@@ -36,7 +36,9 @@ type AuthContextValue = {
  *  picks the writers). "crm.admin" — approving and deleting expenses,
  *  deleting productions and choosing who uses Expenses and Production — goes
  *  by address alone (PRODUCTION_ADMIN_EMAILS, tenancy.is_crm_admin), not by
- *  the super admin role. */
+ *  the super admin role. "production.send" — sending a production to
+ *  Expenses — is a CRM admin's, or anyone's assigned to Production in the
+ *  store; a super admin's only when assigned too. */
 export type Permission =
   | "orders"
   | "catalogue.read"
@@ -47,11 +49,12 @@ export type Permission =
   | "crm"
   | "production"
   | "production.admin"
+  | "production.send"
   | "crm.admin";
 
 type RolePermission = Exclude<
   Permission,
-  "crm" | "production" | "production.admin" | "crm.admin"
+  "crm" | "production" | "production.admin" | "production.send" | "crm.admin"
 >;
 
 const PERMISSIONS: Record<RolePermission, ReadonlySet<string>> = {
@@ -158,15 +161,18 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
   const can = (permission: Permission) =>
     permission === "crm.admin"
       ? user.crmAdmin
-      : isSuperAdmin ||
-        (store !== null &&
-          (permission === "crm"
-            ? store.crm
-            : permission === "production"
-              ? store.production !== null
-              : permission === "production.admin"
-                ? store.production === "admin"
-                : PERMISSIONS[permission].has(store.role)));
+      : // Not a super admin's by default: only where assigned.
+        permission === "production.send"
+        ? store !== null && store.productionSend
+        : isSuperAdmin ||
+          (store !== null &&
+            (permission === "crm"
+              ? store.crm
+              : permission === "production"
+                ? store.production !== null
+                : permission === "production.admin"
+                  ? store.production === "admin"
+                  : PERMISSIONS[permission].has(store.role)));
 
   return (
     <AuthContext.Provider

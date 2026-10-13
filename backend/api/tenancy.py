@@ -75,6 +75,10 @@ class StoreAccess:
     crm: bool = False
     # The Production pages: PRODUCTION_ADMIN, PRODUCTION_WRITE or None.
     production: str | None = None
+    # May send a production to Expenses: a CRM admin, or whoever was
+    # assigned to Production here (store_users.production_access) — a super
+    # admin too, but only when assigned.
+    production_send: bool = False
 
 
 @dataclass(frozen=True)
@@ -124,8 +128,11 @@ def production_level(user: User, production_access: bool) -> str | None:
 def accessible(user: User, memberships: list[StoreAccess], all_stores: list[StoreAccess]) -> list[StoreAccess]:
     """The stores this user may open: every active store for a super admin
     (as "super_admin"), else exactly the active stores they are a member of.
-    Pure, so the rule is testable without a database."""
+    A super admin's memberships, if any, only say where they may send
+    productions to Expenses. Pure, so the rule is testable without a database."""
+    crm = is_crm_admin(user)
     if is_super_admin(user):
+        assigned = {m.store_id for m in memberships if m.production_send}
         return [
             StoreAccess(
                 s.store_id,
@@ -137,6 +144,7 @@ def accessible(user: User, memberships: list[StoreAccess], all_stores: list[Stor
                 s.subtitle,
                 True,
                 PRODUCTION_ADMIN,
+                crm or s.store_id in assigned,
             )
             for s in all_stores
             if s.is_active
@@ -144,9 +152,12 @@ def accessible(user: User, memberships: list[StoreAccess], all_stores: list[Stor
     # A production admin is one in every store they belong to; a CRM admin
     # also opens every such store's Expenses.
     admin = is_production_admin(user)
-    crm = is_crm_admin(user)
     return [
-        replace(m, production=PRODUCTION_ADMIN, crm=m.crm or crm) if admin else m
+        replace(
+            m, production=PRODUCTION_ADMIN, crm=m.crm or crm, production_send=m.production_send or crm
+        )
+        if admin
+        else m
         for m in memberships
         if m.is_active
     ]
@@ -171,7 +182,9 @@ async def load_memberships(session: AsyncSession, user_id: int) -> list[StoreAcc
     )
     # The flag reads as a writer; accessible() raises production admins.
     return [
-        StoreAccess(*row[:8], production=PRODUCTION_WRITE if row[8] else None)
+        StoreAccess(
+            *row[:8], production=PRODUCTION_WRITE if row[8] else None, production_send=row[8]
+        )
         for row in rows
     ]
 
@@ -190,7 +203,9 @@ async def load_all_stores(session: AsyncSession) -> list[StoreAccess]:
 
 async def accessible_stores(session: AsyncSession, user: User) -> list[StoreAccess]:
     if is_super_admin(user):
-        return accessible(user, [], await load_all_stores(session))
+        return accessible(
+            user, await load_memberships(session, user.id), await load_all_stores(session)
+        )
     return accessible(user, await load_memberships(session, user.id), [])
 
 
@@ -310,6 +325,28 @@ async def require_crm_admin(ctx: StoreContext = Depends(admin_store)) -> StoreCo
     if not is_crm_admin(ctx.user):
         raise HTTPException(
             status_code=403, detail="Only the CRM admins (PRODUCTION_ADMIN_EMAILS) can do this"
+        )
+    return ctx
+
+
+async def require_production_send(
+    ctx: StoreContext = Depends(admin_store),
+    session: AsyncSession = Depends(get_session),
+) -> StoreContext:
+    """The StoreContext, for whoever may send a production to Expenses: a
+    CRM admin, or a member assigned to Production in this store (a super
+    admin included, but only when assigned)."""
+    if is_crm_admin(ctx.user):
+        return ctx
+    assigned = await session.scalar(
+        select(StoreUser.production_access).where(
+            StoreUser.user_id == ctx.user.id, StoreUser.store_id == ctx.store.id
+        )
+    )
+    if not assigned:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the CRM admins and the people they assigned to Production can send it",
         )
     return ctx
 

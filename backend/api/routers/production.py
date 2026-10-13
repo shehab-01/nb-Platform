@@ -4,8 +4,8 @@ A day is a production day when it has a production_days row; saving the
 drawer creates or replaces that row, and removing it makes the day an
 ordinary day again. Every total — line amounts, labour, the day's cost, jars,
 cost per jar — is worked out here from what was typed, never taken from the
-browser. Saving a day also files its costs on the Expenses page, one
-expense per part, kept in step with the day (api.services.production_expenses).
+browser. "Send to Expenses" files three of its costs on the Expenses page and
+locks the production (api.services.production_expenses).
 
 Who may do what (api.tenancy): production admins (PRODUCTION_ADMIN_EMAILS
 and super admins) correct and re-date productions and edit the lists; only
@@ -51,6 +51,7 @@ from api.schemas import (
     ProductionProductIn,
     ProductionProductOut,
     ProductionSuggestions,
+    SentExpenseOut,
 )
 
 router = APIRouter(prefix="/production", tags=["Production"])
@@ -373,6 +374,7 @@ async def list_days(
         ProductionDay.patils,
         ProductionDay.jars,
         ProductionDay.total_cost,
+        ProductionDay.sent_at,
     ).where(ProductionDay.store_id == ctx.store.id)
     if start is not None:
         stmt = stmt.where(ProductionDay.day >= start)
@@ -400,8 +402,9 @@ async def list_days(
             jars=jars,
             total_cost=total,
             cost_per_jar=round(total / jars, 2) if jars else 0.0,
+            sent=sent_at is not None,
         )
-        for day_id, d, patils, jars, total in rows
+        for day_id, d, patils, jars, total, sent_at in rows
     ]
 
 
@@ -461,6 +464,11 @@ async def save_day(
     row = await _load(session, store_id, from_day if moving else day)
     if moving and row is None:
         raise HTTPException(status_code=404, detail="No production on the date to move from")
+    if row is not None and row.sent_at is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="This production was sent to Expenses and can no longer be changed",
+        )
     refusal = date_refusal(
         admin=tenancy.is_production_admin(ctx.user),
         day=day,
@@ -492,9 +500,6 @@ async def save_day(
     row.updated_by_id = ctx.user.id
     _apply(row, body, store_id, units)
     try:
-        # The id first: the day's expenses point at it.
-        await session.flush()
-        await production_expenses.sync(session, row, ctx)
         await session.commit()
     except IntegrityError:
         # Someone else recorded a production for this date at the same moment.
@@ -505,6 +510,47 @@ async def save_day(
     saved = await _load(session, store_id, day, fresh=True)
     assert saved is not None
     return saved
+
+
+@router.post("/days/{day}/send", response_model=ProductionDayOut)
+async def send_to_expenses(
+    day: date,
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.require_production_send),
+) -> ProductionDay:
+    """File the production's raw materials, cook salary and other costs as
+    expenses, once, and lock it: from then on it can only be deleted. The CRM
+    admins and the people assigned to Production may send (a super admin only
+    when assigned)."""
+    row = await _load(session, ctx.store.id, day)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No production on that date")
+    if row.sent_at is not None:
+        raise HTTPException(status_code=409, detail="This production was already sent to Expenses")
+    if not production_expenses.lines(row):
+        raise HTTPException(status_code=400, detail="Nothing to send: no raw materials, cooks or other costs")
+    await production_expenses.send(session, row, ctx)
+    await session.commit()
+    saved = await _load(session, ctx.store.id, day, fresh=True)
+    assert saved is not None
+    return saved
+
+
+@router.get("/days/{day}/expenses", response_model=list[SentExpenseOut])
+async def sent_expenses(
+    day: date,
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(_require),
+) -> list[SentExpenseOut]:
+    """The expenses the production sent (none before it is sent): what
+    deleting it would delete too."""
+    row = await _load(session, ctx.store.id, day)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No production on that date")
+    return [
+        SentExpenseOut.model_validate(e)
+        for e in await production_expenses.linked(session, ctx.store.id, row.id)
+    ]
 
 
 @router.delete("/days/{day}", status_code=204)
@@ -565,7 +611,9 @@ async def _members(session: AsyncSession, store_id: int) -> list[MemberAccessOut
             email=user.email,
             picture_url=user.picture_url,
             role=role,
-            level=tenancy.production_level(user, access),
+            # A CRM admin always may; everyone else, super admins included,
+            # by the switch (which lets them record productions and send them).
+            level="admin" if tenancy.is_crm_admin(user) else "write" if access else None,
         )
         for user, role, access in rows
     ]
@@ -576,8 +624,9 @@ async def list_access(
     session: AsyncSession = Depends(get_session),
     ctx: tenancy.StoreContext = Depends(_crm_admin),
 ) -> list[MemberAccessOut]:
-    """The store's members and what each may do here. Super admins are not
-    members (they see every store) and so are not listed."""
+    """The store's members and whether each is assigned to Production. A
+    super admin is listed only if a member of the store, and needs the
+    switch to send productions to Expenses."""
     return await _members(session, ctx.store.id)
 
 

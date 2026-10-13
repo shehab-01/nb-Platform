@@ -133,40 +133,37 @@ def saved(body: ProductionDayIn, d: date = date(2026, 10, 9)) -> ProductionDay:
     return row
 
 
-# --- What a production files -----------------------------------------------------
+# --- What a production sends ----------------------------------------------------
 
 
-def test_a_day_files_raw_materials_and_cook_salary_only():
+def test_raw_materials_cook_salary_and_other_costs_are_sent():
     lines = production_expenses.lines(saved(a_day()))
-    # Gas and other costs stay on the production.
-    assert set(lines) == {"materials", "labour"}
+    # Gas and packaging stay on the production.
+    assert set(lines) == {"materials", "labour", "misc"}
+    assert {line.category for line in lines.values()} == {"From production"}
     assert lines["materials"].amount == 12 * 220 + 800
-    assert lines["materials"].category == "Market & Grocery"
-    assert lines["labour"].category == "Salary"
     assert lines["labour"].amount == 6400
-    assert lines["labour"].note == "From the production of 9 Oct 2026"
+    assert lines["misc"].amount == 2500
 
 
-def test_a_part_that_cost_nothing_files_nothing():
-    lines = production_expenses.lines(saved(a_day(materials=[])))
-    assert set(lines) == {"labour"}
-
-
-def test_the_item_lists_what_the_part_is_made_of():
-    # The item, not the note: it is what the expense PDF prints.
+def test_the_item_is_the_part_and_its_day_the_note_its_names():
     lines = production_expenses.lines(saved(a_day()))
-    assert lines["materials"].item == (
-        "Raw materials — Mustard oil 12 লিটার × ৳220 = ৳2,640; Others ৳800"
-    )
-    assert lines["labour"].item == (
-        "Cook salary — Male 6 × ৳450; Female 4 × ৳400; Head cook 1 × ৳900; Other rate 2 × ৳600"
-    )
+    assert lines["materials"].item == "Raw materials - 09/10"
+    assert lines["labour"].item == "Cook salary - 09/10"
+    assert lines["misc"].item == "Other costs - 09/10"
+    assert lines["materials"].note == "Mustard oil, Others"
+    assert lines["labour"].note == "Male cook, Female cook, Head cook, Other rate"
+    assert lines["misc"].note == "Transport"
 
 
-def test_a_long_bazar_list_is_cut_to_the_column():
-    many = [{"item": "Mustard oil", "quantity": "1", "unit_price": 1}] * 100
-    item = production_expenses.lines(saved(a_day(materials=many)))["materials"].item
-    assert len(item) == production_expenses.ITEM_MAX and item.endswith("…")
+def test_a_name_bought_twice_is_noted_once():
+    twice = [{"item": "Mustard oil", "amount": 10}, {"item": "Mustard oil", "amount": 20}]
+    assert production_expenses.lines(saved(a_day(materials=twice)))["materials"].note == "Mustard oil"
+
+
+def test_a_part_that_cost_nothing_sends_nothing():
+    lines = production_expenses.lines(saved(a_day(materials=[], misc=[])))
+    assert set(lines) == {"labour"}
 
 
 def test_todays_production_is_spent_now_an_earlier_one_on_its_day():
@@ -257,3 +254,28 @@ def test_another_super_admin_cannot_manage_access():
     with pytest.raises(HTTPException) as err:
         asyncio.run(tenancy.require_crm_admin(ctx("other@example.com")))
     assert err.value.status_code == 403
+
+
+# --- Who sends a production to Expenses --------------------------------------------
+
+
+def _store(sid: int, send: bool = False) -> tenancy.StoreAccess:
+    return tenancy.StoreAccess(sid, f"s{sid}", f"S{sid}", "staff", production_send=send)
+
+
+def test_a_super_admin_sends_only_where_assigned():
+    admin = SimpleNamespace(email="other@example.com", role="super_admin")
+    admin.role = tenancy.UserRole.super_admin
+    got = tenancy.accessible(admin, [_store(1, send=True)], [_store(1), _store(2)])
+    assert {s.store_id: s.production_send for s in got} == {1: True, 2: False}
+
+
+def test_a_crm_admin_always_sends():
+    got = tenancy.accessible(SimpleNamespace(email=OWNER_EMAIL, role="staff"), [_store(1)], [])
+    assert got[0].production_send
+
+
+def test_an_assigned_member_sends_and_others_do_not():
+    staff = SimpleNamespace(email="staff@example.com", role="staff")
+    got = tenancy.accessible(staff, [_store(1, send=True), _store(2)], [])
+    assert [s.production_send for s in got] == [True, False]

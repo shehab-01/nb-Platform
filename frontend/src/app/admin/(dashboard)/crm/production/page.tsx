@@ -229,6 +229,11 @@ function ProductionList() {
                           Saved
                         </span>
                       )}
+                      {d.sent && (
+                        <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
+                          Sent
+                        </span>
+                      )}
                     </span>
                     <span className="truncate text-muted-foreground">
                       {d.product_names.join(", ") || "—"}

@@ -1,18 +1,17 @@
 """
-The expenses a production day files for itself.
+The expenses a production sends to the Expenses page.
 
-Saving a production day files two of its costs on the Expenses page, each as
-one expense rather than one per line: all the raw materials (bazar) together,
-and all the cooks' pay together. Gas, packaging and other costs stay on the
-production only. Saving the day again updates those same expenses (found by
-production_day_id and production_part), adds one that now has a cost and
-removes one that no longer has; deleting the day removes them. They are changed only through the
-day: the Expenses page shows them but will not edit or delete them.
+Saving a production files nothing. Its "Send to Expenses" button files three
+of its costs, once, each as a single expense rather than one per line: all
+the raw materials (bazar) together, all the cooks' pay together, and all the
+other costs together. Gas and packaging stay on the production only. From
+then on the production is locked (production_days.sent_at): it can no
+longer be changed, only deleted, and deleting it deletes these expenses too.
 
-They follow the Expenses rules otherwise. Each starts pending, and one a
-CRM admin (PRODUCTION_ADMIN_EMAILS, tenancy.is_crm_admin) approved goes back
-to pending when anyone else changes what it says. Only a CRM admin deletes a
-day, and with it its expenses.
+Each such expense is filed under "From production", reads "Raw materials -
+13/10" with the production's day and month, has no payment method, and
+notes only the names of what it covers. It starts pending like any expense,
+and the Expenses page will not edit or delete it on its own.
 """
 from __future__ import annotations
 
@@ -20,29 +19,29 @@ import logging
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import tenancy
 from api.models import Expense, ExpenseProof, ProductionDay
 from api.services import gdrive
-from api.services.production_report import quantity, taka
 
 log = logging.getLogger(__name__)
 
 DHAKA = timezone(timedelta(hours=6), "Asia/Dhaka")
 
-# Each part, the expense category it is filed under (one of the defaults in
-# api.routers.expenses.DEFAULT_CATEGORIES, which every store has) and how
-# its item reads.
+# The category every sent expense is filed under. Not one of the store's
+# categories: nobody picks it by hand.
+CATEGORY = "From production"
+
+# Each part sent, and how its item reads.
 PARTS = (
-    ("materials", "Market & Grocery", "Raw materials"),
-    ("labour", "Salary", "Cook salary"),
+    ("materials", "Raw materials"),
+    ("labour", "Cook salary"),
+    ("misc", "Other costs"),
 )
 
-# expenses.item's width (migration 0041).
-ITEM_MAX = 1000
+NOTE_MAX = 1000
 
 
 @dataclass(frozen=True)
@@ -53,53 +52,49 @@ class Line:
     note: str | None
 
 
-def _clip(text: str) -> str:
-    return text if len(text) <= ITEM_MAX else text[: ITEM_MAX - 1] + "…"
-
-
-def _day_label(d: date) -> str:
-    return d.strftime("%d %b %Y").lstrip("0")
+def _names(names: list[str]) -> str | None:
+    """The names, each once, in the order first met, comma-separated."""
+    text = ", ".join(dict.fromkeys(n for n in names if n))
+    if not text:
+        return None
+    return text if len(text) <= NOTE_MAX else text[: NOTE_MAX - 1] + "…"
 
 
 def lines(day: ProductionDay) -> dict[str, Line]:
-    """What each part's expense says, for the parts that cost anything: the
-    item carries the breakdown (it is what the expense PDF prints), the note
-    which production it came from. Pure: the day as saved in, lines out."""
-    details = {
-        "materials": "; ".join(
-            f"{m.item} {quantity(m.quantity, m.unit)} × {taka(m.unit_price)} = {taka(m.amount)}"
-            if m.quantity is not None and m.unit_price is not None
-            else f"{m.item} {taka(m.amount)}"
-            for m in day.materials
-        ),
-        "labour": "; ".join(
-            f"{label} {n} × {taka(rate)}"
-            for label, n, rate in [
-                ("Male", day.male_cooks, day.male_rate),
-                ("Female", day.female_cooks, day.female_rate),
+    """What each part's expense says, for the parts that cost anything.
+    Pure: the day as saved in, the lines out."""
+    dd_mm = day.day.strftime("%d/%m")
+    names = {
+        "materials": _names([m.item for m in day.materials]),
+        "labour": _names(
+            [
+                label
+                for label, n in [("Male cook", day.male_cooks), ("Female cook", day.female_cooks)]
+                if n
             ]
-            + [(c.get("label") or "Other rate", c["cooks"], c["rate"]) for c in day.extra_cooks or []]
-            if n
+            + [c.get("label") or "Other rate" for c in day.extra_cooks or []]
         ),
+        "misc": _names([m.purpose for m in day.misc]),
     }
     amounts = {
         "materials": day.materials_cost,
         "labour": day.labour_cost,
+        "misc": day.misc_cost,
     }
     return {
         part: Line(
-            category=category,
-            item=_clip(f"{label} — {details[part]}" if details[part] else label),
+            category=CATEGORY,
+            item=f"{label} - {dd_mm}",
             amount=amounts[part],
-            note=f"From the production of {_day_label(day.day)}",
+            note=names[part],
         )
-        for part, category, label in PARTS
+        for part, label in PARTS
         if amounts[part] > 0
     }
 
 
 def spent_at(day: ProductionDay, today: date, now: datetime) -> datetime:
-    """When a production day's expense counts as spent: now for today's
+    """When a production's expense counts as spent: now for today's
     production, else the day itself, at the time production started (noon
     when none was given), so it lands on that day's Expenses."""
     if day.day == today:
@@ -107,14 +102,39 @@ def spent_at(day: ProductionDay, today: date, now: datetime) -> datetime:
     return datetime.combine(day.day, day.starts_at or time(12), tzinfo=DHAKA)
 
 
-async def _linked(session: AsyncSession, store_id: int, day_id: int) -> list[Expense]:
-    return list(
-        await session.scalars(
-            select(Expense).where(
-                Expense.store_id == store_id, Expense.production_day_id == day_id
+async def linked(session: AsyncSession, store_id: int, day_id: int) -> list[Expense]:
+    """The expenses the production sent, in the order of PARTS."""
+    order = {part: i for i, (part, _) in enumerate(PARTS)}
+    rows = await session.scalars(
+        select(Expense).where(Expense.store_id == store_id, Expense.production_day_id == day_id)
+    )
+    return sorted(rows, key=lambda e: order.get(e.production_part or "", len(order)))
+
+
+async def send(session: AsyncSession, day: ProductionDay, ctx: tenancy.StoreContext) -> None:
+    """File the production's expenses and lock it (the caller commits)."""
+    now = datetime.now(DHAKA)
+    when = spent_at(day, now.date(), now)
+    for part, line in lines(day).items():
+        session.add(
+            Expense(
+                store_id=ctx.store.id,
+                spent_at=when,
+                category=line.category,
+                item=line.item,
+                amount=line.amount,
+                payment_method=None,
+                note=line.note,
+                added_by_name=ctx.user.nickname or ctx.user.name,
+                added_by_id=ctx.user.id,
+                created_by_id=ctx.user.id,
+                status="pending",
+                production_day_id=day.id,
+                production_part=part,
             )
         )
-    )
+    day.sent_at = now
+    day.sent_by_id = ctx.user.id
 
 
 async def _discard(session: AsyncSession, expense: Expense) -> None:
@@ -136,64 +156,8 @@ async def _discard(session: AsyncSession, expense: Expense) -> None:
     await session.delete(expense)
 
 
-async def sync(session: AsyncSession, day: ProductionDay, ctx: tenancy.StoreContext) -> None:
-    """Bring the day's expenses in line with the day as just saved (the day
-    must have its id: flush first). The caller commits."""
-    store_id = ctx.store.id
-    now = datetime.now(DHAKA)
-    when = spent_at(day, now.date(), now)
-    want = lines(day)
-    have = {e.production_part: e for e in await _linked(session, store_id, day.id)}
-
-    gone = [e for part, e in have.items() if part not in want]
-    # Refused before anything is touched, Drive included.
-    for expense in gone:
-        if expense.status == "approved" and not tenancy.is_crm_admin(ctx.user):
-            raise HTTPException(
-                status_code=403,
-                detail=f"“{expense.item}” is approved; only a CRM admin can remove it",
-            )
-    for expense in gone:
-        await _discard(session, expense)
-
-    for part, line in want.items():
-        expense = have.get(part)
-        if expense is None:
-            session.add(
-                Expense(
-                    store_id=store_id,
-                    spent_at=when,
-                    category=line.category,
-                    item=line.item,
-                    amount=line.amount,
-                    payment_method="cash",
-                    note=line.note,
-                    added_by_name=ctx.user.nickname or ctx.user.name,
-                    added_by_id=ctx.user.id,
-                    created_by_id=ctx.user.id,
-                    status="pending",
-                    production_day_id=day.id,
-                    production_part=part,
-                )
-            )
-            continue
-        changed = (expense.category, expense.item, expense.amount, expense.note) != (
-            line.category,
-            line.item,
-            line.amount,
-            line.note,
-        )
-        expense.category, expense.item = line.category, line.item
-        expense.amount, expense.note = line.amount, line.note
-        # A production moved to another date takes its expenses with it.
-        if expense.spent_at.astimezone(DHAKA).date() != day.day:
-            expense.spent_at = when
-        if changed and not tenancy.is_crm_admin(ctx.user):
-            expense.status, expense.approved_by_id, expense.approved_at = "pending", None, None
-
-
 async def remove(session: AsyncSession, day: ProductionDay, ctx: tenancy.StoreContext) -> None:
-    """Delete the day's expenses along with it (the caller commits; only a
-    CRM admin deletes a day: api.routers.production.delete_day)."""
-    for expense in await _linked(session, ctx.store.id, day.id):
+    """Delete the production's expenses along with it (the caller commits;
+    only a CRM admin deletes a production: api.routers.production.delete_day)."""
+    for expense in await linked(session, ctx.store.id, day.id):
         await _discard(session, expense)

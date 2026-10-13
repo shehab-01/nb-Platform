@@ -24,8 +24,8 @@ const COPY: Record<AccessPage, { title: string; pick: string; admin: string }> =
   },
   production: {
     title: "Production",
-    pick: "Tick the stores where this person may record productions. Their role in the store does not matter: an owner needs this too.",
-    admin: "A super admin is a production admin in every store; nothing to set here.",
+    pick: "Tick the stores where this person may record productions and send them to Expenses. Their role in the store does not matter: an owner needs this too.",
+    admin: "",
   },
 };
 
@@ -66,7 +66,9 @@ export function CrmDialog({
   }, [member, page]);
 
   if (!member) return null;
-  const superAdmin = member.role === "super_admin";
+  // A super admin needs nothing for Expenses, but is assigned to Production
+  // like anyone else to send productions to Expenses.
+  const superAdmin = member.role === "super_admin" && page === "expenses";
 
   const submit = async () => {
     setBusy(true);

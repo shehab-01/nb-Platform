@@ -125,6 +125,9 @@ const METHOD_LABEL = Object.fromEntries(
   PAYMENT_METHODS.map((m) => [m.value, m.label])
 ) as Record<PaymentMethod, string>;
 
+/** How an expense was paid; blank ("—") on one a production sent. */
+const methodLabel = (m: PaymentMethod | null) => (m ? (METHOD_LABEL[m] ?? m) : "—");
+
 /** "+8% vs yesterday" — neutral ink: for spending, up is not good news by
  *  itself, and the page does not pretend to know. */
 function change(now: number, before: number): string | null {
@@ -935,7 +938,7 @@ function ExpenseTable({
                       {e.amount.toLocaleString("en-IN")}
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground">
-                      {METHOD_LABEL[e.payment_method] ?? e.payment_method}
+                      {methodLabel(e.payment_method)}
                     </td>
                     <td className="px-3 py-2.5">
                       <div className={wrap}>{e.added_by_name}</div>
@@ -1087,7 +1090,7 @@ function ExpenseCards({
                   </div>
                 )}
                 <div className="mt-1.5 text-xs text-muted-foreground">
-                  {METHOD_LABEL[e.payment_method] ?? e.payment_method} · {e.added_by_name}
+                  {methodLabel(e.payment_method)} · {e.added_by_name}
                 </div>
               </div>
               <div className="flex shrink-0 flex-col items-end gap-2">
@@ -1165,7 +1168,7 @@ function ExpenseDetails({
                     </span>
                   </DetailField>
                   <DetailField label="Payment method">
-                    {METHOD_LABEL[e.payment_method] ?? e.payment_method}
+                    {methodLabel(e.payment_method)}
                   </DetailField>
                   <DetailField label="Added by">{e.added_by_name}</DetailField>
                   <DetailField label="Entry">#{e.id}</DetailField>

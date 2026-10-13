@@ -27,10 +27,10 @@ const COPY: Record<
   production: {
     title: "Production access",
     description:
-      "কারা নতুন প্রোডাকশন লিখতে পারবেন, তা বেছে নিন। তারা আজকের প্রোডাকশন যোগ করতে আর সব দেখতে পারবেন, কিন্তু সেভ করা কিছু বদলাতে বা মুছতে পারবেন না।",
-    can: "Can write",
-    admin: "Production admin",
-    label: (name) => `${name} can record productions`,
+      "কারা প্রোডাকশন লিখতে আর Expenses-এ পাঠাতে পারবেন, তা বেছে নিন। তারা আজকের প্রোডাকশন যোগ করতে, “Send to Expenses” চাপতে আর সব দেখতে পারবেন, কিন্তু সেভ করা কিছু বদলাতে বা মুছতে পারবেন না। সুপার অ্যাডমিনও এখানে বেছে নিলে তবেই পাঠাতে পারবেন।",
+    can: "Can write & send",
+    admin: "CRM admin",
+    label: (name) => `${name} can record productions and send them to Expenses`,
   },
   expenses: {
     title: "Expenses access",
@@ -138,8 +138,8 @@ export function AccessDialog({
             </ul>
           )}
           <p className="mt-3 text-xs text-muted-foreground">
-            সুপার অ্যাডমিন সব স্টোরে সব দেখতে পারেন, তাই এই তালিকায় নেই। কেউ তালিকায় না থাকলে আগে
-            তাকে স্টোরের সদস্য করতে হবে।
+            কেউ তালিকায় না থাকলে (সুপার অ্যাডমিনসহ) আগে Users পাতা থেকে তাকে এই স্টোরের সদস্য
+            করতে হবে।
           </p>
           {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
         </div>

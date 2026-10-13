@@ -866,6 +866,7 @@ export async function getMyStores(): Promise<StoreAccess[]> {
       template: string;
       crm?: boolean;
       production?: "admin" | "write" | null;
+      production_send?: boolean;
     }[]
   >("/api/me/stores");
   return rows.map((r) => ({
@@ -877,6 +878,7 @@ export async function getMyStores(): Promise<StoreAccess[]> {
     template: r.template,
     crm: r.crm ?? false,
     production: r.production ?? null,
+    productionSend: r.production_send ?? false,
   }));
 }
 
@@ -1700,7 +1702,8 @@ export type Expense = {
   category: string;
   item: string;
   amount: number;
-  payment_method: PaymentMethod;
+  /** null on the expenses a production sends. */
+  payment_method: PaymentMethod | null;
   note: string | null;
   added_by_name: string;
   added_by_id: number | null;
@@ -1975,6 +1978,8 @@ export type ProductionDay = {
   jars: number;
   cost_per_jar: number;
   updated_at: string;
+  /** When it was sent to Expenses; set means it can no longer be changed. */
+  sent_at: string | null;
 };
 
 /** What the drawer sends. No totals: the server works them out. A material
@@ -2004,6 +2009,8 @@ export type ProductionDayInput = {
 
 export type ProductionDaySummary = {
   day: string;
+  /** Sent to Expenses, so locked. */
+  sent: boolean;
   products: number;
   /** What was cooked, in the order entered. */
   product_names: string[];
@@ -2075,6 +2082,26 @@ export async function saveProductionDay(
     method: "PUT",
     body: JSON.stringify(input),
   });
+}
+
+/** Sends the production's raw materials, cook salary and other costs to
+ *  Expenses, once; the production is locked from then on. */
+export async function sendProductionToExpenses(day: string): Promise<ProductionDay> {
+  return request<ProductionDay>(`/api/production/days/${day}/send`, { method: "POST" });
+}
+
+/** An expense a production sent. */
+export type SentExpense = {
+  id: number;
+  item: string;
+  amount: number;
+  note: string | null;
+  status: ExpenseStatus;
+};
+
+/** What the production sent to Expenses (what deleting it deletes too). */
+export async function listProductionExpenses(day: string): Promise<SentExpense[]> {
+  return request<SentExpense[]>(`/api/production/days/${day}/expenses`);
 }
 
 /** Makes the day an ordinary day again. */

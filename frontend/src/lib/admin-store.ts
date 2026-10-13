@@ -18,6 +18,9 @@ export type StoreAccess = {
   /** The Production pages: "admin" (full control, chooses who writes),
    *  "write" (records today's production) or null for no access. */
   production: "admin" | "write" | null;
+  /** May send a production to Expenses: a CRM admin, or someone assigned to
+   *  Production here (a super admin too, but only when assigned). */
+  productionSend: boolean;
 };
 
 const STORAGE_KEY = "nb_admin_store";

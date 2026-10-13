@@ -11,6 +11,7 @@ const a: StoreAccess = {
   template: "classic",
   crm: false,
   production: null,
+  productionSend: false,
 };
 const b: StoreAccess = {
   storeId: 2,
@@ -21,6 +22,7 @@ const b: StoreAccess = {
   template: "classic",
   crm: false,
   production: null,
+  productionSend: false,
 };
 
 describe("storeTitle", () => {

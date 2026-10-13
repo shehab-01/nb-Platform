@@ -49,6 +49,16 @@ function EditProduction() {
   if (record === undefined || !lists.products || !lists.items) {
     return <Skeleton className="h-96 w-full" />;
   }
+  if (record.sent_at) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        এই প্রোডাকশন Expenses-এ পাঠানো হয়েছে, তাই আর বদলানো যাবে না।{" "}
+        <Link href={`/admin/crm/production/${day}`} className="font-medium text-primary hover:underline">
+          প্রোডাকশনটি দেখুন
+        </Link>
+      </p>
+    );
+  }
   return (
     <ProductionForm
       editing={record}

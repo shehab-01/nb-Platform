@@ -902,6 +902,8 @@ class StoreAccessOut(BaseModel):
     crm: bool = False
     # The Production pages: "admin", "write" or null (no access).
     production: str | None = None
+    # May send a production to Expenses here (tenancy.StoreAccess.production_send).
+    production_send: bool = False
 
 
 class StoreOut(BaseModel):
@@ -1095,7 +1097,8 @@ class ExpenseOut(BaseModel):
     category: str
     item: str
     amount: int
-    payment_method: str
+    # None on the expenses a production sends.
+    payment_method: str | None = None
     note: str | None = None
     added_by_name: str
     added_by_id: int | None = None
@@ -1338,6 +1341,8 @@ class ProductionDayOut(BaseModel):
     patils: int
     jars: int
     updated_at: datetime
+    # When it was sent to Expenses; set means it can no longer be changed.
+    sent_at: datetime | None = None
 
     @computed_field
     @property
@@ -1345,10 +1350,24 @@ class ProductionDayOut(BaseModel):
         return round(self.total_cost / self.jars, 2) if self.jars else 0.0
 
 
+class SentExpenseOut(BaseModel):
+    """An expense a production sent to the Expenses page."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    item: str
+    amount: int
+    note: str | None = None
+    status: str
+
+
 class ProductionDaySummary(BaseModel):
     """One production day in the month list."""
 
     day: date
+    # Sent to Expenses, so locked.
+    sent: bool = False
     products: int
     # What was cooked, in the order entered.
     product_names: list[str] = []

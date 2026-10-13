@@ -43,7 +43,6 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  deleteProductionDay,
   deleteProductionItem,
   deleteProductionProduct,
   getProductionDay,
@@ -69,6 +68,7 @@ import {
   TotalBar,
   TotalCostBlock,
 } from "./day-dashboard";
+import { DeleteProductionDialog } from "./delete-dialog";
 import { dayLabel, dhakaToday, taka, takaPaisa } from "./format";
 import { PRODUCT_ICONS, ProductIcon } from "./product-icons";
 import { useLeaveGuard } from "./use-leave-guard";
@@ -443,6 +443,7 @@ function FormBody({
     jars,
     cost_per_jar: jars ? total / jars : 0,
     updated_at: "",
+    sent_at: null,
   };
 
   // Unsaved: anything differs from how the page opened. Saving or deleting
@@ -497,7 +498,7 @@ function FormBody({
                   {editing ? "Update production costing" : "Add production costing"}
                 </h2>
                 <p className="text-sm opacity-90">
-                  এই দিনের সব তথ্য লিখুন। সেভ করলে প্রোডাকশনের তালিকায় যোগ হবে, আর কাঁচামালের মোট খরচ ও রাঁধুনিদের মোট মজুরি দুটি খরচ হিসেবে Expenses-এ চলে যাবে।
+                  এই দিনের সব তথ্য লিখুন। সেভ করলে প্রোডাকশনের তালিকায় যোগ হবে। খরচগুলো Expenses-এ যায় প্রোডাকশনের পাতার “Send to Expenses” বোতামে।
                 </p>
               </div>
               <Link
@@ -1146,7 +1147,7 @@ function FormBody({
           setBatches((rows) => rows.map((r) => (r.product === name ? { ...r, product: "" } : r)))
         }
       />
-      <DeleteDialog
+      <DeleteProductionDialog
         day={confirmingDelete && editing ? editing.day : null}
         onClose={() => setConfirmingDelete(false)}
         onDeleted={() => router.push(`/admin/crm/production?month=${editing?.day.slice(0, 7)}`)}
@@ -1599,64 +1600,6 @@ function ListManager({
           </Button>
           <Button onClick={submit} disabled={!clean || taken || busy}>
             {busy ? "Saving…" : editingRow ? "Save changes" : `Add ${copy.singular}`}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function DeleteDialog({
-  day,
-  onClose,
-  onDeleted,
-}: {
-  day: string | null;
-  onClose: () => void;
-  onDeleted: () => void;
-}) {
-  const [busy, setBusy] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-  return (
-    <Dialog
-      open={day !== null}
-      onOpenChange={(o) => {
-        if (!o) {
-          setError(null);
-          onClose();
-        }
-      }}
-    >
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Delete this production?</DialogTitle>
-          <DialogDescription>
-            {day && dayLabel(day, { weekday: true })}-এর প্রোডাকশন আর এর সব তথ্য — কাঁচামাল,
-            রাঁধুনি, পণ্য, খরচ — মুছে যাবে। এটা আর ফেরানো যাবে না।
-          </DialogDescription>
-        </DialogHeader>
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            Keep it
-          </Button>
-          <Button
-            variant="destructive"
-            disabled={busy}
-            onClick={async () => {
-              if (!day) return;
-              setBusy(true);
-              try {
-                await deleteProductionDay(day);
-                onDeleted();
-              } catch (err) {
-                setError(err instanceof Error ? err.message : "Could not delete");
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            Delete
           </Button>
         </DialogFooter>
       </DialogContent>

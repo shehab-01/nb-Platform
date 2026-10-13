@@ -1406,9 +1406,12 @@ class ProductionItemOut(BaseModel):
 
 
 class ProductionSuggestions(BaseModel):
-    """Purposes other costs were given before, most recent first."""
+    """Purposes other costs were given before, most recent first, and what
+    each raw material last cost per unit, to start a new bazar line from."""
 
     purposes: list[str]
+    # Item name -> unit price on the latest production that priced it.
+    last_prices: dict[str, int] = {}
 
 
 class MemberAccessOut(BaseModel):

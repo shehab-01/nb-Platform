@@ -45,7 +45,10 @@ export function ProductionAdminOnly({ children }: { children: React.ReactNode })
 export function useProductionLists() {
   const [products, setProducts] = React.useState<ProductionProduct[] | null>(null);
   const [items, setItems] = React.useState<ProductionItem[] | null>(null);
-  const [suggestions, setSuggestions] = React.useState<ProductionSuggestions>({ purposes: [] });
+  const [suggestions, setSuggestions] = React.useState<ProductionSuggestions>({
+    purposes: [],
+    last_prices: {},
+  });
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {

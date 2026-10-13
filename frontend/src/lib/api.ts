@@ -2042,7 +2042,8 @@ export function unitLabel(unit: string | null | undefined): string {
  *  records what it paid). */
 export type ProductionItem = { id: number; name: string; unit: ProductionUnit };
 
-export type ProductionSuggestions = { purposes: string[] };
+/** Purposes used before, and each raw material's last unit price by name. */
+export type ProductionSuggestions = { purposes: string[]; last_prices: Record<string, number> };
 
 /** The day as saved, or null when it is not a production day. */
 export async function getProductionDay(day: string): Promise<ProductionDay | null> {

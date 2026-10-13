@@ -322,7 +322,8 @@ async def suggestions(
     session: AsyncSession = Depends(get_session),
     ctx: tenancy.StoreContext = Depends(_require),
 ) -> ProductionSuggestions:
-    """The purposes other costs were given before, most recently used first."""
+    """The purposes other costs were given before, most recently used first,
+    and each raw material's unit price the last time it was priced."""
     store_id = ctx.store.id
     purposes: dict[str, str] = {}
     for (purpose,) in await session.execute(
@@ -333,7 +334,23 @@ async def suggestions(
         .limit(1000)
     ):
         purposes.setdefault(purpose.casefold(), purpose)
-    return ProductionSuggestions(purposes=list(purposes.values())[:50])
+    # Newest day first, so the first price seen for an item is its latest.
+    last_prices: dict[str, int] = {}
+    for item, price in await session.execute(
+        select(ProductionMaterial.item, ProductionMaterial.unit_price)
+        .join(ProductionDay, ProductionDay.id == ProductionMaterial.production_day_id)
+        .where(
+            ProductionMaterial.store_id == store_id,
+            ProductionDay.store_id == store_id,
+            ProductionMaterial.unit_price.is_not(None),
+        )
+        .order_by(ProductionDay.day.desc(), ProductionMaterial.position)
+        .limit(2000)
+    ):
+        last_prices.setdefault(item, price)
+    return ProductionSuggestions(
+        purposes=list(purposes.values())[:50], last_prices=last_prices
+    )
 
 
 # --- Days ----------------------------------------------------------------------

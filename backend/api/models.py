@@ -753,7 +753,8 @@ class Expense(Base):
     # A default category name or one of the store's own (expense_categories).
     # Stored as text so renaming or removing a category never rewrites history.
     category: Mapped[str] = mapped_column(String(60))
-    item: Mapped[str] = mapped_column(String(200))
+    # Up to 200 typed by hand (ExpenseIn); a production day's breakdown runs longer.
+    item: Mapped[str] = mapped_column(String(1000))
     # Whole taka.
     amount: Mapped[int] = mapped_column(Integer)
     payment_method: Mapped[str] = mapped_column(String(20))

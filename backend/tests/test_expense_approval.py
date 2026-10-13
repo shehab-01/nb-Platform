@@ -144,8 +144,7 @@ def test_a_day_files_raw_materials_and_cook_salary_only():
     assert lines["materials"].category == "Market & Grocery"
     assert lines["labour"].category == "Salary"
     assert lines["labour"].amount == 6400
-    assert lines["materials"].item == "Production 9 Oct 2026 · Raw materials"
-    assert lines["labour"].item == "Production 9 Oct 2026 · Cook salary"
+    assert lines["labour"].note == "From the production of 9 Oct 2026"
 
 
 def test_a_part_that_cost_nothing_files_nothing():
@@ -153,12 +152,21 @@ def test_a_part_that_cost_nothing_files_nothing():
     assert set(lines) == {"labour"}
 
 
-def test_a_parts_note_lists_what_it_is_made_of():
+def test_the_item_lists_what_the_part_is_made_of():
+    # The item, not the note: it is what the expense PDF prints.
     lines = production_expenses.lines(saved(a_day()))
-    assert lines["materials"].note == "Mustard oil 12 লিটার ৳2,640; Others ৳800"
-    assert lines["labour"].note == (
-        "Male 6 × ৳450; Female 4 × ৳400; Head cook 1 × ৳900; Other rate 2 × ৳600"
+    assert lines["materials"].item == (
+        "Raw materials — Mustard oil 12 লিটার × ৳220 = ৳2,640; Others ৳800"
     )
+    assert lines["labour"].item == (
+        "Cook salary — Male 6 × ৳450; Female 4 × ৳400; Head cook 1 × ৳900; Other rate 2 × ৳600"
+    )
+
+
+def test_a_long_bazar_list_is_cut_to_the_column():
+    many = [{"item": "Mustard oil", "quantity": "1", "unit_price": 1}] * 100
+    item = production_expenses.lines(saved(a_day(materials=many)))["materials"].item
+    assert len(item) == production_expenses.ITEM_MAX and item.endswith("…")
 
 
 def test_todays_production_is_spent_now_an_earlier_one_on_its_day():

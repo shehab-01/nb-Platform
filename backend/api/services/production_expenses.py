@@ -41,7 +41,8 @@ PARTS = (
     ("labour", "Salary", "Cook salary"),
 )
 
-NOTE_MAX = 1000
+# expenses.item's width (migration 0041).
+ITEM_MAX = 1000
 
 
 @dataclass(frozen=True)
@@ -52,10 +53,8 @@ class Line:
     note: str | None
 
 
-def _clip(text: str) -> str | None:
-    if not text:
-        return None
-    return text if len(text) <= NOTE_MAX else text[: NOTE_MAX - 1] + "…"
+def _clip(text: str) -> str:
+    return text if len(text) <= ITEM_MAX else text[: ITEM_MAX - 1] + "…"
 
 
 def _day_label(d: date) -> str:
@@ -63,12 +62,13 @@ def _day_label(d: date) -> str:
 
 
 def lines(day: ProductionDay) -> dict[str, Line]:
-    """What each part's expense says, for the parts that cost anything.
-    Pure: the day as saved in, the lines out."""
-    notes = {
+    """What each part's expense says, for the parts that cost anything: the
+    item carries the breakdown (it is what the expense PDF prints), the note
+    which production it came from. Pure: the day as saved in, lines out."""
+    details = {
         "materials": "; ".join(
-            f"{m.item} {quantity(m.quantity, m.unit)} {taka(m.amount)}"
-            if m.quantity is not None
+            f"{m.item} {quantity(m.quantity, m.unit)} × {taka(m.unit_price)} = {taka(m.amount)}"
+            if m.quantity is not None and m.unit_price is not None
             else f"{m.item} {taka(m.amount)}"
             for m in day.materials
         ),
@@ -89,9 +89,9 @@ def lines(day: ProductionDay) -> dict[str, Line]:
     return {
         part: Line(
             category=category,
-            item=f"Production {_day_label(day.day)} · {label}",
+            item=_clip(f"{label} — {details[part]}" if details[part] else label),
             amount=amounts[part],
-            note=_clip(notes[part]),
+            note=f"From the production of {_day_label(day.day)}",
         )
         for part, category, label in PARTS
         if amounts[part] > 0

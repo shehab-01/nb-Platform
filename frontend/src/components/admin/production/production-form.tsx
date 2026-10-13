@@ -264,6 +264,11 @@ function FormBody({
     return names;
   }, [products, editing]);
   const iconOf = (name: string) => products.find((p) => p.name === name)?.icon;
+  // What an item cost per unit last time, to start its line from; editable.
+  const lastPrice = (name: string) => {
+    const p = suggestions.last_prices[name];
+    return p === undefined ? undefined : String(p);
+  };
 
   // --- Live preview of the figures ---
   const materialsCost = materials.reduce((s, m) => s + (lineTotal(m) ?? 0), 0);
@@ -766,7 +771,7 @@ function FormBody({
                           onValueChange={(v) =>
                             v === NEW
                               ? setManaging({ kind: "items", row: m.key })
-                              : setMaterial(m.key, { item: v })
+                              : setMaterial(m.key, { item: v, unitPrice: lastPrice(v) ?? m.unitPrice })
                           }
                         >
                           <SelectTrigger

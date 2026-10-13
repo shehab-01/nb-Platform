@@ -112,10 +112,28 @@ async def linked(session: AsyncSession, store_id: int, day_id: int) -> list[Expe
 
 
 async def send(session: AsyncSession, day: ProductionDay, ctx: tenancy.StoreContext) -> None:
-    """File the production's expenses and lock it (the caller commits)."""
+    """File the production's expenses and lock it (the caller commits).
+
+    A production saved while saving still filed expenses (before the send
+    button) already has some, in the old form and parts. They are rewritten
+    into the sent form rather than filed twice; a part no longer sent (gas,
+    packaging) is deleted."""
     now = datetime.now(DHAKA)
     when = spent_at(day, now.date(), now)
-    for part, line in lines(day).items():
+    want = lines(day)
+    for expense in await linked(session, ctx.store.id, day.id):
+        line = want.pop(expense.production_part or "", None)
+        if line is None:
+            await _discard(session, expense)
+            continue
+        expense.spent_at = when
+        expense.category, expense.item = line.category, line.item
+        expense.amount, expense.note = line.amount, line.note
+        expense.payment_method = None
+        expense.status, expense.approved_by_id, expense.approved_at = "pending", None, None
+    # The rewritten and deleted rows go first, so no new row meets an old one.
+    await session.flush()
+    for part, line in want.items():
         session.add(
             Expense(
                 store_id=ctx.store.id,

@@ -325,6 +325,30 @@ class PathaoSendOut(BaseModel):
     failed: list[PathaoFailure]
 
 
+class PathaoSyncFailure(BaseModel):
+    order_id: int
+    order_no: str
+    consignment_id: str
+    error: str
+
+
+class PathaoSyncRunOut(BaseModel):
+    """A staff-started full Pathao sync and how far it has got."""
+
+    id: int
+    # running | stopping | done | stopped | failed | interrupted
+    status: str
+    total: int
+    checked: int
+    changed: int
+    delivered: int
+    failed: int
+    failures: list[PathaoSyncFailure]
+    error: str | None
+    started_at: datetime
+    finished_at: datetime | None
+
+
 class AddressParseIn(BaseModel):
     address: str = Field(min_length=1, max_length=1000)
 

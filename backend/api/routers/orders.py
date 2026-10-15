@@ -31,6 +31,7 @@ from api.models import (
     OrderSource,
     OrderStatus,
     OrderTag,
+    PathaoSyncRun,
     Product,
     ProductVariant,
     StoreUser,
@@ -76,6 +77,8 @@ from api.schemas import (
     PathaoPlaceOut,
     PathaoSendIn,
     PathaoSendOut,
+    PathaoSyncFailure,
+    PathaoSyncRunOut,
     TagCreate,
 )
 
@@ -1967,6 +1970,65 @@ async def parse_order_address(
         pathao_address.apply_to_order(order, result)
         await session.commit()
     return await _get_fresh_order(session, order_id)
+
+
+def _sync_run_out(run: PathaoSyncRun, prefix: str) -> PathaoSyncRunOut:
+    return PathaoSyncRunOut(
+        id=run.id,
+        status=pathao_sync.run_state(run),
+        total=run.total,
+        checked=run.checked,
+        changed=run.changed,
+        delivered=run.delivered,
+        failed=run.failed,
+        failures=[
+            PathaoSyncFailure(
+                order_id=f["order_id"],
+                order_no=f"{prefix}-{f['order_id']}",
+                consignment_id=f["consignment_id"],
+                error=f["error"],
+            )
+            for f in run.failures
+        ],
+        error=run.error,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+    )
+
+
+@router.get("/pathao/sync-all", response_model=PathaoSyncRunOut | None)
+async def get_pathao_full_sync(
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
+) -> PathaoSyncRunOut | None:
+    """The store's latest full sync — the one running, or the last one."""
+    run = await pathao_sync.latest_run(session, ctx.store.id)
+    return _sync_run_out(run, ctx.store.order_prefix) if run is not None else None
+
+
+@router.post("/pathao/sync-all", response_model=PathaoSyncRunOut)
+async def start_pathao_full_sync(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
+) -> PathaoSyncRunOut:
+    """Ask Pathao about every parcel not yet delivered or returned, oldest
+    first, in the background. Pressing it while a sync runs returns that one."""
+    integrations = await stores.load_integrations(session, ctx.store.id)
+    if integrations is None or not integrations.pathao.enabled:
+        raise HTTPException(status_code=503, detail="Pathao is not configured for this store")
+    run = await pathao_sync.start_full_sync(session, ctx.store.id, user.id)
+    return _sync_run_out(run, ctx.store.order_prefix)
+
+
+@router.post("/pathao/sync-all/stop", response_model=PathaoSyncRunOut | None)
+async def stop_pathao_full_sync(
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
+) -> PathaoSyncRunOut | None:
+    """Stop the running full sync after the parcel it is on."""
+    run = await pathao_sync.request_stop(session, ctx.store.id)
+    return _sync_run_out(run, ctx.store.order_prefix) if run is not None else None
 
 
 @router.post("/pathao/refresh", response_model=PathaoSendOut)

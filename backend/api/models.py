@@ -121,6 +121,9 @@ class Order(Base):
     pathao_status: Mapped[str | None] = mapped_column(String(60))
     pathao_delivery_fee: Mapped[int | None] = mapped_column(Integer)
     pathao_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When we last asked Pathao about this parcel, answered or not; the
+    # background sync asks the longest-unasked parcels first.
+    pathao_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Where Pathao should deliver, in its own city/zone/area ids: filled by
     # Pathao's address parser or picked by staff (see
     # api.services.pathao_address), and sent with the booking. Area is
@@ -397,6 +400,43 @@ class MetaCapiFailedEvent(Base):
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_error: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+
+class PathaoSyncRun(Base):
+    """
+    One staff-started pass over every unsettled parcel of a store (see
+    api.services.pathao_sync.full_sync). Progress lives here rather than in
+    memory because the API runs several workers: the one doing the work is
+    rarely the one answering the progress poll.
+    """
+
+    __tablename__ = "pathao_sync_runs"
+    __table_args__ = (Index("ix_pathao_sync_runs_store_id_id", "store_id", "id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="CASCADE"))
+    started_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    # running → done | stopped | failed; "stopping" while a stop is pending.
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    checked: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    changed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    delivered: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # [{"order_no", "consignment_id", "error"}], capped, for the staff report.
+    failures: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    error: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    # Touched after every parcel; a running row that stops being touched
+    # belonged to a worker that died (restart, deploy).
+    heartbeat_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Product(Base):

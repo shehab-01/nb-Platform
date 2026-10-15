@@ -512,6 +512,84 @@ export async function refreshPathao(ids: number[]): Promise<PathaoResult> {
   return pathaoBatched("/api/orders/pathao/refresh", ids);
 }
 
+export type PathaoSyncStatus =
+  | "running"
+  | "stopping"
+  | "done"
+  | "stopped"
+  | "failed"
+  | "interrupted";
+
+export type PathaoSyncRun = {
+  id: number;
+  status: PathaoSyncStatus;
+  total: number;
+  checked: number;
+  changed: number;
+  delivered: number;
+  failed: number;
+  failures: { orderId: number; orderNo: string; consignmentId: string; error: string }[];
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+};
+
+type ApiPathaoSyncRun = {
+  id: number;
+  status: PathaoSyncStatus;
+  total: number;
+  checked: number;
+  changed: number;
+  delivered: number;
+  failed: number;
+  failures: { order_id: number; order_no: string; consignment_id: string; error: string }[];
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+};
+
+function mapSyncRun(run: ApiPathaoSyncRun | null): PathaoSyncRun | null {
+  if (!run) return null;
+  return {
+    id: run.id,
+    status: run.status,
+    total: run.total,
+    checked: run.checked,
+    changed: run.changed,
+    delivered: run.delivered,
+    failed: run.failed,
+    failures: run.failures.map((f) => ({
+      orderId: f.order_id,
+      orderNo: f.order_no,
+      consignmentId: f.consignment_id,
+      error: f.error,
+    })),
+    error: run.error,
+    startedAt: run.started_at,
+    finishedAt: run.finished_at,
+  };
+}
+
+/** The store's latest full Pathao sync (running or finished), if any. */
+export async function getPathaoFullSync(): Promise<PathaoSyncRun | null> {
+  return mapSyncRun(await request<ApiPathaoSyncRun | null>("/api/orders/pathao/sync-all"));
+}
+
+/** Start a full Pathao sync; returns the running one if already going. */
+export async function startPathaoFullSync(): Promise<PathaoSyncRun> {
+  return mapSyncRun(
+    await request<ApiPathaoSyncRun>("/api/orders/pathao/sync-all", { method: "POST" })
+  )!;
+}
+
+export async function stopPathaoFullSync(): Promise<PathaoSyncRun | null> {
+  return mapSyncRun(
+    await request<ApiPathaoSyncRun | null>("/api/orders/pathao/sync-all/stop", {
+      method: "POST",
+    })
+  );
+}
+
 /** Take an order (open its modal). 409 means someone else is on it. */
 export async function claimOrder(id: number): Promise<Order> {
   return mapOrder(

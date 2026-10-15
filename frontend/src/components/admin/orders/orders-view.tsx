@@ -103,6 +103,8 @@ export function OrdersView({
   storageKey,
   showFulfilment = false,
   showStaff = true,
+  showConfirmedBy = false,
+  showPreviousOrders = false,
   bulkActions,
 }: {
   /** Which statuses the filter offers on this page. */
@@ -123,6 +125,10 @@ export function OrdersView({
    * it off; it stays available in the View panel.
    */
   showStaff?: boolean;
+  /** Show who confirmed each order by default (the archive wants it). */
+  showConfirmedBy?: boolean;
+  /** Show how many other orders each phone has placed, by default. */
+  showPreviousOrders?: boolean;
   /**
    * Which bulk actions ticking rows offers. "confirm" sends the batch on to
    * Shipping; "ship" books it with Pathao and prints stickers. Omit for
@@ -733,6 +739,8 @@ export function OrdersView({
         initialColumnVisibility={{
           status: false,
           staff: showStaff,
+          confirmedBy: showConfirmedBy,
+          previousOrders: showPreviousOrders,
           printed: showFulfilment,
           courier: showFulfilment,
           pathao: showFulfilment,

@@ -267,6 +267,39 @@ export function getOrderColumns({
         ),
     },
     {
+      id: "confirmedBy",
+      header: "Confirmed by",
+      enableSorting: false,
+      meta: { label: "Confirmed by" },
+      cell: ({ row }) =>
+        row.original.confirmedByName ? (
+          <span title={row.original.confirmedByName}>
+            {staffLabel(row.original.confirmedByName, row.original.confirmedByNickname)}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        ),
+    },
+    {
+      id: "previousOrders",
+      header: "Previous Order",
+      enableSorting: false,
+      meta: { label: "Previous Order" },
+      // A returning customer, or the same order twice: either way worth
+      // knowing before the call. The orders themselves are in the modal.
+      cell: ({ row }) =>
+        row.original.previousOrders > 0 ? (
+          <Badge
+            variant="outline"
+            className="border-sky-500/40 bg-sky-50 font-medium text-sky-700 dark:bg-sky-950/50 dark:text-sky-300"
+          >
+            {row.original.previousOrders} previous
+          </Badge>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        ),
+    },
+    {
       id: "printed",
       header: "Print",
       enableSorting: false,

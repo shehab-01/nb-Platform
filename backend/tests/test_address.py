@@ -15,6 +15,10 @@ from api.schemas import OrderCreate, OrderDraft
         "12 Road-5 Dhaka",
         "  Sector 10   Uttara  ",
         "বাসা ১২ গ্রাম নয়াপাড়া",
+        "khairtul,03,tongi",
+        "বাসা ১২,মিরপুর,ঢাকা",
+        "House 12/A;Uttara",
+        "মিরপুর।ঢাকা।বাংলাদেশ",
     ],
 )
 def test_accepts_real_addresses(address):
@@ -31,6 +35,9 @@ def test_accepts_real_addresses(address):
         "১২ ৩৪ ৫৬",
         "- , . Dhaka",
         "Dhaka, - -",
+        "12,34,56",
+        "Dhaka,Dhaka",
+        ",,,Tongi,,,",
     ],
 )
 def test_rejects_short_or_numeric_addresses(address):

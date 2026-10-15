@@ -5,8 +5,10 @@ import { ArrowLeft, ExternalLink, Phone } from "lucide-react";
 
 import { useAuth } from "@/components/admin/auth-context";
 import { FraudCards } from "@/components/admin/orders/fraud-summary";
+import { OrderSummaryModal } from "@/components/admin/orders/order-summary-modal";
 import { OrderTags } from "@/components/admin/orders/order-tags";
 import { PathaoLocationPicker } from "@/components/admin/orders/pathao-location-picker";
+import { PreviousOrders } from "@/components/admin/orders/previous-orders";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,7 +29,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { parseOrderAddress, recheckOrderFraud, updateOrder } from "@/lib/api";
+import {
+  lookupOrdersByPhone,
+  parseOrderAddress,
+  recheckOrderFraud,
+  updateOrder,
+  type PhoneLookup,
+} from "@/lib/api";
 import {
   CHANGE_STATUS_OPTIONS,
   ORDER_SOURCE_LABELS,
@@ -47,6 +55,8 @@ import {
 } from "@/lib/orders";
 import { toBdMobile } from "@/lib/phone";
 import { cn } from "@/lib/utils";
+
+const NO_PREVIOUS: PhoneLookup = { orders: [], incomplete: [] };
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
@@ -89,6 +99,34 @@ export function OrderDetailsModal({
   // Unsaved edits are reviewed before a status change or before closing:
   // which of the two the person was doing decides what happens after Save.
   const [review, setReview] = React.useState<"status" | "close" | null>(null);
+  // This number's other orders (null while looking), and the one opened
+  // from that list to read.
+  const [previous, setPrevious] = React.useState<PhoneLookup | null>(null);
+  const [viewing, setViewing] = React.useState<Order | null>(null);
+
+  React.useEffect(() => {
+    if (!open || !order) return;
+    let cancelled = false;
+    setPrevious(null);
+    setViewing(null);
+    const self = order.id;
+    lookupOrdersByPhone(order.phone)
+      .then((found) => {
+        if (cancelled) return;
+        // The order on screen is not one of its own previous orders.
+        setPrevious({
+          orders: found.orders.filter((o) => o.id !== self),
+          incomplete: found.incomplete.filter((o) => o.id !== self),
+        });
+      })
+      .catch(() => {
+        // Informational only: on failure the section just says nothing.
+        if (!cancelled) setPrevious(NO_PREVIOUS);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, order?.id, order?.phone]); // eslint-disable-line react-hooks/exhaustive-deps
 
   React.useEffect(() => {
     if (order) {
@@ -198,7 +236,8 @@ export function OrderDetailsModal({
   if (phoneNormalised && phoneNormalised !== order.phone) {
     changes.push({ field: "Phone", from: order.phone, to: phoneNormalised });
   }
-  if (editAddress.trim() && editAddress.trim() !== order.address) {
+  const addressChanged = editAddress.trim() !== order.address;
+  if (editAddress.trim() && addressChanged) {
     changes.push({ field: "Address", from: order.address, to: editAddress.trim() });
   }
   const locationChanged = !sameLocation(editLocation, order.pathaoLocation);
@@ -339,6 +378,14 @@ export function OrderDetailsModal({
               refreshing={rechecking}
             />
           )}
+          {/* What else this number has ordered, next to the courier history:
+              a returning customer or a duplicate is known before the call. */}
+          <PreviousOrders
+            lookup={previous ?? NO_PREVIOUS}
+            loading={previous === null}
+            searched
+            onOpen={setViewing}
+          />
         <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
           {/* Main column */}
           <div className="flex flex-col gap-6">
@@ -395,6 +442,27 @@ export function OrderDetailsModal({
                     onBlur={() => setParseSignal((n) => n + 1)}
                     rows={3}
                   />
+                  {/* The address on its own, without going through a status
+                      change or the close prompt: fixing it is often all a
+                      call was about. The delivery location below is part of
+                      the same address, so it is saved with it. */}
+                  {(addressChanged || locationChanged) && (
+                    <div className="flex justify-end pt-1">
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={busy || !editAddress.trim()}
+                        onClick={() =>
+                          void run({
+                            address: addressChanged ? editAddress.trim() : undefined,
+                            pathaoLocation: locationChanged ? editLocation : undefined,
+                          })
+                        }
+                      >
+                        {busy ? "Saving…" : "Save address"}
+                      </Button>
+                    </div>
+                  )}
                 </div>
                 <div className="mt-4">
                   <PathaoLocationPicker
@@ -539,6 +607,19 @@ export function OrderDetailsModal({
                         <span className="text-muted-foreground">
                           Not handled yet
                         </span>
+                      )}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground uppercase">Confirmed by</p>
+                    <p
+                      className="mt-0.5 font-medium"
+                      title={order.confirmedByName ?? undefined}
+                    >
+                      {order.confirmedByName ? (
+                        staffLabel(order.confirmedByName, order.confirmedByNickname)
+                      ) : (
+                        <span className="text-muted-foreground">Not confirmed</span>
                       )}
                     </p>
                   </div>
@@ -699,6 +780,15 @@ export function OrderDetailsModal({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* One of this number's other orders, read only, over this one. */}
+      <OrderSummaryModal
+        order={viewing}
+        open={viewing !== null}
+        onOpenChange={(next) => {
+          if (!next) setViewing(null);
+        }}
+      />
     </Dialog>
   );
 }

@@ -9,6 +9,7 @@ export default function IncompleteOrdersPage() {
       initialStatuses={["incomplete"]}
       storageKey="orders-incomplete"
       showStaff={false}
+      showPreviousOrders
     />
   );
 }

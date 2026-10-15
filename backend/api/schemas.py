@@ -210,6 +210,12 @@ class OrderOut(BaseModel):
     # Who last moved the status — the worker credited on each list.
     handled_by_name: str | None = None
     handled_by_nickname: str | None = None
+    # Who confirmed it; kept through shipping and history.
+    confirmed_by_name: str | None = None
+    confirmed_by_nickname: str | None = None
+    # Other orders this phone has placed in this store (abandoned forms not
+    # counted). Filled in by the order list only; 0 elsewhere.
+    previous_orders: int = 0
     tags: list[OrderTagOut] = []
     items: list[OrderItemOut] = []
     pathao_consignment_id: str | None = None

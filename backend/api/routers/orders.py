@@ -200,6 +200,9 @@ def _move_status(
     order.status = new_status.value
     # Credit whoever moved it: on Confirmed Order this is who confirmed it.
     order.handled_by = user.id
+    # handled_by moves on with the order; this stays for the archive.
+    if new_status == OrderStatus.confirmed:
+        order.confirmed_by = user.id
     # The order now belongs to another list; nobody is "on it" any more.
     # Done here so the row is free even if the browser never says goodbye.
     if order.assigned_to is not None:
@@ -595,6 +598,28 @@ def _delivery_filter(value: str):
     raise HTTPException(status_code=400, detail=f"Unknown delivery filter {value!r}")
 
 
+async def _placed_counts(
+    session: AsyncSession, store_id: int, orders: list[Order]
+) -> dict[str, int]:
+    """How many real orders (the statuses the phone lookup calls placed, so
+    no abandoned forms or cancellations) each phone on this page has in this
+    store. One grouped query on the (store_id, phone_key) index, so a page
+    of 25 or 1000 rows costs the same round trip."""
+    keys = {o.phone_key for o in orders if o.phone_key}
+    if not keys:
+        return {}
+    result = await session.execute(
+        select(Order.phone_key, func.count())
+        .where(
+            Order.store_id == store_id,
+            Order.phone_key.in_(keys),
+            Order.status.in_(LOOKUP_STATUSES),
+        )
+        .group_by(Order.phone_key)
+    )
+    return {key: count for key, count in result.all()}
+
+
 @router.get("", response_model=OrderListOut)
 async def list_orders(
     page: int = Query(1, ge=1),
@@ -654,8 +679,15 @@ async def list_orders(
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
+    orders = list(rows)
+    items = [OrderOut.model_validate(row) for row in orders]
+    placed = await _placed_counts(session, ctx.store.id, orders)
+    for row, item in zip(orders, items):
+        # The row itself is not one of its own previous orders.
+        own = 1 if row.status in LOOKUP_STATUSES else 0
+        item.previous_orders = max(placed.get(row.phone_key or "", 0) - own, 0)
     return OrderListOut(
-        items=[OrderOut.model_validate(row) for row in rows],
+        items=items,
         total=total or 0,
         page=page,
         page_size=page_size,
@@ -1549,6 +1581,7 @@ async def create_manual_order(
         total_amount=total,
         items=items,
         handled_by=user.id,
+        confirmed_by=user.id if status == OrderStatus.confirmed.value else None,
     )
     if payload.pathao_location is not None:
         await _set_location(session, order, payload.pathao_location)

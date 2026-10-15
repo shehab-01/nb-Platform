@@ -40,6 +40,9 @@ type ApiOrder = {
   claim_active: boolean;
   handled_by_name: string | null;
   handled_by_nickname: string | null;
+  confirmed_by_name?: string | null;
+  confirmed_by_nickname?: string | null;
+  previous_orders?: number;
   auto_captured: boolean;
   pathao_consignment_id: string | null;
   pathao_status: string | null;
@@ -180,6 +183,9 @@ function mapOrder(order: ApiOrder): Order {
     claimActive: order.claim_active,
     staffName: order.handled_by_name,
     staffNickname: order.handled_by_nickname,
+    confirmedByName: order.confirmed_by_name ?? null,
+    confirmedByNickname: order.confirmed_by_nickname ?? null,
+    previousOrders: order.previous_orders ?? 0,
     autoCaptured: order.auto_captured,
     pathaoConsignmentId: order.pathao_consignment_id ?? null,
     pathaoStatus: order.pathao_status ?? null,

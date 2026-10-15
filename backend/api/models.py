@@ -145,6 +145,12 @@ class Order(Base):
     handled_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
+    # Who last put this order on Confirmed (or took it by hand as confirmed).
+    # Unlike handled_by it survives the moves after — shipping, history — so
+    # the archive can still say who confirmed each order.
+    confirmed_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
 
     # The BDCourier check run for this order's phone (see api.services.bdcourier);
     # null until the check has run, or when the store has no BDCourier key.
@@ -159,6 +165,9 @@ class Order(Base):
     )
     handler: Mapped["User | None"] = relationship(
         lazy="joined", foreign_keys=[handled_by]
+    )
+    confirmer: Mapped["User | None"] = relationship(
+        lazy="joined", foreign_keys=[confirmed_by]
     )
     tags: Mapped[list["OrderTag"]] = relationship(
         lazy="selectin", order_by="OrderTag.id", cascade="all, delete-orphan"
@@ -206,6 +215,18 @@ class Order(Base):
         if "handler" in sa_inspect(self).unloaded:
             return None
         return self.handler.nickname if self.handler else None
+
+    @property
+    def confirmed_by_name(self) -> str | None:
+        if "confirmer" in sa_inspect(self).unloaded:
+            return None
+        return self.confirmer.name if self.confirmer else None
+
+    @property
+    def confirmed_by_nickname(self) -> str | None:
+        if "confirmer" in sa_inspect(self).unloaded:
+            return None
+        return self.confirmer.nickname if self.confirmer else None
 
     @property
     def pathao_address_confidence(self) -> str | None:

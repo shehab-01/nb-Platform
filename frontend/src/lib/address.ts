@@ -9,10 +9,11 @@
 
 export const ADDRESS_MIN_WORDS = 3;
 
-// A word is a run of non-space characters containing a letter or a digit, so
-// stray punctuation ("-", ",") does not count. Bangla letters and digits
-// count like Latin ones.
-const WORD = /\S*[\p{L}\p{N}]\S*/gu;
+// A word is a run of characters containing a letter or a digit, broken by
+// spaces or by the separators people type in place of them ("khairtul,03,
+// tongi" is three words). Stray punctuation ("-", ",") does not count.
+// Bangla letters and digits count like Latin ones; । is the Bangla full stop.
+const WORD = /[^\s,;/|।]*[\p{L}\p{N}][^\s,;/|।]*/gu;
 const LETTER = /\p{L}/u;
 
 export function isValidAddress(raw: string): boolean {

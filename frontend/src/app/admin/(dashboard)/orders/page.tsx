@@ -10,6 +10,7 @@ export default function WebOrderListsPage() {
       initialStatuses={WEB_ORDER_STATUSES}
       storageKey="orders"
       showStaff={false}
+      showPreviousOrders
     />
   );
 }

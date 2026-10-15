@@ -213,6 +213,12 @@ export type Order = {
   /** Who last moved the status — on a confirmed order, who confirmed it. */
   staffName: string | null;
   staffNickname: string | null;
+  /** Who confirmed it; unlike staffName it stays through shipping and history. */
+  confirmedByName: string | null;
+  confirmedByNickname: string | null;
+  /** Other orders this phone placed in this store (abandoned forms and
+   * cancellations not counted). Only the order lists fill it in; 0 elsewhere. */
+  previousOrders: number;
   /** Captured from an abandoned storefront form; nobody submitted it. */
   autoCaptured: boolean;
   tags: OrderTag[];

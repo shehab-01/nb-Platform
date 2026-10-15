@@ -15,10 +15,12 @@ ADDRESS_RULE = (
     "district) and cannot be only numbers"
 )
 
-# A word is a run of non-space characters containing a letter or a digit, so
-# stray punctuation ("-", ",") does not count as one. Bangla letters and
-# digits (০-৯) count like Latin ones.
-_WORD = re.compile(r"\S*[^\W_]\S*")
+# A word is a run of characters containing a letter or a digit, broken by
+# spaces or by the separators people type in place of them ("khairtul,03,
+# tongi" is three words). Stray punctuation ("-", ",") does not count as one.
+# Bangla letters and digits (০-৯) count like Latin ones; । is the Bangla
+# full stop. Keep in step with lib/address.ts.
+_WORD = re.compile(r"[^\s,;/|।]*[^\W_][^\s,;/|।]*")
 _LETTER = re.compile(r"[^\W\d_]")
 
 

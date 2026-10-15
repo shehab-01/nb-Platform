@@ -6,15 +6,22 @@ import { CheckIcon, ChevronsUpDown, SearchIcon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
-export type SearchSelectOption = { id: number; name: string };
+export type SearchSelectOption<T extends number | string = number> = {
+  id: T;
+  name: string;
+  /** Small muted text after the name (a unit, say); not searched. */
+  hint?: string;
+};
 
 /**
  * A select with a search box, for lists too long to scroll — Pathao has 64
  * cities and thousands of zones. Built on the popover rather than the native
- * select, which has no filtering. Typing narrows the list; Enter picks the
- * first match; Escape closes.
+ * select, which has no filtering. Opening it puts the cursor in the search
+ * box; typing narrows the list; Enter picks the first match; Escape closes.
+ * An optional `action` row stays under the list whatever is typed ("New
+ * item…"), so a missing entry is one click from being made.
  */
-export function SearchSelect({
+export function SearchSelect<T extends number | string = number>({
   value,
   options,
   onChange,
@@ -22,17 +29,20 @@ export function SearchSelect({
   disabled = false,
   loading = false,
   highlighted = false,
+  action,
   className,
   "aria-label": ariaLabel,
 }: {
-  value: number | null;
-  options: SearchSelectOption[];
-  onChange: (id: number) => void;
+  value: T | null;
+  options: SearchSelectOption<T>[];
+  onChange: (id: T) => void;
   placeholder: string;
   disabled?: boolean;
   loading?: boolean;
   /** Tinted, to show the value was filled in for the person, not by them. */
   highlighted?: boolean;
+  /** A row below the options that runs `onSelect` instead of picking. */
+  action?: { label: React.ReactNode; onSelect: () => void };
   className?: string;
   "aria-label"?: string;
 }) {
@@ -47,7 +57,7 @@ export function SearchSelect({
     ? options.filter((option) => option.name.toLowerCase().includes(q))
     : options;
 
-  const pick = (id: number) => {
+  const pick = (id: T) => {
     onChange(id);
     setOpen(false);
   };
@@ -80,7 +90,18 @@ export function SearchSelect({
           )}
         >
           <span className={cn("truncate", !selected && "text-muted-foreground")}>
-            {selected ? selected.name : loading ? "Loading…" : placeholder}
+            {selected ? (
+              <>
+                {selected.name}
+                {selected.hint && (
+                  <span className="ml-1.5 text-xs text-muted-foreground">{selected.hint}</span>
+                )}
+              </>
+            ) : loading ? (
+              "Loading…"
+            ) : (
+              placeholder
+            )}
           </span>
           <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
         </button>
@@ -127,10 +148,25 @@ export function SearchSelect({
                   className={cn("size-4 shrink-0", option.id === value ? "opacity-100" : "opacity-0")}
                 />
                 <span className="truncate">{option.name}</span>
+                {option.hint && (
+                  <span className="shrink-0 text-xs text-muted-foreground">{option.hint}</span>
+                )}
               </li>
             ))
           )}
         </ul>
+        {action && (
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              action.onSelect();
+            }}
+            className="flex w-full items-center gap-2 border-t px-3 py-2 text-left text-sm text-primary hover:bg-accent"
+          >
+            {action.label}
+          </button>
+        )}
       </PopoverContent>
     </Popover>
   );

@@ -3,18 +3,22 @@
 import type { CSSProperties } from "react";
 
 import "./spotlight.css";
-import { ProductPicture } from "@/components/storefront/product-picture";
 import { Storefront as Classic } from "@/templates/classic/page";
+import { rawImage } from "@/templates/raw-image";
 import type { StorefrontProps } from "@/templates/types";
 
 /**
- * Bazar Spotlight: Bazar Classic exactly — size picker, product picture that
- * follows the size, order table — with the store's banner above the product
- * card. The banner is `content.spotlight` and never changes with the size;
- * the picker heading and the header and footer colours are `store.options`.
+ * Bazar Spotlight: Bazar Classic exactly — size picker, order table — except
+ * that the product card shows one picture the store uploaded
+ * (`content.spotlight`) whichever size is picked. The card's title, the
+ * picker heading and the header and footer colours are `store.options`.
  */
 export function Storefront(props: StorefrontProps) {
   const { content, contentSrcset, options } = props.store;
+  // Only the store's own upload (or the form's pending pick, in the
+  // preview) replaces the size's picture; until there is one, the card
+  // behaves as Bazar Classic's does rather than show a stand-in.
+  const ownPicture = rawImage(content.spotlight);
   const footer = options.footer_color;
   const vars = {
     "--sp-nav": options.nav_color,
@@ -31,20 +35,8 @@ export function Storefront(props: StorefrontProps) {
         pickHeading={options.pick_heading}
         // Empty unless the store wrote one: then the picked size's title.
         productTitle={options.product_title}
-        // The banner is the first thing on screen, so it gets the early
-        // fetch and the product picture below it waits its turn.
-        productBelowFold
-        beforeProduct={
-          <section className="nb-sp-banner">
-            <ProductPicture
-              src={content.spotlight}
-              srcSet={contentSrcset.spotlight}
-              alt={props.store.name}
-              width={1146}
-              height={672}
-              priority
-            />
-          </section>
+        fixedPicture={
+          ownPicture ? { src: content.spotlight, srcSet: contentSrcset.spotlight } : undefined
         }
       />
     </div>

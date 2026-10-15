@@ -55,7 +55,7 @@ describe("template registry", () => {
     expect(resolveOptions("spotlight", { product_title: "মধু" }).product_title).toBe("মধু");
     expect(resolveOptions("classic", { nav_color: "#000000" })).toEqual({});
   });
-  it("spotlight keeps the size picker and has its own banner", () => {
+  it("spotlight keeps the size picker and has its own product picture", () => {
     expect(TEMPLATE_CATALOG.spotlight.singleVariant).toBe(false);
     expect(Object.keys(resolveContent("spotlight", {}))).toEqual(["logo", "spotlight"]);
   });

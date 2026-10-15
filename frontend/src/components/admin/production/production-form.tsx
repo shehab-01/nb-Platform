@@ -41,6 +41,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   deleteProductionItem,
@@ -767,39 +768,31 @@ function FormBody({
                         <span className="hidden text-xs text-muted-foreground tabular-nums @lg:block">
                           {i + 1}
                         </span>
-                        <Select
-                          value={m.item}
-                          onValueChange={(v) =>
-                            v === NEW
-                              ? setManaging({ kind: "items", row: m.key })
-                              : setMaterial(m.key, { item: v, unitPrice: lastPrice(v) ?? m.unitPrice })
+                        {/* Searchable: the bazar list grows long, and typing
+                            "রসুন" beats scrolling for it. */}
+                        <SearchSelect
+                          value={m.item || null}
+                          options={itemOptions.map((o) => ({
+                            id: o.name,
+                            name: o.name,
+                            hint: o.unit ? `(${unitLabel(o.unit)})` : undefined,
+                          }))}
+                          onChange={(v) =>
+                            setMaterial(m.key, { item: v, unitPrice: lastPrice(v) ?? m.unitPrice })
                           }
-                        >
-                          <SelectTrigger
-                            size="sm"
-                            className="col-span-3 w-full @lg:col-span-1"
-                            aria-label={`Item ${i + 1}`}
-                          >
-                            <SelectValue placeholder="আইটেম বাছুন" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {itemOptions.map((o) => (
-                              <SelectItem key={o.name} value={o.name}>
-                                {o.name}
-                                {o.unit && (
-                                  <span className="text-xs text-muted-foreground">
-                                    ({unitLabel(o.unit)})
-                                  </span>
-                                )}
-                              </SelectItem>
-                            ))}
-                            {itemOptions.length > 0 && <SelectSeparator />}
-                            <SelectItem value={NEW} className="text-primary">
-                              <Plus className="size-4" />
-                              New item…
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
+                          action={{
+                            label: (
+                              <>
+                                <Plus className="size-4" />
+                                New item…
+                              </>
+                            ),
+                            onSelect: () => setManaging({ kind: "items", row: m.key }),
+                          }}
+                          placeholder="আইটেম বাছুন"
+                          className="col-span-3 h-7 w-full rounded-md px-2.5 @lg:col-span-1"
+                          aria-label={`Item ${i + 1}`}
+                        />
                         <RemoveButton
                           label={`Remove item ${i + 1}`}
                           onClick={() =>

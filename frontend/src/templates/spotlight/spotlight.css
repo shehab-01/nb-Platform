@@ -1,12 +1,6 @@
-/* Bazar Spotlight over Bazar Classic (classic/page.css): the banner, and the
-   store's header and footer colours in place of the classic ones. Scoped
-   under .nb-sp; the --sp-* variables are set from the store's options. */
-
-.nb-sp-banner img {
-  display: block;
-  width: 100%;
-  height: auto;
-}
+/* Bazar Spotlight over Bazar Classic (classic/page.css): the store's header
+   and footer colours in place of the classic ones. Scoped under .nb-sp; the
+   --sp-* variables are set from the store's options. */
 
 .nb-sp .nb-cl .nb-header {
   background: color-mix(in srgb, var(--sp-nav) 88%, transparent);

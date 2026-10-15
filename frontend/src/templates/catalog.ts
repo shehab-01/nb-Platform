@@ -158,22 +158,25 @@ export const TEMPLATE_CATALOG: Record<string, TemplateInfo> = {
     id: "spotlight",
     name: "Bazar Spotlight",
     description:
-      "Bazar Classic with a banner of your own above the product. The product picture still follows the size picked; the banner stays put. The picker's heading and the header and footer colours are the store's to set.",
+      "Bazar Classic with one product picture of the store's own: it stays the same whichever size is picked. The product title, the picker's heading and the header and footer colours are the store's to set.",
     preview: "/templates/spotlight.png",
     highlights: [
       "Everything in Bazar Classic, size picker included",
-      "A banner of the store's own above the product",
-      "Picker heading reworded per store",
+      "One uploaded product picture for every size",
+      "Product title and picker heading written per store",
       "Header and footer colours",
     ],
     content: [
       LOGO,
       {
+        // Key kept from when this was a banner, so uploads carry over.
         key: "spotlight",
-        label: "Banner",
-        defaultUrl: "/campaign.jpg",
-        size: "1146×672 · JPG",
-        hint: "Above the product card; stays the same whichever size is picked",
+        label: "Product picture",
+        // Not shown on the page: until the store uploads one, the card
+        // shows the picked size's own picture (the logo when it has none).
+        defaultUrl: "/logo.png",
+        size: "1120×1120 · JPG",
+        hint: "On the product card for every size. Until uploaded, the picked size's picture shows",
       },
     ],
     texts: [

@@ -66,7 +66,11 @@ export function Storefront({
   orderTable = false,
   pickHeading = "কত প্যাকেট নিতে চান সিলেক্ট করুন",
   productTitle,
+  fixedPicture,
 }: StorefrontProps & {
+  /** One picture for the product card whichever size is picked, in place
+   * of the size's own; a template may let the store upload it. */
+  fixedPicture?: { src: string; srcSet?: string };
   /** A fixed title for the product card in place of the picked size's
    * own; a template may let the store write it. */
   productTitle?: string;
@@ -273,6 +277,18 @@ export function Storefront({
         {hideProductCard ? null : (
           <>
             <h1>{productTitle || variant.title}</h1>
+            {fixedPicture ? (
+              <div className="nb-product-image">
+                <ProductPicture
+                  src={fixedPicture.src}
+                  srcSet={fixedPicture.srcSet}
+                  alt={productTitle || listing.title}
+                  width={1120}
+                  height={1120}
+                  priority={!productBelowFold}
+                />
+              </div>
+            ) : (
             <div
               className="nb-product-image"
               // No picture yet: the logo stands in, on the dark ground it was
@@ -291,6 +307,7 @@ export function Storefront({
                 priority={!productBelowFold}
               />
             </div>
+            )}
           </>
         )}
         {hideTopCta ? null : (

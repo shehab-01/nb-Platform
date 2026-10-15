@@ -16,6 +16,28 @@ export type ContentField = {
   hint: string;
 };
 
+/** A line of the template's copy a store may reword. Stored in the store's
+ * theme under `key`; empty means the default. */
+export type TextField = {
+  key: string;
+  label: string;
+  defaultValue: string;
+  maxLength: number;
+  hint: string;
+  /** What the empty input says, when the default is not a fixed text (an
+   * empty default means the page decides, e.g. the product's own title). */
+  placeholder?: string;
+};
+
+/** A colour of the template a store may change. Stored in the store's theme
+ * under `key` as "#rrggbb"; anything else means the default. */
+export type ColorField = {
+  key: string;
+  label: string;
+  defaultValue: string;
+  hint: string;
+};
+
 export type TemplateInfo = {
   /** The value stored in `stores.template`. */
   id: string;
@@ -25,6 +47,9 @@ export type TemplateInfo = {
   preview: string;
   highlights: string[];
   content: ContentField[];
+  /** Copy and colours the store may change; most templates have none. */
+  texts: TextField[];
+  colors: ColorField[];
   /** True when the template has no size picker and sells only the live
    * product's default variant. The store form warns before switching a
    * multi-variant store onto such a template. */
@@ -93,6 +118,8 @@ export const TEMPLATE_CATALOG: Record<string, TemplateInfo> = {
       "Meta Pixel + Conversions API events",
     ],
     content: [LOGO],
+    texts: [],
+    colors: [],
     singleVariant: false,
   },
   campaign: {
@@ -107,6 +134,8 @@ export const TEMPLATE_CATALOG: Record<string, TemplateInfo> = {
       "Each picture replaceable per store",
     ],
     content: CAMPAIGN_PICTURES,
+    texts: [],
+    colors: [],
     singleVariant: true,
   },
   campaign2: {
@@ -121,9 +150,86 @@ export const TEMPLATE_CATALOG: Record<string, TemplateInfo> = {
       "Same six pictures as Bazar Campaign",
     ],
     content: CAMPAIGN_PICTURES,
+    texts: [],
+    colors: [],
     singleVariant: true,
   },
+  spotlight: {
+    id: "spotlight",
+    name: "Bazar Spotlight",
+    description:
+      "Bazar Classic with a banner of your own above the product. The product picture still follows the size picked; the banner stays put. The picker's heading and the header and footer colours are the store's to set.",
+    preview: "/templates/spotlight.png",
+    highlights: [
+      "Everything in Bazar Classic, size picker included",
+      "A banner of the store's own above the product",
+      "Picker heading reworded per store",
+      "Header and footer colours",
+    ],
+    content: [
+      LOGO,
+      {
+        key: "spotlight",
+        label: "Banner",
+        defaultUrl: "/campaign.jpg",
+        size: "1146×672 · JPG",
+        hint: "Above the product card; stays the same whichever size is picked",
+      },
+    ],
+    texts: [
+      {
+        key: "product_title",
+        label: "Product title",
+        defaultValue: "",
+        maxLength: 120,
+        hint: "The big title on the product card. Empty: the picked size's own title",
+        placeholder: "The picked size's title",
+      },
+      {
+        key: "pick_heading",
+        label: "Picker heading",
+        defaultValue: "কত প্যাকেট নিতে চান সিলেক্ট করুন",
+        maxLength: 120,
+        hint: "Above the sizes to pick from",
+      },
+    ],
+    colors: [
+      { key: "nav_color", label: "Header colour", defaultValue: "#043d22", hint: "The bar with the logo" },
+      { key: "footer_color", label: "Footer colour", defaultValue: "#05200f", hint: "The card at the bottom" },
+    ],
+    singleVariant: false,
+  },
 };
+
+const HEX_RE = /^#[0-9a-f]{6}$/i;
+
+/** "#1a9c4d" is a colour a store may save; anything else is not. */
+export function isHexColor(value: string | undefined): value is string {
+  return value !== undefined && HEX_RE.test(value);
+}
+
+/**
+ * Every text and colour key the template declares, mapped to the store's
+ * value (from its theme) when it has a usable one and the default otherwise.
+ * A colour that is not "#rrggbb" falls back too: it ends up in a style
+ * attribute, so only that one shape is let through.
+ */
+export function resolveOptions(
+  templateId: string,
+  theme: Record<string, string> | undefined,
+): Record<string, string> {
+  const info = TEMPLATE_CATALOG[templateId] ?? TEMPLATE_CATALOG.classic;
+  const out: Record<string, string> = {};
+  for (const field of info.texts) {
+    const value = theme?.[field.key]?.trim();
+    out[field.key] = value ? value.slice(0, field.maxLength) : field.defaultValue;
+  }
+  for (const field of info.colors) {
+    const value = theme?.[field.key];
+    out[field.key] = isHexColor(value) ? value.toLowerCase() : field.defaultValue;
+  }
+  return out;
+}
 
 
 /**
@@ -152,6 +258,8 @@ export function templateInfo(id: string): TemplateInfo {
       preview: "",
       highlights: [],
       content: [],
+      texts: [],
+      colors: [],
       singleVariant: false,
     }
   );

@@ -6,7 +6,7 @@ import "@/templates/classic/landing.css";
 import { getStore, getStoreDirectory, storeHeaders, themeVars } from "@/lib/store";
 import { fetchStorefrontListing } from "@/lib/storefront-api";
 import { loadTemplate, resolveTemplateName } from "@/templates";
-import { resolveContent } from "@/templates/catalog";
+import { resolveContent, resolveOptions } from "@/templates/catalog";
 import type { StorePublicConfig } from "@/templates/types";
 
 /**
@@ -44,6 +44,7 @@ export default async function Home() {
     themeVars: themeVars(store.theme),
     content: resolveContent(resolveTemplateName(store.template), store.content),
     contentSrcset: store.content_srcset ?? {},
+    options: resolveOptions(resolveTemplateName(store.template), store.theme),
   };
   if (listing === null) return <template.Closed store={publicConfig} />;
   return <template.Storefront store={publicConfig} listing={listing} />;

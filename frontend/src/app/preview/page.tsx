@@ -6,7 +6,7 @@ import { getStoreBySlug, themeVars } from "@/lib/store";
 import { fetchStorefrontListing } from "@/lib/storefront-api";
 import { PreviewClient } from "@/app/preview/preview-client";
 import { resolveTemplateName } from "@/templates";
-import { resolveContent } from "@/templates/catalog";
+import { resolveContent, resolveOptions } from "@/templates/catalog";
 import type { StorePublicConfig } from "@/templates/types";
 
 /**
@@ -98,6 +98,7 @@ export default async function PreviewPage({ searchParams }: { searchParams: Sear
     themeVars: themeVars(theme),
     content: resolveContent(templateName, content),
     contentSrcset,
+    options: resolveOptions(templateName, theme),
   };
   // Rendered on the client so the store form can swap pictures live; the
   // order form is inert there (pointer events off).

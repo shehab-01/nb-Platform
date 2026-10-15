@@ -2,6 +2,7 @@
 // module so the admin can name it without pulling the preview page (and the
 // template registry behind it) into the admin bundle.
 
-/** Parent → frame: `{type, content: {key: url}}` swaps the pictures shown.
+/** Parent → frame: `{type, content: {key: url}, options?: {key: value}}`
+ *  swaps the pictures, text and colours shown.
  *  Frame → parent: `${PREVIEW_MESSAGE}-ready` once it can take them. */
 export const PREVIEW_MESSAGE = "nb-preview-content";

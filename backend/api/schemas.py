@@ -1016,6 +1016,10 @@ class StoreCreate(BaseModel):
         for k, v in value.items():
             if len(k) > 40 or len(v) > 200:
                 raise ValueError("Theme entry too long")
+            # Template colours (nav_color, footer_color, ...) end up in a
+            # style attribute on the storefront; only "#rrggbb" gets there.
+            if k.endswith("_color") and v and not re.match(r"^#[0-9a-fA-F]{6}$", v):
+                raise ValueError(f"{k}: a colour like #1a9c4d")
         return value
 
 

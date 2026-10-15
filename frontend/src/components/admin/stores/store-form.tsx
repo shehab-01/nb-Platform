@@ -24,7 +24,7 @@ import {
 } from "@/lib/api";
 import type { Product } from "@/lib/products";
 import { cn } from "@/lib/utils";
-import { resolveContent, templateInfo } from "@/templates/catalog";
+import { isHexColor, resolveContent, resolveOptions, templateInfo } from "@/templates/catalog";
 
 /** "Nature Bazar" -> "NB", "Store One" -> "SO", "Honey" -> "HONEY". */
 export function suggestPrefix(name: string): string {
@@ -134,8 +134,16 @@ export function StoreForm({
     return resolveContent(d.template, overrides);
   }, [d.template, existingPictures, resets, previewUrls]);
 
+  // The template's text and colours as typed, by key; saved into the
+  // store's theme. A key left empty goes back to the template default.
+  const [opts, setOpts] = React.useState<Record<string, string>>(() => ({ ...(store?.theme ?? {}) }));
+  const previewOptions = React.useMemo(() => resolveOptions(d.template, opts), [d.template, opts]);
+
   const creating = store === null;
   const slots = templateInfo(d.template).content;
+  const textFields = templateInfo(d.template).texts;
+  const colorFields = templateInfo(d.template).colors;
+  const badColor = colorFields.find((f) => opts[f.key] && !isHexColor(opts[f.key]));
   // Switching a store that offers several sizes onto a template without a
   // picker silently narrows the offer to the default size. Orders stay
   // correct either way (the API prices from the variant the page names),
@@ -163,6 +171,7 @@ export function StoreForm({
     prefixOk &&
     !prefixTakenBy &&
     (!creating || slugOk) &&
+    !badColor &&
     (narrowing === null || narrowingConfirmed);
   // What is still missing, in the order the fields are asked for.
   const blocker = !d.domain.trim()
@@ -175,9 +184,11 @@ export function StoreForm({
           ? `Order prefix is already used by ${prefixTakenBy.name}`
           : !prefixOk
             ? "Order prefix must start with a letter"
-            : narrowing && !narrowingConfirmed
-              ? "Confirm the template change"
-              : null;
+            : badColor
+              ? `${badColor.label} must look like #1a9c4d`
+              : narrowing && !narrowingConfirmed
+                ? "Confirm the template change"
+                : null;
   const customCount = slots.filter(
     (s) => pictures[s.key] || (existingPictures[s.key] && !resets.has(s.key)),
   ).length;
@@ -195,7 +206,7 @@ export function StoreForm({
         template: d.template,
         currency: store?.currency ?? "BDT",
         orderPrefix: d.orderPrefix,
-        theme: store?.theme ?? {},
+        theme: themeWithOptions(store?.theme ?? {}, d.template, opts),
         domains: [d.domain.trim()],
         isActive: d.isActive,
       });
@@ -438,6 +449,58 @@ export function StoreForm({
           </Card>
         )}
 
+        {textFields.length + colorFields.length > 0 && (
+          <Card title="Text & colours">
+            {textFields.map((field) => (
+              <Row key={field.key} label={field.label} htmlFor={`opt-${field.key}`} hint={field.hint}>
+                <Input
+                  id={`opt-${field.key}`}
+                  className="w-90 max-w-full"
+                  maxLength={field.maxLength}
+                  placeholder={field.placeholder ?? field.defaultValue}
+                  value={opts[field.key] ?? ""}
+                  onChange={(e) => setOpts({ ...opts, [field.key]: e.target.value })}
+                />
+              </Row>
+            ))}
+            {colorFields.map((field) => {
+              const typed = opts[field.key] ?? "";
+              return (
+                <Row key={field.key} label={field.label} htmlFor={`opt-${field.key}`} hint={field.hint}>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      aria-label={`${field.label} picker`}
+                      className="h-9 w-12 cursor-pointer rounded-md border bg-background p-1"
+                      value={previewOptions[field.key]}
+                      onChange={(e) => setOpts({ ...opts, [field.key]: e.target.value })}
+                    />
+                    <Input
+                      id={`opt-${field.key}`}
+                      className="w-28 font-mono"
+                      maxLength={7}
+                      placeholder={field.defaultValue}
+                      value={typed}
+                      aria-invalid={(typed !== "" && !isHexColor(typed)) || undefined}
+                      onChange={(e) => setOpts({ ...opts, [field.key]: e.target.value.trim() })}
+                    />
+                    {typed && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setOpts({ ...opts, [field.key]: "" })}
+                      >
+                        Default
+                      </Button>
+                    )}
+                  </div>
+                </Row>
+              );
+            })}
+          </Card>
+        )}
+
         {error && <p className="text-sm text-destructive">{error}</p>}
 
         <div className="flex flex-wrap items-center gap-3">
@@ -462,10 +525,32 @@ export function StoreForm({
         template={d.template}
         storeSlug={store?.slug}
         content={previewContent}
+        options={previewOptions}
         className="xl:h-[calc(100vh-7rem)]"
       />
     </div>
   );
+}
+
+/**
+ * The theme to save: the store's as it was, with the template's text and
+ * colour keys set from the form, or removed when left empty so the template
+ * default applies. Keys of other templates are kept, so switching back to
+ * one finds its settings where they were.
+ */
+export function themeWithOptions(
+  theme: Record<string, string>,
+  template: string,
+  opts: Record<string, string>,
+): Record<string, string> {
+  const info = templateInfo(template);
+  const out = { ...theme };
+  for (const field of [...info.texts, ...info.colors]) {
+    const value = (opts[field.key] ?? "").trim();
+    if (value) out[field.key] = value;
+    else delete out[field.key];
+  }
+  return out;
 }
 
 /** A titled panel: the form reads as a few short sections, not one long list. */

@@ -23,11 +23,14 @@ export function TemplatePreview({
   /** Picture URL per content key: pending pick, existing upload, or the
       template default — see `resolveContent`. */
   content,
+  /** Text and colour per key, as the form has them — see `resolveOptions`. */
+  options,
   className,
 }: {
   template: string;
   storeSlug?: string;
   content: Record<string, string>;
+  options?: Record<string, string>;
   className?: string;
 }) {
   const info = templateInfo(template);
@@ -41,10 +44,10 @@ export function TemplatePreview({
 
   const post = React.useCallback(() => {
     frameRef.current?.contentWindow?.postMessage(
-      { type: PREVIEW_MESSAGE, content },
+      { type: PREVIEW_MESSAGE, content, options },
       window.location.origin,
     );
-  }, [content]);
+  }, [content, options]);
 
   // Two ways in, because either side may be ready first: the frame says hello
   // when it mounts, and every later pick posts straight away.

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_TEMPLATE, loadTemplate, resolveTemplateName, templateNames } from "@/templates";
-import { TEMPLATE_CATALOG, resolveContent, templateInfo } from "@/templates/catalog";
+import { TEMPLATE_CATALOG, resolveContent, resolveOptions, templateInfo } from "@/templates/catalog";
 
 describe("template registry", () => {
   it("knows the classic template", () => {
@@ -37,6 +37,27 @@ describe("template registry", () => {
     expect("nope" in c).toBe(false);
     expect(Object.keys(resolveContent("classic", {}))).toEqual(["logo"]);
     expect(resolveContent("unknown", {}).logo).toBe("/logo.png");
+  });
+  it("resolves text and colours with defaults and only hex colours", () => {
+    const o = resolveOptions("spotlight", {
+      pick_heading: "  কয়টি নিতে চান?  ",
+      nav_color: "#ABCDEF",
+      footer_color: "red; background:url(x)",
+      header: "#000000",
+    });
+    expect(o.pick_heading).toBe("কয়টি নিতে চান?");
+    expect(o.nav_color).toBe("#abcdef");
+    expect(o.footer_color).toBe(TEMPLATE_CATALOG.spotlight.colors[1].defaultValue);
+    expect("header" in o).toBe(false);
+    expect(resolveOptions("spotlight", {}).pick_heading).toBe("কত প্যাকেট নিতে চান সিলেক্ট করুন");
+    // No title written: empty, so the page shows the picked size's own.
+    expect(resolveOptions("spotlight", {}).product_title).toBe("");
+    expect(resolveOptions("spotlight", { product_title: "মধু" }).product_title).toBe("মধু");
+    expect(resolveOptions("classic", { nav_color: "#000000" })).toEqual({});
+  });
+  it("spotlight keeps the size picker and has its own banner", () => {
+    expect(TEMPLATE_CATALOG.spotlight.singleVariant).toBe(false);
+    expect(Object.keys(resolveContent("spotlight", {}))).toEqual(["logo", "spotlight"]);
   });
   it("loads a module with the two components", async () => {
     const tpl = await loadTemplate("classic");

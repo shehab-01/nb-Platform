@@ -9,8 +9,8 @@ import type { StorePublicConfig, TemplateModule } from "@/templates/types";
 
 /**
  * The template, rendered live. The parent page (the store form) may post
- * `{type: "nb-preview-content", content: {key: url}}` to swap pictures before
- * anything is uploaded; blob: URLs from a same-origin parent load fine here.
+ * `{type: "nb-preview-content", content: {key: url}, options?: {key: value}}`
+ * to swap pictures, text and colours before anything is saved; blob: URLs from a same-origin parent load fine here.
  * Only same-origin messages are honoured.
  */
 export function PreviewClient({
@@ -24,6 +24,9 @@ export function PreviewClient({
 }) {
   const [template, setTemplate] = React.useState<TemplateModule | null>(null);
   const [overrides, setOverrides] = React.useState<Record<string, string>>({});
+  // Text and colours as the form has them right now, already resolved
+  // against the template's defaults by the parent.
+  const [optionOverrides, setOptionOverrides] = React.useState<Record<string, string>>({});
 
   React.useEffect(() => {
     let live = true;
@@ -38,9 +41,14 @@ export function PreviewClient({
   React.useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
-      const data = event.data as { type?: string; content?: Record<string, string> };
+      const data = event.data as {
+        type?: string;
+        content?: Record<string, string>;
+        options?: Record<string, string>;
+      };
       if (data?.type !== PREVIEW_MESSAGE || !data.content) return;
       setOverrides(data.content);
+      if (data.options) setOptionOverrides(data.options);
     };
     window.addEventListener("message", onMessage);
     // Tell the parent we can take pictures now (it may have picked some
@@ -53,6 +61,8 @@ export function PreviewClient({
   const merged: StorePublicConfig = {
     ...store,
     content: { ...store.content, ...pick(overrides, Object.keys(store.content)) },
+    // Every key, empty ones too: an emptied title means "the default" here.
+    options: { ...store.options, ...optionOverrides },
   };
   return (
     <div style={{ pointerEvents: "none" }} aria-hidden>

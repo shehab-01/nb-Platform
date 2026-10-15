@@ -71,3 +71,15 @@ def test_content_url_maps_media_paths():
 
     assert content_url("stores/2/abc.jpg") == "/media/stores/2/abc.jpg"
     assert content_url("/campaign.jpg") == "/campaign.jpg"
+
+
+def test_theme_colours_must_be_hex():
+    from pydantic import ValidationError
+
+    from api.schemas import StoreUpdate
+
+    ok = StoreUpdate(theme={"nav_color": "#1A9C4D", "footer_color": "", "pick_heading": "যেকোনো লেখা"})
+    assert ok.theme["nav_color"] == "#1A9C4D"
+    for bad in ("red", "#12345", "#1a9c4d; background:url(x)"):
+        with pytest.raises(ValidationError):
+            StoreUpdate(theme={"nav_color": bad})

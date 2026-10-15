@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentProps } from "react";
 
 import "./page.css";
 import { Storefront as Base } from "@/templates/classic/storefront";
-import type { StorefrontProps } from "@/templates/types";
 
 /**
  * Bazar Classic as a store sees it: the shared classic page plus this
@@ -12,9 +11,10 @@ import type { StorefrontProps } from "@/templates/types";
  * left on scroll while a red order button slides in, pill buttons with a
  * light sweep, firmer card edges, and the order summary as a table. Kept out
  * of storefront.tsx, which the campaign templates also build on, so only
- * this template gets it.
+ * this template gets it. Templates that are Bazar Classic plus a little
+ * (spotlight) render this and hand the shared page's own props through.
  */
-export function Storefront(props: StorefrontProps) {
+export function Storefront(props: ComponentProps<typeof Base>) {
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40);

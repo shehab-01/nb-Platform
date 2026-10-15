@@ -64,7 +64,15 @@ export function Storefront({
   productBelowFold = false,
   hideProductCard = false,
   orderTable = false,
+  pickHeading = "কত প্যাকেট নিতে চান সিলেক্ট করুন",
+  productTitle,
 }: StorefrontProps & {
+  /** A fixed title for the product card in place of the picked size's
+   * own; a template may let the store write it. */
+  productTitle?: string;
+  /** The heading over the size picker; a template may let the store
+   * reword it. */
+  pickHeading?: string;
   /** Rendered full-width between the logo bar and the product card; how the
    * campaign template adds its banners on top of this page. */
   beforeProduct?: ReactNode;
@@ -264,7 +272,7 @@ export function Storefront({
       <section className="nb-card nb-product">
         {hideProductCard ? null : (
           <>
-            <h1>{variant.title}</h1>
+            <h1>{productTitle || variant.title}</h1>
             <div
               className="nb-product-image"
               // No picture yet: the logo stands in, on the dark ground it was
@@ -300,7 +308,7 @@ export function Storefront({
 
         {hidePicker ? null : (
           <div className="nb-block" aria-labelledby="nb-pick">
-            <h2 id="nb-pick">কত প্যাকেট নিতে চান সিলেক্ট করুন</h2>
+            <h2 id="nb-pick">{pickHeading}</h2>
             {variants.map((v, i) => (
               <SizeOption
                 key={i}

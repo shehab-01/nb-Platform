@@ -23,6 +23,10 @@ export type StorePublicConfig = {
   /** srcset per content key for the store's own uploads (their resized WebP
    * copies); absent for template defaults, which next/image resizes. */
   contentSrcset: Record<string, string>;
+  /** Text and colours by field key, the store's own or the template default
+   * (templates/catalog.resolveOptions). Colours are always "#rrggbb". Every
+   * key the template declares is present. */
+  options: Record<string, string>;
 };
 
 export type StorefrontProps = {

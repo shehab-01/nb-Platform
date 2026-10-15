@@ -16,6 +16,7 @@ from sqlalchemy import (
     select,
     update,
 )
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -330,6 +331,7 @@ async def save_order_draft(
     mobile = bd_mobile(phone)
     previous_mobile = bd_mobile(order.phone) if order is not None else None
 
+    created = False
     if order is None:
         # A new lead is written against what is on sale, so the Incomplete
         # list shows what they were about to buy. Nothing live, nothing to
@@ -337,7 +339,7 @@ async def save_order_draft(
         product = await catalogue.active(session, store.id)
         if product is None:
             return OrderDraftOut(saved=False)
-        order = Order(
+        new_order = Order(
             store_id=store.id,
             customer_name=name,
             phone=phone,
@@ -352,17 +354,33 @@ async def save_order_draft(
             total_amount=product.unit_price,
             items=[_line(product, 1)],
         )
-        session.add(order)
-        await session.flush()
-        session.add(
-            OrderEvent(
-                store_id=order.store_id,
-                order_id=order.id,
-                event_type="draft_captured",
-                new_status=OrderStatus.incomplete.value,
+        try:
+            async with session.begin_nested():
+                session.add(new_order)
+                await session.flush()
+        except IntegrityError:
+            # Browser autofill fills every field at once, so several autosaves
+            # for one visit can arrive together; they all found no row, and
+            # only the first insert wins the unique draft_key. The rest update
+            # that row instead of crashing.
+            order = await _find_by_draft_key(session, store.id, payload.draft_key)
+            if order is None or order.status != OrderStatus.incomplete.value:
+                return OrderDraftOut(saved=False)
+            # The winning request already queued the courier check.
+            previous_mobile = bd_mobile(order.phone)
+        else:
+            created = True
+            order = new_order
+            session.add(
+                OrderEvent(
+                    store_id=order.store_id,
+                    order_id=order.id,
+                    event_type="draft_captured",
+                    new_status=OrderStatus.incomplete.value,
+                )
             )
-        )
-    else:
+
+    if not created:
         # Only ever fill fields in. A revisit that retypes just the phone must
         # not blank out the name and address an earlier autosave captured.
         order.draft_key = payload.draft_key

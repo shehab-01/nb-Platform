@@ -109,6 +109,22 @@ export function getOrderColumns({
       enableHiding: false,
     },
     {
+      // Counts on across pages (page 2 of 50 starts at 51), so the last
+      // number on the last page is how many orders the filters matched.
+      id: "rowNo",
+      meta: { label: "No." },
+      header: "No.",
+      cell: ({ row, table }) => {
+        const { pageIndex, pageSize } = table.getState().pagination;
+        return (
+          <span className="text-sm tabular-nums text-muted-foreground">
+            {pageIndex * pageSize + row.index + 1}
+          </span>
+        );
+      },
+      enableSorting: false,
+    },
+    {
       accessorKey: "createdAt",
       meta: { label: "Created At" },
       header: ({ column }) => (

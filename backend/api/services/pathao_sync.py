@@ -126,9 +126,10 @@ async def poll_once() -> int:
                         # the batch would only fail the same way — stop the
                         # round early and pick it up next scheduled poll.
                         log.warning(
-                            "Pathao sync: %s (%s): %s",
+                            "Pathao sync: %s (%s): HTTP %s %s",
                             order.pathao_consignment_id,
                             order.order_no,
+                            exc.status,
                             pathao.error_text(exc),
                         )
                         if pathao.is_rate_limited(exc):

@@ -258,7 +258,13 @@ export function DataTable<TData, TValue>({
         ) : null}
         {serverSide?.loading ? (
           <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
-        ) : null}
+        ) : (
+          // How many rows the current search and filters match, across all
+          // pages — not just the ones on screen.
+          <span className="shrink-0 whitespace-nowrap rounded-md bg-muted px-2 py-1 text-sm font-medium tabular-nums">
+            {totalRows.toLocaleString()} {totalRows === 1 ? "row" : "rows"}
+          </span>
+        )}
         <div className="flex-1" />
         <DataTableViewOptions
           table={table}

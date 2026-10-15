@@ -101,8 +101,27 @@ class PathaoLocationIn(BaseModel):
         return self
 
 
+class OrderLinePriceIn(BaseModel):
+    """A new unit price for one of the order's lines. item_id 0 means the
+    order's only line on orders written before line items existed."""
+
+    item_id: int = Field(ge=0)
+    unit_price: int = Field(ge=0, le=1_000_000)
+
+
+class OrderPricingIn(BaseModel):
+    """Staff repricing an order on the phone: new unit prices for its lines
+    and a discount off their sum. The server works out the total; nothing
+    here names one, so a tampered browser cannot set it directly."""
+
+    lines: list[OrderLinePriceIn] = Field(min_length=1, max_length=50)
+    discount: int = Field(default=0, ge=0, le=10_000_000)
+
+
 class OrderUpdate(BaseModel):
     status: OrderStatus | None = None
+    # Absent leaves the prices alone; present reprices the order.
+    pricing: OrderPricingIn | None = None
     printed: bool | None = None
     courier: bool | None = None
     comment: str | None = Field(default=None, max_length=2000)

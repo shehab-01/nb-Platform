@@ -58,6 +58,36 @@ import { cn } from "@/lib/utils";
 
 const NO_PREVIOUS: PhoneLookup = { orders: [], incomplete: [] };
 
+/** The order's lines. Orders written before line items existed carry only
+ *  the summary columns, so they read as one line with id 0 — the id the API
+ *  takes for repricing such an order. */
+function linesOf(order: Order) {
+  return order.items.length > 0
+    ? order.items
+    : [
+        {
+          id: 0,
+          productId: null,
+          productName: order.product,
+          unitPrice: order.unitPrice,
+          quantity: order.quantity,
+          lineTotal: order.total,
+        },
+      ];
+}
+
+/** The discount already on the order: what its lines add up to, less what
+ *  the customer pays. */
+function savedDiscountOf(order: Order): number {
+  const subtotal = linesOf(order).reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
+  return Math.max(subtotal - order.total, 0);
+}
+
+/** The price boxes as the order has them, by line id. */
+function pricesOf(order: Order): Record<number, string> {
+  return Object.fromEntries(linesOf(order).map((l) => [l.id, String(l.unitPrice)]));
+}
+
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
@@ -83,6 +113,8 @@ export function OrderDetailsModal({
   );
   const [note, setNote] = React.useState("");
   const [discount, setDiscount] = React.useState("");
+  // The Price box of each line as typed, by line id.
+  const [editPrices, setEditPrices] = React.useState<Record<number, string>>({});
   const [editName, setEditName] = React.useState("");
   const [editPhone, setEditPhone] = React.useState("");
   const [rechecking, setRechecking] = React.useState(false);
@@ -132,7 +164,8 @@ export function OrderDetailsModal({
     if (order) {
       setPendingStatus(null);
       setNote(order.comment);
-      setDiscount("");
+      setDiscount(savedDiscountOf(order) ? String(savedDiscountOf(order)) : "");
+      setEditPrices(pricesOf(order));
       setEditName(order.customerName);
       setEditPhone(order.phone);
       setEditAddress(order.address);
@@ -201,27 +234,38 @@ export function OrderDetailsModal({
 
   const claim = activeClaim(order);
 
-  // Orders written before line items existed carry only the summary columns,
-  // so fall back to a single synthetic line rather than showing an empty list.
-  const lines =
-    order.items.length > 0
-      ? order.items
-      : [
-          {
-            id: 0,
-            productId: null,
-            productName: order.product,
-            unitPrice: order.unitPrice,
-            quantity: order.quantity,
-            lineTotal: order.total,
-          },
-        ];
+  const lines = linesOf(order);
 
-  const discountAmount = Math.min(
-    Math.max(Number(discount) || 0, 0),
-    order.total
-  );
-  const grandTotal = order.total - discountAmount;
+  // Prices as typed. Once the parcel is booked Pathao has the amount to
+  // collect, so the price is locked (the API refuses it too).
+  const priceLocked =
+    order.pathaoConsignmentId !== null || order.status === "shipped" || order.status === "history";
+  const typedPrice = (line: (typeof lines)[number]) => {
+    const raw = editPrices[line.id];
+    return raw === undefined ? line.unitPrice : raw === "" ? NaN : Number(raw);
+  };
+  const pricesValid = lines.every((l) => {
+    const p = typedPrice(l);
+    return Number.isInteger(p) && p >= 0;
+  });
+  const subtotal = pricesValid
+    ? lines.reduce((sum, l) => sum + typedPrice(l) * l.quantity, 0)
+    : 0;
+  const discountAmount = Math.max(Number(discount) || 0, 0);
+  const discountValid = Number.isInteger(discountAmount) && discountAmount <= subtotal;
+  const grandTotal = pricesValid && discountValid ? subtotal - discountAmount : order.total;
+  const priceChanged =
+    !priceLocked &&
+    (lines.some((l) => typedPrice(l) !== l.unitPrice) ||
+      discountAmount !== savedDiscountOf(order));
+  const priceValid = pricesValid && discountValid;
+  const pricingPatch =
+    priceChanged && priceValid
+      ? {
+          lines: lines.map((l) => ({ itemId: l.id, unitPrice: typedPrice(l) })),
+          discount: discountAmount,
+        }
+      : undefined;
 
   // Every field edit that hasn't reached the server yet, for the review
   // prompt. Blank name/phone/address are ignored: the server rejects them.
@@ -247,12 +291,16 @@ export function OrderDetailsModal({
   if (note !== order.comment) {
     changes.push({ field: "Note", from: order.comment, to: note });
   }
+  if (pricingPatch) {
+    changes.push({ field: "Total", from: `৳${order.total}`, to: `৳${grandTotal}` });
+  }
   const detailsPatch = {
     customerName: editName.trim() || undefined,
     phone: phoneNormalised ?? undefined,
     address: editAddress.trim() || undefined,
     comment: note !== order.comment ? note : undefined,
     pathaoLocation: locationChanged ? editLocation : undefined,
+    pricing: pricingPatch,
   };
 
   const discardEdits = () => {
@@ -261,6 +309,8 @@ export function OrderDetailsModal({
     setEditAddress(order.address);
     setEditLocation(order.pathaoLocation);
     setNote(order.comment);
+    setEditPrices(pricesOf(order));
+    setDiscount(savedDiscountOf(order) ? String(savedDiscountOf(order)) : "");
   };
 
   // "Update": save the edits along with the status, after a look at them.
@@ -294,14 +344,7 @@ export function OrderDetailsModal({
     if (intent === "close") onOpenChange(false);
   };
 
-  const run = async (patch: {
-    status?: OrderStatus;
-    comment?: string;
-    customerName?: string;
-    phone?: string;
-    address?: string;
-    pathaoLocation?: PathaoLocation;
-  }) => {
+  const run = async (patch: Parameters<typeof updateOrder>[1]) => {
     setBusy(true);
     setError(null);
     try {
@@ -500,11 +543,29 @@ export function OrderDetailsModal({
                       </div>
                       <div className="space-y-1.5">
                         <Label>Price</Label>
-                        <Input readOnly value={line.unitPrice} />
+                        <Input
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          readOnly={priceLocked}
+                          title={priceLocked ? "Booked with the courier: the price is fixed" : undefined}
+                          value={editPrices[line.id] ?? String(line.unitPrice)}
+                          onChange={(e) =>
+                            setEditPrices({ ...editPrices, [line.id]: e.target.value })
+                          }
+                          aria-invalid={!Number.isInteger(typedPrice(line)) || typedPrice(line) < 0 || undefined}
+                        />
                       </div>
                       <div className="space-y-1.5">
                         <Label>Total</Label>
-                        <Input readOnly value={line.lineTotal.toFixed(2)} />
+                        <Input
+                          readOnly
+                          value={
+                            Number.isFinite(typedPrice(line))
+                              ? (typedPrice(line) * line.quantity).toFixed(2)
+                              : ""
+                          }
+                        />
                       </div>
                     </div>
                   </div>
@@ -520,15 +581,17 @@ export function OrderDetailsModal({
                   <Input
                     type="number"
                     min={0}
-                    max={order.total}
+                    max={subtotal}
                     placeholder="0"
+                    readOnly={priceLocked}
                     value={discount}
                     onChange={(e) => setDiscount(e.target.value)}
+                    aria-invalid={!discountValid || undefined}
                   />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Sub Total</Label>
-                  <Input readOnly value={order.total} />
+                  <Input readOnly value={pricesValid ? subtotal : ""} />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Delivery Charge</Label>
@@ -543,6 +606,28 @@ export function OrderDetailsModal({
                   />
                 </div>
               </div>
+              {/* The new price on its own, without a status change: what the
+                  customer agreed on the call. The server works out the total
+                  from these prices and the discount. */}
+              {priceChanged && (
+                <div className="flex items-center justify-end gap-3">
+                  {!priceValid && (
+                    <span className="text-xs text-destructive">
+                      {pricesValid
+                        ? "Discount can't be more than the sub total"
+                        : "Prices must be whole taka, 0 or more"}
+                    </span>
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={busy || !pricingPatch}
+                    onClick={() => void run({ pricing: pricingPatch })}
+                  >
+                    {busy ? "Saving…" : `Save price (৳${grandTotal.toLocaleString()})`}
+                  </Button>
+                </div>
+              )}
             </div>
 
             {order.status !== "confirmed" && order.status !== "shipped" && (
@@ -551,7 +636,9 @@ export function OrderDetailsModal({
                   size="lg"
                   disabled={busy}
                   className="bg-emerald-600 text-white hover:bg-emerald-700"
-                  onClick={() => run({ status: "confirmed" })}
+                  // A price typed but not saved yet is confirmed with it:
+                  // the button says that amount, so that is what it saves.
+                  onClick={() => run({ status: "confirmed", pricing: pricingPatch })}
                 >
                   Approve Order (৳{grandTotal.toLocaleString()})
                 </Button>

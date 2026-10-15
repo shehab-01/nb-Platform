@@ -277,6 +277,9 @@ export async function updateOrder(
     courier?: boolean;
     /** Replaces the delivery location outright; leave out to keep it. */
     pathaoLocation?: PathaoLocation;
+    /** New unit prices per line (itemId 0: an order without line items)
+     *  and a discount off their sum; the server works out the total. */
+    pricing?: { lines: { itemId: number; unitPrice: number }[]; discount: number };
   }
 ): Promise<Order> {
   const order = await request<ApiOrder>(`/api/orders/${id}`, {
@@ -291,6 +294,15 @@ export async function updateOrder(
       courier: patch.courier,
       pathao_location: patch.pathaoLocation
         ? locationBody(patch.pathaoLocation)
+        : undefined,
+      pricing: patch.pricing
+        ? {
+            lines: patch.pricing.lines.map((l) => ({
+              item_id: l.itemId,
+              unit_price: l.unitPrice,
+            })),
+            discount: patch.pricing.discount,
+          }
         : undefined,
     }),
   });

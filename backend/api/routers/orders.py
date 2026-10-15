@@ -61,6 +61,7 @@ from api.schemas import (
     OrderDraftOut,
     OrderListOut,
     OrderOut,
+    OrderPricingIn,
     OrderStatsOut,
     OrderUpdate,
     Performer,
@@ -2108,6 +2109,61 @@ async def refresh_pathao(
     return PathaoSendOut(orders=await _load_orders(session, refreshed_ids), failed=failed)
 
 
+def _reprice(
+    session: AsyncSession, order: Order, user: User, pricing: OrderPricingIn
+) -> None:
+    """New unit prices for the order's lines, less a discount, as staff
+    agreed them with the customer. total_amount — what Pathao collects and
+    revenue sums — becomes the lines' sum minus the discount, worked out
+    here. Refused once the parcel is booked: Pathao already has the amount
+    to collect, and a total that disagrees with it is worse than none."""
+    if order.pathao_consignment_id or order.status in (
+        OrderStatus.shipped.value,
+        OrderStatus.history.value,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Already booked with the courier; the price can no longer change",
+        )
+    prices = {line.item_id: line.unit_price for line in pricing.lines}
+    if order.items:
+        by_id = {item.id: item for item in order.items}
+        unknown = set(prices) - set(by_id)
+        if unknown:
+            raise HTTPException(status_code=400, detail="Not a line of this order")
+        for item_id, price in prices.items():
+            by_id[item_id].unit_price = price
+        subtotal = sum(item.unit_price * item.quantity for item in order.items)
+        units = sum(item.quantity for item in order.items)
+    else:
+        # Written before line items: the summary columns are the one line.
+        if set(prices) != {0}:
+            raise HTTPException(status_code=400, detail="Not a line of this order")
+        order.unit_price = prices[0]
+        subtotal = order.unit_price * order.quantity
+        units = order.quantity
+    if pricing.discount > subtotal:
+        raise HTTPException(status_code=400, detail="Discount is more than the order")
+    total = subtotal - pricing.discount
+    previous = order.total_amount
+    order.total_amount = total
+    # The same summary rule as a manual order with a negotiated total.
+    if order.items:
+        order.unit_price = total // units if units else total
+    if total == previous:
+        return
+    session.add(
+        OrderEvent(
+            store_id=order.store_id,
+            order_id=order.id,
+            actor_id=user.id,
+            event_type="price_updated",
+            note=f"৳{previous} → ৳{total}"
+            + (f" (discount ৳{pricing.discount})" if pricing.discount else ""),
+        )
+    )
+
+
 @router.patch("/{order_id}", response_model=OrderOut)
 async def update_order(
     order_id: int,
@@ -2127,6 +2183,7 @@ async def update_order(
             payload.printed,
             payload.courier,
             payload.pathao_location,
+            payload.pricing,
         )
     ):
         raise HTTPException(status_code=400, detail="Nothing to update")
@@ -2142,6 +2199,10 @@ async def update_order(
             status_code=409,
             detail=f"{order.assigned_to_display or 'Another worker'} is handling this order",
         )
+
+    # Before the status: "Approve" with a new price confirms at that price.
+    if payload.pricing is not None:
+        _reprice(session, order, user, payload.pricing)
 
     if payload.status is not None:
         _move_status(session, order, user, payload.status)

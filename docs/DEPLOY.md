@@ -30,6 +30,8 @@ example's value.
 | `COOKIE_SECURE` | `true` |
 | `CLIENT_IP_HEADER` | `x-forwarded-for` |
 | `PATHAO_BASE_URL` | `https://api-hermes.pathao.com` when parcels go live; sandbox until then |
+| `CARRYBEE_BASE_URL` | `https://developers.carrybee.com` when Carrybee parcels go live; `https://sandbox.carrybee.com` until then |
+| `CARRYBEE_TRACKING_URL` | Empty until Carrybee gives a public tracking page; then its URL with `{consignment_id}` where the id goes |
 | `API_PORT` / `WEB_PORT` | `8001` / `8090` |
 | `UVICORN_WORKERS` | `2` |
 | `GTM_ID` | optional, else empty |
@@ -138,6 +140,13 @@ until a super admin approves them and assigns a store.
 5. Verify Meta with the test event code from the live domain (browser + server
    pairs marked deduplicated in Events Manager), then clear the code. Book
    one sandbox Pathao parcel, then switch `PATHAO_BASE_URL` to live.
+   For Carrybee: switch it on in Settings, copy the "header value should be
+   exactly" value from Carrybee → Webhook Integration into "Integration
+   header", save, then paste the store's webhook URL (shown under Carrybee)
+   and the webhook secret into that Carrybee page with every event selected. Carrybee must be able to
+   reach the admin domain over HTTPS; the URL goes through the web app's
+   `/api` rewrite like every other call. Book one sandbox parcel, watch its
+   status arrive, then switch `CARRYBEE_BASE_URL` to live.
 
 Adding a domain later: Admin → Stores → Edit, or from the server:
 

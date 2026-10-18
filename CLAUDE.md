@@ -30,7 +30,7 @@ are), `docs/ARCHITECTURE-V1.md` (what we inherited), `DEV.md` (running it),
 - Runtime configuration, not build-time: there are no `NEXT_PUBLIC_*`
   variables. The storefront layout serialises the store's public config
   into `<script id="nb-store">`; `lib/store-public.ts` reads it. Services
-  take a per-store `MetaConfig` / `PathaoConfig` from
+  take a per-store `MetaConfig` / `PathaoConfig` / `CarrybeeConfig` from
   `stores.load_integrations()`, never `settings.*`. Per-store secrets live in
   `store_settings.*_enc`, encrypted by `api/crypto.py` under
   `APP_ENCRYPTION_KEY`, and the API returns only set-flags and a 4-char hint.
@@ -47,7 +47,7 @@ are), `docs/ARCHITECTURE-V1.md` (what we inherited), `DEV.md` (running it),
   project `nbplatform`. Same ports locally so v1 (`../natureBazar`, 8085/8000)
   and v2 coexist.
 - `DEV_LOGIN_EMAIL` and `DEV_STORE_FALLBACK` are development switches and
-  must be empty in production. Live Meta or Pathao credentials never go in
+  must be empty in production. Live Meta, Pathao or Carrybee credentials never go in
   the dev `.env`.
 - Ask before anything irreversible (dropping data, cutover, changing a
   migration's meaning). Do not push or deploy unless asked.
@@ -56,8 +56,8 @@ are), `docs/ARCHITECTURE-V1.md` (what we inherited), `DEV.md` (running it),
 
 ```
 backend/   FastAPI. api/models.py, api/routers/*, api/services/* (meta_capi,
-           pathao, pathao_address), api/stores.py (host → store), api/tenancy.py
-           (memberships, X-Admin-Store), alembic/versions (0001–0040), scripts/seed_dev.py,
+           pathao, pathao_address, carrybee, courier), api/stores.py (host → store), api/tenancy.py
+           (memberships, X-Admin-Store), alembic/versions (0001–0048), scripts/seed_dev.py,
            tests/ (pytest, no DB)
 frontend/  Next.js 16 App Router. src/proxy.ts (host routing), src/lib/store.ts
            (server-side store config), src/lib/admin-store.ts (+ lib/http.ts:

@@ -17,7 +17,7 @@ from api.address import ADDRESS_RULE, valid_address
 from api.config import settings
 from api.models import OrderSource, OrderStatus, UserRole, UserStatus
 from api.phone import bd_mobile
-from api.services.pathao import tracking_url
+from api.services.courier import tracking_url
 
 PHONE_RULE = "Phone must be an 11-digit Bangladeshi mobile number (01XXXXXXXXX)"
 
@@ -237,10 +237,14 @@ class OrderOut(BaseModel):
     previous_orders: int = 0
     tags: list[OrderTagOut] = []
     items: list[OrderItemOut] = []
-    pathao_consignment_id: str | None = None
-    pathao_status: str | None = None
-    pathao_delivery_fee: int | None = None
-    pathao_sent_at: datetime | None = None
+    # The courier booking (api.services.courier): whose it is, its tracking
+    # number, and the courier's last word on it.
+    courier_provider: str | None = None
+    courier_consignment_id: str | None = None
+    courier_status: str | None = None
+    courier_status_at: datetime | None = None
+    courier_delivery_fee: int | None = None
+    courier_sent_at: datetime | None = None
     # The delivery location in Pathao's ids (parser or staff), and how sure
     # the parser was: high / medium / low, or "manual" once staff chose.
     pathao_city_id: int | None = None
@@ -252,10 +256,8 @@ class OrderOut(BaseModel):
 
     @computed_field
     @property
-    def pathao_tracking_url(self) -> str | None:
-        if not self.pathao_consignment_id:
-            return None
-        return tracking_url(self.pathao_consignment_id, self.phone)
+    def courier_tracking_url(self) -> str | None:
+        return tracking_url(self.courier_provider, self.courier_consignment_id, self.phone)
 
     # From the model: "<store prefix>-<id>".
     order_no: str
@@ -328,26 +330,39 @@ class BulkOrderResult(BaseModel):
     skipped: list[BulkSkipped]
 
 
-# Pathao is called one order at a time (only the per-order endpoint hands back
-# a consignment id), so a batch's wall time grows with its length. Twenty keeps
-# a request well inside Cloudflare's 100s proxy timeout; the admin splits a
-# larger selection and sends the batches back to back.
-PATHAO_BATCH_LIMIT = 20
+# Couriers are called one order at a time (only the per-order endpoint hands
+# back a consignment id), so a batch's wall time grows with its length. Twenty
+# keeps a request well inside Cloudflare's 100s proxy timeout; the admin splits
+# a larger selection and sends the batches back to back.
+COURIER_BATCH_LIMIT = 20
+
+CourierName = Literal["pathao", "carrybee"]
 
 
-class PathaoSendIn(BaseModel):
-    order_ids: list[int] = Field(min_length=1, max_length=PATHAO_BATCH_LIMIT)
+class CourierSendIn(BaseModel):
+    order_ids: list[int] = Field(min_length=1, max_length=COURIER_BATCH_LIMIT)
+    # Which courier to book with. Ignored by refresh, which asks each order's
+    # own courier.
+    courier: CourierName = "pathao"
 
 
-class PathaoFailure(BaseModel):
+class CourierFailure(BaseModel):
     order_id: int
     order_no: str
     error: str
 
 
-class PathaoSendOut(BaseModel):
+class CourierSendOut(BaseModel):
     orders: list[OrderOut]
-    failed: list[PathaoFailure]
+    failed: list[CourierFailure]
+
+
+class CourierOption(BaseModel):
+    """A courier the store can book with now (switched on and configured)."""
+
+    name: CourierName
+    label: str
+    sandbox: bool
 
 
 class PathaoSyncFailure(BaseModel):
@@ -410,6 +425,29 @@ class PathaoStatusOut(BaseModel):
     error: str | None = None
 
 
+class CarrybeeStatusOut(BaseModel):
+    """The Settings page's Carrybee connection test, with saved credentials."""
+
+    configured: bool
+    sandbox: bool
+    base_url: str
+    store_id: str
+    stores: list[dict] = []
+    error: str | None = None
+
+
+class CourierSplit(BaseModel):
+    """One courier's share of a period's parcels."""
+
+    courier: CourierName
+    # Booked with this courier.
+    sent: int = 0
+    delivered: int = 0
+    returned: int = 0
+    # Booked, not delivered or returned yet.
+    in_transit: int = 0
+
+
 class DashboardTotals(BaseModel):
     """A month's headline figures."""
 
@@ -419,6 +457,8 @@ class DashboardTotals(BaseModel):
     confirmed: int
     # Reported delivered by the courier.
     delivered: int
+    # The same month's parcels by courier, for every courier that has any.
+    couriers: list[CourierSplit] = []
 
 
 class DashboardPeriod(BaseModel):
@@ -436,6 +476,8 @@ class DashboardPeriod(BaseModel):
     leads: int
     leads_processing: int
     leads_confirmed: int
+    # The chosen days' orders booked with each courier, by where they are now.
+    couriers: list[CourierSplit] = []
 
 
 class Performer(BaseModel):
@@ -493,7 +535,7 @@ class StaffDayStats(BaseModel):
     from_incomplete: int = 0
     delivered: int = 0
     returned: int = 0
-    # Sent to Pathao, not yet delivered or returned.
+    # Sent to the courier, not yet delivered or returned.
     in_transit: int = 0
 
 
@@ -514,11 +556,11 @@ class DeliveryTeamDay(BaseModel):
     """The orders confirmed on one Dhaka day and where their parcels are now."""
 
     day: date
-    # Handed to Pathao.
+    # Handed to a courier.
     sent: int = 0
     delivered: int = 0
     returned: int = 0
-    # With Pathao, not yet delivered or returned.
+    # With the courier, not yet delivered or returned.
     in_transit: int = 0
 
 
@@ -534,6 +576,8 @@ class DeliveryTeamOut(BaseModel):
     returned: int
     in_transit: int
     days: list[DeliveryTeamDay]
+    # The month's parcels by courier, for every courier that has any.
+    couriers: list[CourierSplit] = []
 
 
 class StaffDayOrder(BaseModel):
@@ -544,8 +588,9 @@ class StaffDayOrder(BaseModel):
     customer_name: str
     source: str
     status: str
-    pathao_status: str | None = None
-    # Pathao's tracking number, once the parcel is booked.
+    courier_provider: str | None = None
+    courier_status: str | None = None
+    # The courier's tracking number, once the parcel is booked.
     consignment_id: str | None = None
     delivered: bool
     confirmed_at: datetime

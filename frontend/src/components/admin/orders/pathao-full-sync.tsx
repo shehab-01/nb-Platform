@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   getPathaoFullSync,
+  listCouriers,
   startPathaoFullSync,
   stopPathaoFullSync,
   type PathaoSyncRun,
@@ -53,6 +54,21 @@ export function PathaoFullSync() {
 
   React.useEffect(load, [load]);
 
+  // Only stores with Pathao switched on get the button; Carrybee keeps
+  // itself current by webhook. null while unknown.
+  const [pathaoOn, setPathaoOn] = React.useState<boolean | null>(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    listCouriers()
+      .then((list) => {
+        if (!cancelled) setPathaoOn(list.some((c) => c.name === "pathao"));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const active = isActive(run);
   React.useEffect(() => {
     if (!active) return;
@@ -81,6 +97,8 @@ export function PathaoFullSync() {
       setBusy(false);
     }
   };
+
+  if (!pathaoOn && !active) return null;
 
   const percent =
     run && run.total > 0 ? Math.round((run.checked / run.total) * 100) : 0;

@@ -23,7 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { Order } from "@/lib/orders";
+import { COURIER_LABELS, type CourierName, type Order } from "@/lib/orders";
 import type { StickerSize } from "@/lib/stickers";
 import { cn } from "@/lib/utils";
 
@@ -35,8 +35,8 @@ export type BulkMode = "confirm" | "ship" | "history";
 
 export type BulkHandlers = {
   sendToShipping: (orders: Order[]) => Promise<void>;
-  sendToPathao: (orders: Order[]) => Promise<void>;
-  refreshPathao: (orders: Order[]) => Promise<void>;
+  sendToCourier: (orders: Order[], courier: CourierName) => Promise<void>;
+  refreshCourier: (orders: Order[]) => Promise<void>;
   printStickers: (orders: Order[], size: StickerSize) => Promise<void>;
   sendToHistory: (orders: Order[]) => Promise<void>;
 };
@@ -106,6 +106,7 @@ export function OrderBulkActions({
   selectAllPage,
   allPageSelected,
   handlers,
+  couriers,
 }: {
   mode: BulkMode;
   rows: Order[];
@@ -113,6 +114,8 @@ export function OrderBulkActions({
   selectAllPage: () => void;
   allPageSelected: boolean;
   handlers: BulkHandlers;
+  /** The couriers switched on in Settings, one Send button each. */
+  couriers: CourierName[];
 }) {
   const [busy, setBusy] = React.useState<string | null>(null);
 
@@ -125,8 +128,8 @@ export function OrderBulkActions({
     }
   };
 
-  const unsent = rows.filter((order) => !order.pathaoConsignmentId);
-  const booked = rows.filter((order) => order.pathaoConsignmentId);
+  const unsent = rows.filter((order) => !order.courierConsignmentId);
+  const booked = rows.filter((order) => order.courierConsignmentId);
 
   return (
     <div className="absolute left-1/2 top-[4.25rem] z-30 w-full max-w-sm -translate-x-1/2">
@@ -177,26 +180,35 @@ export function OrderBulkActions({
           <>
             <div className="mt-4 flex flex-col gap-2 border-t pt-4">
               <SectionTitle icon={Send}>Courier services</SectionTitle>
-              <ActionButton
-                icon={Send}
-                label="Send to Pathao"
-                hint={
-                  unsent.length === rows.length
-                    ? undefined
-                    : `${unsent.length} not sent yet`
-                }
-                primary
-                busy={busy === "pathao"}
-                disabled={busy !== null || unsent.length === 0}
-                onClick={() => run("pathao", () => handlers.sendToPathao(unsent))}
-              />
+              {couriers.map((courier, index) => (
+                <ActionButton
+                  key={courier}
+                  icon={Send}
+                  label={`Send to ${COURIER_LABELS[courier]}`}
+                  hint={
+                    unsent.length === rows.length
+                      ? undefined
+                      : `${unsent.length} not sent yet`
+                  }
+                  primary={index === 0}
+                  busy={busy === courier}
+                  disabled={busy !== null || unsent.length === 0}
+                  onClick={() => run(courier, () => handlers.sendToCourier(unsent, courier))}
+                />
+              ))}
+              {couriers.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No courier is switched on. An owner can turn on Pathao or
+                  Carrybee in Settings.
+                </p>
+              )}
               <ActionButton
                 icon={RefreshCw}
                 label="Refresh status"
                 hint={booked.length ? `${booked.length} booked` : undefined}
                 busy={busy === "refresh"}
                 disabled={busy !== null || booked.length === 0}
-                onClick={() => run("refresh", () => handlers.refreshPathao(booked))}
+                onClick={() => run("refresh", () => handlers.refreshCourier(booked))}
               />
             </div>
             <div className="mt-4 flex flex-col gap-2 border-t pt-4">

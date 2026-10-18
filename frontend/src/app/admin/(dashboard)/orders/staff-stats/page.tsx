@@ -40,7 +40,7 @@ import {
   type StaffMember,
   type StaffStats,
 } from "@/lib/api";
-import { ORDER_STATUS_LABELS, type OrderStatus } from "@/lib/orders";
+import { ORDER_STATUS_LABELS, courierStatusLabel, type OrderStatus } from "@/lib/orders";
 import {
   dhakaToday,
   monthLabel,
@@ -113,7 +113,7 @@ const CELL_METRICS: { key: Metric; label: string; short: string; className: stri
  *
  * Delivered is credited to the day the order was confirmed, not the day the
  * parcel arrived, so a day's delivered figure keeps growing for a few days
- * as Pathao reports in. Manual orders are not counted at all. Super admins
+ * as the courier reports in. Manual orders are not counted at all. Super admins
  * only — the API refuses everyone else too.
  */
 export default function StaffStatsPage() {
@@ -193,7 +193,7 @@ function StaffStatsView() {
           <h1 className="text-2xl font-bold tracking-tight">Staff Stats</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Delivered counts on the day the order was confirmed, and fills in
-            as Pathao reports. Manual orders are not counted.
+            as the courier reports. Manual orders are not counted.
           </p>
         </div>
         {controls}
@@ -221,7 +221,7 @@ function StaffStatsView() {
         <Tile
           label="In transit"
           value={data && total.in_transit}
-          hint="With Pathao now"
+          hint="With the courier now"
         />
         <Tile
           label="Delivery rate"
@@ -692,7 +692,7 @@ function DayDialog({
                     >
                       {o.delivered
                         ? "Delivered"
-                        : o.pathao_status?.replace(/_/g, " ") ||
+                        : courierStatusLabel(o.courier_status) ||
                           ORDER_STATUS_LABELS[o.status as OrderStatus] ||
                           o.status}
                     </td>

@@ -1,6 +1,6 @@
 import qrcode from "qrcode-generator";
 
-import type { Order, OrderItem } from "@/lib/orders";
+import { courierLabel, type Order, type OrderItem } from "@/lib/orders";
 
 /**
  * Shipping stickers: one invoice per order, rendered in a print window.
@@ -17,7 +17,6 @@ import type { Order, OrderItem } from "@/lib/orders";
 export type StickerSize = "label" | "a4";
 
 const SHOP_NAME = "Nature Bazar";
-const COURIER = "Pathao";
 /** The storefront promises free delivery, so the customer never owes one. */
 const DELIVERY_FEE = 0;
 
@@ -121,7 +120,7 @@ function invoiceHtml(order: Order, date: string, size: StickerSize): string {
   const label = size === "label";
   const rows = lines(order);
   const subTotal = rows.reduce((sum, row) => sum + row.lineTotal, 0);
-  const parcelId = order.pathaoConsignmentId || "N/A";
+  const parcelId = order.courierConsignmentId || "N/A";
 
   return `
 <article class="page${label ? " label" : ""}">
@@ -135,7 +134,7 @@ function invoiceHtml(order: Order, date: string, size: StickerSize): string {
 
   <section class="party">
     <div class="who">
-      <div class="line">${icon("truck")}<span class="k">Courier</span><b>${COURIER}</b></div>
+      <div class="line">${icon("truck")}<span class="k">Courier</span><b>${escapeHtml(order.courierConsignmentId ? courierLabel(order) : "—")}</b></div>
       <div class="line">${icon("user")}<b class="lg">${escapeHtml(order.customerName || "Customer")}</b></div>
       <div class="line">${icon("phone")}<b class="lg mono">${escapeHtml(order.phone)}</b></div>
     </div>

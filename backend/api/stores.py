@@ -275,12 +275,46 @@ class PathaoConfig:
     store_id: int = 0
     item_type: str = "parcel"
     unit_weight_kg: float = 1.0
+    # The store's switch for Pathao on its Settings page.
+    switched_on: bool = True
 
     @property
-    def enabled(self) -> bool:
+    def configured(self) -> bool:
+        """Every credential is saved, whether or not Pathao is switched on."""
         return bool(
             self.client_id and self.client_secret and self.username and self.password and self.store_id
         )
+
+    @property
+    def enabled(self) -> bool:
+        return self.switched_on and self.configured
+
+
+@dataclass(frozen=True)
+class CarrybeeConfig:
+    """One store's Carrybee merchant credentials and parcel defaults."""
+
+    client_id: str = ""
+    client_secret: str = ""
+    client_context: str = ""
+    # Carrybee's pickup store the parcels are booked from.
+    store_id: str = ""
+    # 1 parcel, 2 book, 3 document.
+    product_type: int = 1
+    unit_weight_g: int = 500
+    webhook_secret: str = ""
+    webhook_token: str = ""
+    # The value the integration check must get back (Carrybee's panel shows it).
+    integration_header: str = ""
+    switched_on: bool = True
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.client_id and self.client_secret and self.client_context and self.store_id)
+
+    @property
+    def enabled(self) -> bool:
+        return self.switched_on and self.configured
 
 
 @dataclass(frozen=True)
@@ -290,6 +324,16 @@ class Integrations:
     meta: MetaConfig
     pathao: PathaoConfig
     bdcourier_api_key: str = ""
+    carrybee: CarrybeeConfig = field(default_factory=CarrybeeConfig)
+
+    def couriers(self) -> list[str]:
+        """The couriers this store can book with right now, Pathao first."""
+        out = []
+        if self.pathao.enabled:
+            out.append("pathao")
+        if self.carrybee.enabled:
+            out.append("carrybee")
+        return out
 
 
 _integrations = _Cache(CACHE_TTL_SECONDS)
@@ -309,7 +353,8 @@ def integrations_from(store: Store, row: StoreSettings | None) -> Integrations:
     if row is None:
         return Integrations(
             store_id=store.id, order_prefix=store.order_prefix or "NB",
-            meta=MetaConfig(), pathao=PathaoConfig(),
+            meta=MetaConfig(), pathao=PathaoConfig(switched_on=False),
+            carrybee=CarrybeeConfig(switched_on=False),
         )
     return Integrations(
         store_id=store.id,
@@ -327,8 +372,21 @@ def integrations_from(store: Store, row: StoreSettings | None) -> Integrations:
             store_id=int(row.pathao_store_id or 0),
             item_type=row.pathao_item_type or "parcel",
             unit_weight_kg=float(row.pathao_parcel_weight_kg or 1),
+            switched_on=bool(row.pathao_enabled),
         ),
         bdcourier_api_key=_decrypt(row.bdcourier_api_key_enc),
+        carrybee=CarrybeeConfig(
+            client_id=row.carrybee_client_id or "",
+            client_secret=_decrypt(row.carrybee_client_secret_enc),
+            client_context=_decrypt(row.carrybee_client_context_enc),
+            store_id=row.carrybee_store_id or "",
+            product_type=int(row.carrybee_product_type or 1),
+            unit_weight_g=int(row.carrybee_item_weight_g or 500),
+            webhook_secret=_decrypt(row.carrybee_webhook_secret_enc),
+            webhook_token=row.carrybee_webhook_token or "",
+            integration_header=row.carrybee_integration_header or "",
+            switched_on=bool(row.carrybee_enabled),
+        ),
     )
 
 

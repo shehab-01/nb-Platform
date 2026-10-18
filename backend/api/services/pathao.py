@@ -281,7 +281,7 @@ async def get_access_token(cfg: PathaoConfig, store_id: int, *, force: bool = Fa
     Uses its own DB session so the caller's transaction (which may hold row
     locks on orders) is never committed from here.
     """
-    if not cfg.enabled:
+    if not cfg.configured:
         raise PathaoError("Pathao is not configured for this store")
     async with async_session() as session:
         row = await session.get(IntegrationToken, (store_id, PROVIDER))

@@ -4,6 +4,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Check, ExternalLink, Lock } from "lucide-react";
 
 import { SortableHeader } from "@/components/admin/data-table/data-table-sort-header";
+import { CourierBadge } from "@/components/admin/orders/courier-badge";
 import { FraudBadge } from "@/components/admin/orders/fraud-summary";
 import { OrderTags } from "@/components/admin/orders/order-tags";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +14,7 @@ import {
   ORDER_SOURCE_LABELS,
   SOURCE_BADGE_CLASS,
   activeClaim,
+  courierStatusLabel,
   formatOrderDateTime,
   timeAgo,
   staffLabel,
@@ -29,27 +31,37 @@ function FlagCell({ on }: { on: boolean }) {
   );
 }
 
-/** The consignment id as a link to Pathao's tracking page. */
-function PathaoCell({ order }: { order: Order }) {
-  if (!order.pathaoConsignmentId) {
+/**
+ * Which courier has the parcel, and its consignment id — a link to the
+ * courier's tracking page when it has one.
+ */
+function ConsignmentCell({ order }: { order: Order }) {
+  if (!order.courierConsignmentId) {
     return <span className="sr-only">Not sent</span>;
   }
   return (
-    <a
-      href={order.pathaoTrackingUrl ?? "#"}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 font-mono text-xs font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
-      onClick={(event) => event.stopPropagation()}
-    >
-      {order.pathaoConsignmentId}
-      <ExternalLink className="size-3" />
-    </a>
+    <span className="inline-flex items-center gap-1.5">
+      <CourierBadge courier={order.courierProvider} />
+      {order.courierTrackingUrl ? (
+        <a
+          href={order.courierTrackingUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 font-mono text-xs font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {order.courierConsignmentId}
+          <ExternalLink className="size-3" />
+        </a>
+      ) : (
+        <span className="font-mono text-xs font-medium">{order.courierConsignmentId}</span>
+      )}
+    </span>
   );
 }
 
-// Pathao's own status words, toned by what they mean. Order matters: partial
-// delivery is checked before "deliver" would claim it.
+// The couriers' own status words, toned by what they mean. Order matters:
+// partial delivery is checked before "deliver" would claim it.
 const DELIVERY_TONES: [RegExp, string][] = [
   [/partial/, "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"],
   [/deliver/, "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"],
@@ -57,21 +69,21 @@ const DELIVERY_TONES: [RegExp, string][] = [
 ];
 
 /**
- * Where the parcel is, as Pathao last said. Kept current by the API's own
- * polling, so staff can archive an order before it is delivered and still
- * see the delivery land later.
+ * Where the parcel is, as its courier last said. Kept current by the API
+ * (Pathao's polling, Carrybee's webhook), so staff can archive an order
+ * before it is delivered and still see the delivery land later.
  */
 function DeliveryCell({ order }: { order: Order }) {
-  if (!order.pathaoConsignmentId) {
+  if (!order.courierConsignmentId) {
     return <span className="text-xs text-muted-foreground">Not sent</span>;
   }
-  const status = order.pathaoStatus ?? "Pending";
+  const status = order.courierStatus ?? "Pending";
   const tone =
     DELIVERY_TONES.find(([re]) => re.test(status.toLowerCase()))?.[1] ??
     "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300";
   return (
     <Badge variant="secondary" className={cn("font-medium", tone)}>
-      {status.replace(/_/g, " ")}
+      {courierStatusLabel(status)}
     </Badge>
   );
 }
@@ -314,11 +326,12 @@ export function getOrderColumns({
       cell: ({ row }) => <FlagCell on={row.original.courier} />,
     },
     {
+      // Kept as "pathao" so column layouts staff saved before Carrybee still apply.
       id: "pathao",
-      header: "Pathao",
+      header: "Consignment",
       enableSorting: false,
-      meta: { label: "Pathao" },
-      cell: ({ row }) => <PathaoCell order={row.original} />,
+      meta: { label: "Consignment" },
+      cell: ({ row }) => <ConsignmentCell order={row.original} />,
     },
     {
       id: "delivery",

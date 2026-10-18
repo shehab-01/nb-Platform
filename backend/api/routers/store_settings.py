@@ -1,5 +1,5 @@
-"""Per-store integration settings: Meta Pixel / Conversions API, Pathao,
-BDCourier. Edited from the store's own Settings page by anyone with the
+"""Per-store integration settings: Meta Pixel / Conversions API, the
+couriers (Pathao, Carrybee), BDCourier. Edited from the store's own Settings page by anyone with the
 "settings" permission there (owners, and super admins everywhere). The store
 in the path must be the one named by X-Admin-Store: the header is what the
 membership check is made against, so the two can never disagree.
@@ -8,6 +8,7 @@ Secrets go in and never come out: the response says whether each is set and
 its last characters. In the update, a secret field left out (None) keeps the
 stored value, "" clears it, anything else replaces it.
 """
+import secrets
 from decimal import Decimal
 from typing import Literal
 
@@ -20,8 +21,8 @@ from api.auth import get_current_user
 from api.config import settings as app_settings
 from api.db import get_session
 from api.models import StoreSettings, User, UserRole
-from api.schemas import PathaoStatusOut
-from api.services import pathao
+from api.schemas import CarrybeeStatusOut, PathaoStatusOut
+from api.services import carrybee, pathao
 
 router = APIRouter(prefix="/stores", tags=["Stores"])
 
@@ -53,6 +54,10 @@ async def settings_store(
     return ctx
 
 ItemType = Literal["document", "parcel", "fragile"]
+# Carrybee's product types: 1 parcel, 2 book, 3 document.
+CarrybeeProductType = Literal[1, 2, 3]
+
+WEBHOOK_PATH = "/api/webhooks/carrybee/"
 
 
 class StoreSettingsOut(BaseModel):
@@ -69,7 +74,24 @@ class StoreSettingsOut(BaseModel):
     pathao_password_set: bool
     pathao_store_id: int | None
     pathao_item_type: str
+    pathao_enabled: bool
     pathao_parcel_weight_kg: Decimal
+    carrybee_enabled: bool
+    carrybee_client_id: str
+    carrybee_client_secret_set: bool
+    carrybee_client_secret_hint: str | None
+    carrybee_client_context_set: bool
+    carrybee_client_context_hint: str | None
+    carrybee_store_id: str
+    carrybee_product_type: int
+    carrybee_item_weight_g: int
+    carrybee_webhook_secret_set: bool
+    carrybee_webhook_secret_hint: str | None
+    # Where Carrybee should post status changes, relative to the admin's own
+    # origin; null until Carrybee is first switched on.
+    carrybee_webhook_path: str | None
+    carrybee_integration_header: str
+    carrybee_sandbox: bool
     bdcourier_api_key_set: bool
     bdcourier_api_key_hint: str | None
     encryption_available: bool
@@ -85,7 +107,19 @@ class StoreSettingsUpdate(BaseModel):
     pathao_password: str | None = Field(default=None, max_length=500)
     pathao_store_id: int | None = Field(default=None, ge=0)
     pathao_item_type: ItemType = "parcel"
+    # None keeps the current switch, so a client that predates it never
+    # switches a courier off by leaving the field out.
+    pathao_enabled: bool | None = None
     pathao_parcel_weight_kg: Decimal = Field(default=Decimal("1"), ge=Decimal("0.5"), le=Decimal("10"))
+    carrybee_enabled: bool | None = None
+    carrybee_client_id: str = Field(default="", max_length=120)
+    carrybee_client_secret: str | None = Field(default=None, max_length=500)
+    carrybee_client_context: str | None = Field(default=None, max_length=500)
+    carrybee_store_id: str = Field(default="", max_length=40, pattern=r"^d*$")
+    carrybee_product_type: CarrybeeProductType = 1
+    carrybee_item_weight_g: int = Field(default=500, ge=1, le=25_000)
+    carrybee_webhook_secret: str | None = Field(default=None, max_length=500)
+    carrybee_integration_header: str = Field(default="", max_length=100)
     bdcourier_api_key: str | None = Field(default=None, max_length=500)
 
 
@@ -110,13 +144,24 @@ def redact(row: StoreSettings | None) -> StoreSettingsOut:
             meta_capi_token_set=False, meta_capi_token_hint=None,
             pathao_client_id="", pathao_client_secret_set=False, pathao_client_secret_hint=None,
             pathao_email="", pathao_password_set=False, pathao_store_id=None,
-            pathao_item_type="parcel", pathao_parcel_weight_kg=Decimal("1"),
+            pathao_item_type="parcel", pathao_enabled=False,
+            pathao_parcel_weight_kg=Decimal("1"),
+            carrybee_enabled=False, carrybee_client_id="",
+            carrybee_client_secret_set=False, carrybee_client_secret_hint=None,
+            carrybee_client_context_set=False, carrybee_client_context_hint=None,
+            carrybee_store_id="", carrybee_product_type=1, carrybee_item_weight_g=500,
+            carrybee_webhook_secret_set=False, carrybee_webhook_secret_hint=None,
+            carrybee_webhook_path=None, carrybee_integration_header="",
+            carrybee_sandbox=carrybee.is_sandbox(),
             bdcourier_api_key_set=False, bdcourier_api_key_hint=None,
             encryption_available=ok,
         )
     capi = peek(row.meta_capi_token_enc)
     secret = peek(row.pathao_client_secret_enc)
     fraud = peek(row.bdcourier_api_key_enc)
+    cb_secret = peek(row.carrybee_client_secret_enc)
+    cb_context = peek(row.carrybee_client_context_enc)
+    cb_webhook = peek(row.carrybee_webhook_secret_enc)
     return StoreSettingsOut(
         meta_pixel_id=row.meta_pixel_id,
         meta_test_event_code=row.meta_test_event_code,
@@ -129,7 +174,24 @@ def redact(row: StoreSettings | None) -> StoreSettingsOut:
         pathao_password_set=row.pathao_password_enc is not None,
         pathao_store_id=row.pathao_store_id,
         pathao_item_type=row.pathao_item_type,
+        pathao_enabled=row.pathao_enabled,
         pathao_parcel_weight_kg=row.pathao_parcel_weight_kg,
+        carrybee_enabled=row.carrybee_enabled,
+        carrybee_client_id=row.carrybee_client_id,
+        carrybee_client_secret_set=cb_secret[0],
+        carrybee_client_secret_hint=cb_secret[1],
+        carrybee_client_context_set=cb_context[0],
+        carrybee_client_context_hint=cb_context[1],
+        carrybee_store_id=row.carrybee_store_id,
+        carrybee_product_type=row.carrybee_product_type,
+        carrybee_item_weight_g=row.carrybee_item_weight_g,
+        carrybee_webhook_secret_set=cb_webhook[0],
+        carrybee_webhook_secret_hint=cb_webhook[1],
+        carrybee_webhook_path=(
+            WEBHOOK_PATH + row.carrybee_webhook_token if row.carrybee_webhook_token else None
+        ),
+        carrybee_integration_header=row.carrybee_integration_header,
+        carrybee_sandbox=carrybee.is_sandbox(),
         bdcourier_api_key_set=fraud[0],
         bdcourier_api_key_hint=fraud[1],
         encryption_available=ok,
@@ -168,6 +230,8 @@ async def put_settings(
         v for v in (
             payload.meta_capi_token, payload.pathao_client_secret,
             payload.pathao_password, payload.bdcourier_api_key,
+            payload.carrybee_client_secret, payload.carrybee_client_context,
+            payload.carrybee_webhook_secret,
         )
     )
     if wants_secret and not crypto.available():
@@ -189,6 +253,28 @@ async def put_settings(
     row.pathao_store_id = payload.pathao_store_id
     row.pathao_item_type = payload.pathao_item_type
     row.pathao_parcel_weight_kg = payload.pathao_parcel_weight_kg
+    if payload.pathao_enabled is not None:
+        row.pathao_enabled = payload.pathao_enabled
+    if payload.carrybee_enabled is not None:
+        row.carrybee_enabled = payload.carrybee_enabled
+    row.carrybee_client_id = payload.carrybee_client_id.strip()
+    row.carrybee_client_secret_enc = apply_secret(
+        row.carrybee_client_secret_enc, payload.carrybee_client_secret
+    )
+    row.carrybee_client_context_enc = apply_secret(
+        row.carrybee_client_context_enc, payload.carrybee_client_context
+    )
+    row.carrybee_store_id = payload.carrybee_store_id.strip()
+    row.carrybee_product_type = payload.carrybee_product_type
+    row.carrybee_item_weight_g = payload.carrybee_item_weight_g
+    row.carrybee_webhook_secret_enc = apply_secret(
+        row.carrybee_webhook_secret_enc, payload.carrybee_webhook_secret
+    )
+    row.carrybee_integration_header = payload.carrybee_integration_header.strip()
+    # The webhook URL exists from the first time Carrybee is switched on, and
+    # then never changes: it is pasted into Carrybee's panel once.
+    if row.carrybee_enabled and not row.carrybee_webhook_token:
+        row.carrybee_webhook_token = secrets.token_urlsafe(24)
     row.bdcourier_api_key_enc = apply_secret(row.bdcourier_api_key_enc, payload.bdcourier_api_key)
     await session.commit()
     await session.refresh(row)
@@ -213,13 +299,13 @@ async def test_pathao(
     integrations = await stores.load_integrations(session, ctx.store.id)
     cfg = integrations.pathao if integrations else stores.PathaoConfig()
     out = PathaoStatusOut(
-        enabled=cfg.enabled,
+        enabled=cfg.configured,
         sandbox=pathao.is_sandbox(),
         base_url=app_settings.pathao_base_url,
         store_id=cfg.store_id,
         unit_weight_kg=cfg.unit_weight_kg,
     )
-    if not cfg.enabled:
+    if not cfg.configured:
         missing = [
             name
             for name, value in (
@@ -240,4 +326,52 @@ async def test_pathao(
         out.stores = await pathao.list_stores(cfg, ctx.store.id)
     except pathao.PathaoError as exc:
         out.error = pathao.error_text(exc)
+    return out
+
+
+@router.post("/{store_id}/settings/carrybee-test", response_model=CarrybeeStatusOut)
+async def test_carrybee(
+    store_id: int,
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(settings_store),
+) -> CarrybeeStatusOut:
+    """
+    Call Carrybee with the store's *saved* credentials and list the pickup
+    stores they can see, so the store id can be picked rather than guessed.
+    Only the id, secret and context are needed for the test; the pickup store
+    is what it helps choose. Unsaved edits are not tested: save first.
+    """
+    stores.invalidate()
+    integrations = await stores.load_integrations(session, ctx.store.id)
+    cfg = integrations.carrybee if integrations else stores.CarrybeeConfig()
+    out = CarrybeeStatusOut(
+        configured=cfg.configured,
+        sandbox=carrybee.is_sandbox(),
+        base_url=app_settings.carrybee_base_url,
+        store_id=cfg.store_id,
+    )
+    missing = [
+        name
+        for name, value in (
+            ("client id", cfg.client_id),
+            ("client secret", cfg.client_secret),
+            ("client context", cfg.client_context),
+        )
+        if not value
+    ]
+    if missing:
+        out.error = "Missing: " + ", ".join(missing)
+        return out
+    try:
+        # list_stores refuses an unconfigured config; the pickup store may be
+        # what this test is for, so ask with a stand-in for it.
+        probe = cfg if cfg.store_id else stores.CarrybeeConfig(
+            client_id=cfg.client_id,
+            client_secret=cfg.client_secret,
+            client_context=cfg.client_context,
+            store_id="-",
+        )
+        out.stores = await carrybee.list_stores(probe)
+    except carrybee.CarrybeeError as exc:
+        out.error = carrybee.error_text(exc)
     return out

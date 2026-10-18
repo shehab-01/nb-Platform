@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useAuth } from "@/components/admin/auth-context";
 import { MonthSwitcher } from "@/components/admin/month-switcher";
+import { CourierBadge } from "@/components/admin/orders/courier-badge";
 import {
   Card,
   CardContent,
@@ -39,6 +40,7 @@ import {
   sum,
   type Figures,
 } from "@/lib/staff-stats";
+import { courierStatusLabel } from "@/lib/orders";
 import { cn } from "@/lib/utils";
 
 /** "6/10" — day/month, the way the team writes it. */
@@ -220,13 +222,13 @@ function SheetCard({ sheet, month }: { sheet: Sheet; month: string }) {
             {sheet.days.length} {sheet.days.length === 1 ? "day" : "days"} worked
           </CardDescription>
         </div>
-        {/* Still with Pathao: some of these may yet come back and push the
+        {/* Still with the courier: some of these may yet come back and push the
             return rate up, so it sits right next to the amount it threatens. */}
         <button
           type="button"
           onClick={() => setTransit(true)}
           disabled={total.in_transit === 0}
-          title="Parcels still with Pathao"
+          title="Parcels still with the courier"
           className="-m-1.5 rounded-md p-1.5 text-right transition-colors enabled:hover:bg-accent"
         >
           <div className="text-xs text-muted-foreground">In transit</div>
@@ -428,7 +430,7 @@ function BreakdownDialog({
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               Only parcels that finished their trip count. Orders cancelled
-              before shipping, or still with Pathao, are left out.
+              before shipping, or still with the courier, are left out.
             </p>
             <ul className="mt-2 flex flex-col gap-1">
               {[...RETURN_PENALTY].reverse().map((t) => (
@@ -449,7 +451,7 @@ function BreakdownDialog({
             {total.in_transit > 0 && (
               <p className="mt-2 text-xs text-muted-foreground">
                 {total.in_transit} {total.in_transit === 1 ? "parcel is" : "parcels are"}{" "}
-                still with Pathao. If any come back, the return rate goes up.
+                still with the courier. If any come back, the return rate goes up.
               </p>
             )}
           </section>
@@ -515,7 +517,7 @@ function InTransitDialog({
           <DialogTitle>{sheet.name} — in transit</DialogTitle>
           <DialogDescription>
             Orders they confirmed in {monthLabel(month)} that are still with
-            Pathao: not delivered, not returned.
+            the courier: not delivered, not returned.
           </DialogDescription>
         </DialogHeader>
         <div className="-mx-6 flex-1 overflow-y-auto px-6">
@@ -535,7 +537,7 @@ function InTransitDialog({
                   <th className="py-2 pr-3 font-medium">Order</th>
                   <th className="py-2 pr-3 font-medium">Customer</th>
                   <th className="py-2 pr-3 font-medium">Consignment</th>
-                  <th className="py-2 text-right font-medium">Pathao status</th>
+                  <th className="py-2 text-right font-medium">Delivery status</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -551,10 +553,17 @@ function InTransitDialog({
                     <td className="py-2 pr-3 font-mono text-xs">{o.order_no}</td>
                     <td className="max-w-40 truncate py-2 pr-3">{o.customer_name}</td>
                     <td className="py-2 pr-3 font-mono text-xs text-muted-foreground">
-                      {o.consignment_id ?? "—"}
+                      {o.consignment_id ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <CourierBadge courier={o.courier_provider} />
+                          {o.consignment_id}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td className="py-2 text-right text-xs text-sky-700 dark:text-sky-400">
-                      {o.pathao_status?.replace(/_/g, " ") || "Booked, no update yet"}
+                      {courierStatusLabel(o.courier_status) || "Booked, no update yet"}
                     </td>
                   </tr>
                 ))}

@@ -1,5 +1,7 @@
 import { request, requestBlob, requestForm, requestVoid } from "@/lib/http";
+import { COURIER_LABELS } from "@/lib/orders";
 import type {
+  CourierName,
   FraudCheck,
   Order,
   OrderItem,
@@ -44,11 +46,12 @@ type ApiOrder = {
   confirmed_by_nickname?: string | null;
   previous_orders?: number;
   auto_captured: boolean;
-  pathao_consignment_id: string | null;
-  pathao_status: string | null;
-  pathao_delivery_fee: number | null;
-  pathao_sent_at: string | null;
-  pathao_tracking_url: string | null;
+  courier_provider?: CourierName | null;
+  courier_consignment_id: string | null;
+  courier_status: string | null;
+  courier_delivery_fee: number | null;
+  courier_sent_at: string | null;
+  courier_tracking_url: string | null;
   pathao_city_id?: number | null;
   pathao_zone_id?: number | null;
   pathao_area_id?: number | null;
@@ -150,8 +153,10 @@ export type OrderListParams = {
   status?: OrderStatus[];
   /** How the order arrived: website, a recovered incomplete form, or manual. */
   source?: OrderSource[];
-  /** Delivery column values: "not_sent", "pending" or "status:<Pathao text>". */
+  /** Delivery column values: "not_sent", "pending" or "status:<courier text>". */
   delivery?: string[];
+  /** Which courier the parcel is booked with. */
+  courierProvider?: CourierName[];
   dateFrom?: string;
   dateTo?: string;
   q?: string;
@@ -187,11 +192,14 @@ function mapOrder(order: ApiOrder): Order {
     confirmedByNickname: order.confirmed_by_nickname ?? null,
     previousOrders: order.previous_orders ?? 0,
     autoCaptured: order.auto_captured,
-    pathaoConsignmentId: order.pathao_consignment_id ?? null,
-    pathaoStatus: order.pathao_status ?? null,
-    pathaoDeliveryFee: order.pathao_delivery_fee ?? null,
-    pathaoSentAt: order.pathao_sent_at ?? null,
-    pathaoTrackingUrl: order.pathao_tracking_url ?? null,
+    courierProvider: order.courier_consignment_id
+      ? (order.courier_provider ?? "pathao")
+      : null,
+    courierConsignmentId: order.courier_consignment_id ?? null,
+    courierStatus: order.courier_status ?? null,
+    courierDeliveryFee: order.courier_delivery_fee ?? null,
+    courierSentAt: order.courier_sent_at ?? null,
+    courierTrackingUrl: order.courier_tracking_url ?? null,
     pathaoLocation: {
       cityId: order.pathao_city_id ?? null,
       zoneId: order.pathao_zone_id ?? null,
@@ -227,7 +235,7 @@ export async function getOrderCounts(): Promise<Record<OrderStatus, number>> {
   return data.counts as Record<OrderStatus, number>;
 }
 
-/** The Pathao status texts the store's booked orders carry, within `status`. */
+/** The courier status texts the store's booked orders carry, within `status`. */
 export async function listDeliveryStatuses(status: OrderStatus[]): Promise<string[]> {
   const search = new URLSearchParams();
   for (const s of status) search.append("status", s);
@@ -243,6 +251,7 @@ export async function listOrders(
   for (const status of params.status ?? []) search.append("status", status);
   for (const source of params.source ?? []) search.append("source", source);
   for (const value of params.delivery ?? []) search.append("delivery", value);
+  for (const value of params.courierProvider ?? []) search.append("courier_provider", value);
   if (params.dateFrom) search.set("date_from", params.dateFrom);
   if (params.dateTo) search.set("date_to", params.dateTo);
   if (params.q) search.set("q", params.q);
@@ -338,15 +347,15 @@ export async function bulkUpdateOrders(
   };
 }
 
-export type PathaoFailure = { orderId: number; orderNo: string; error: string };
-export type PathaoResult = { orders: Order[]; failed: PathaoFailure[] };
+export type CourierFailure = { orderId: number; orderNo: string; error: string };
+export type CourierResult = { orders: Order[]; failed: CourierFailure[] };
 
-type ApiPathaoResult = {
+type ApiCourierResult = {
   orders: ApiOrder[];
   failed: { order_id: number; order_no: string; error: string }[];
 };
 
-function mapPathaoResult(data: ApiPathaoResult): PathaoResult {
+function mapCourierResult(data: ApiCourierResult): CourierResult {
   return {
     orders: data.orders.map(mapOrder),
     failed: data.failed.map((f) => ({
@@ -358,15 +367,15 @@ function mapPathaoResult(data: ApiPathaoResult): PathaoResult {
 }
 
 /**
- * How many orders go in one Pathao request. Must not exceed the API's own
- * PATHAO_BATCH_LIMIT, which rejects anything larger.
+ * How many orders go in one courier request. Must not exceed the API's own
+ * COURIER_BATCH_LIMIT, which rejects anything larger.
  *
- * The server talks to Pathao one order at a time — only the per-order endpoint
- * returns a consignment id, and we need that to track and print the parcel —
- * so a batch's wall time grows with its length. Twenty finishes inside
- * Cloudflare's 100s proxy timeout with room to spare.
+ * The server talks to the courier one order at a time — only the per-order
+ * endpoint returns a consignment id, and we need that to track and print the
+ * parcel — so a batch's wall time grows with its length. Twenty finishes
+ * inside Cloudflare's 100s proxy timeout with room to spare.
  */
-const PATHAO_BATCH = 20;
+const COURIER_BATCH = 20;
 
 function chunk<T>(items: T[], size: number): T[][] {
   const batches: T[][] = [];
@@ -377,7 +386,7 @@ function chunk<T>(items: T[], size: number): T[][] {
 }
 
 /**
- * Run a Pathao call in batches, back to back, merging the results.
+ * Run a courier call in batches, back to back, merging the results.
  *
  * Each batch the server accepts is committed order by order, so work already
  * done survives a later batch failing: once anything has come back we return
@@ -385,34 +394,36 @@ function chunk<T>(items: T[], size: number): T[][] {
  * the successes. A first-batch failure still throws, so a small selection
  * behaves exactly as a single request would.
  */
-async function pathaoBatched(
+async function courierBatched(
   path: string,
-  ids: number[]
-): Promise<PathaoResult> {
-  const merged: PathaoResult = { orders: [], failed: [] };
-  const batches = chunk(ids, PATHAO_BATCH);
+  ids: number[],
+  courier: CourierName,
+  label: string
+): Promise<CourierResult> {
+  const merged: CourierResult = { orders: [], failed: [] };
+  const batches = chunk(ids, COURIER_BATCH);
 
   for (const [index, batch] of batches.entries()) {
     try {
-      const result = mapPathaoResult(
-        await request<ApiPathaoResult>(path, {
+      const result = mapCourierResult(
+        await request<ApiCourierResult>(path, {
           method: "POST",
-          body: JSON.stringify({ order_ids: batch }),
+          body: JSON.stringify({ order_ids: batch, courier }),
         })
       );
       merged.orders.push(...result.orders);
       merged.failed.push(...result.failed);
     } catch (err) {
       if (index === 0) throw err;
-      // Some of this batch may already be booked at Pathao, so the reason says
-      // "check" rather than claiming they were not sent. Re-sending is safe
-      // either way: the API refuses an order that already has a consignment.
+      // Some of this batch may already be booked, so the reason says "check"
+      // rather than claiming they were not sent. Re-sending is safe either
+      // way: the API refuses an order that already has a consignment.
       const reason = err instanceof Error ? err.message : "Request failed";
       for (const id of batches.slice(index).flat()) {
         merged.failed.push({
           orderId: id,
           orderNo: `#${id}`,
-          error: `Not completed — ${reason}. Check Pathao before retrying.`,
+          error: `Not completed — ${reason}. Check ${label} before retrying.`,
         });
       }
       break;
@@ -520,14 +531,30 @@ export async function parseOrderAddress(orderId: number): Promise<Order> {
   );
 }
 
-/** Book each order with Pathao. Successes carry the consignment id. */
-export async function sendToPathao(ids: number[]): Promise<PathaoResult> {
-  return pathaoBatched("/api/orders/pathao/send", ids);
+/** A courier the store can book with right now (switched on and set up). */
+export type CourierOption = { name: CourierName; label: string; sandbox: boolean };
+
+/** The couriers switched on in this store's Settings, Pathao first. */
+export async function listCouriers(): Promise<CourierOption[]> {
+  return request<CourierOption[]>("/api/orders/couriers");
 }
 
-/** Pull the latest delivery status from Pathao for booked orders. */
-export async function refreshPathao(ids: number[]): Promise<PathaoResult> {
-  return pathaoBatched("/api/orders/pathao/refresh", ids);
+/** Book each order with the courier. Successes carry the consignment id. */
+export async function sendToCourier(
+  ids: number[],
+  courier: CourierName
+): Promise<CourierResult> {
+  return courierBatched(
+    "/api/orders/courier/send",
+    ids,
+    courier,
+    COURIER_LABELS[courier]
+  );
+}
+
+/** Pull the latest delivery status for booked orders, each from its own courier. */
+export async function refreshCourier(ids: number[]): Promise<CourierResult> {
+  return courierBatched("/api/orders/courier/refresh", ids, "pathao", "the courier");
 }
 
 export type PathaoSyncStatus =
@@ -675,10 +702,21 @@ export async function getOrderStats(): Promise<OrderStats> {
   return request<OrderStats>("/api/orders/stats");
 }
 
+/** One courier's share of a period's parcels. */
+export type CourierSplit = {
+  courier: CourierName;
+  sent: number;
+  delivered: number;
+  returned: number;
+  in_transit: number;
+};
+
 export type DashboardTotals = {
   orders: number;
   confirmed: number;
   delivered: number;
+  /** The month's parcels by courier, for every courier that has any. */
+  couriers?: CourierSplit[];
 };
 
 export type DashboardPeriod = {
@@ -691,6 +729,8 @@ export type DashboardPeriod = {
   leads: number;
   leads_processing: number;
   leads_confirmed: number;
+  /** The chosen days' orders booked with each courier. */
+  couriers?: CourierSplit[];
 };
 
 export type Performer = {
@@ -733,7 +773,7 @@ export type StaffDayStats = {
   from_incomplete: number;
   delivered: number;
   returned: number;
-  /** Sent to Pathao, not yet delivered or returned. */
+  /** Sent to the courier, not yet delivered or returned. */
   in_transit: number;
 };
 
@@ -756,8 +796,9 @@ export type StaffDayOrder = {
   customer_name: string;
   source: string;
   status: string;
-  pathao_status: string | null;
-  /** Pathao's tracking number, once booked. */
+  courier_provider: CourierName | null;
+  courier_status: string | null;
+  /** The courier's tracking number, once booked. */
   consignment_id: string | null;
   delivered: boolean;
   confirmed_at: string;
@@ -766,11 +807,11 @@ export type StaffDayOrder = {
 /** The orders confirmed on one day and where their parcels are now. */
 export type DeliveryTeamDay = {
   day: string;
-  /** Handed to Pathao. */
+  /** Handed to a courier. */
   sent: number;
   delivered: number;
   returned: number;
-  /** With Pathao, not yet delivered or returned. */
+  /** With the courier, not yet delivered or returned. */
   in_transit: number;
 };
 
@@ -783,6 +824,8 @@ export type DeliveryTeam = {
   returned: number;
   in_transit: number;
   days: DeliveryTeamDay[];
+  /** The month's parcels by courier, for every courier that has any. */
+  couriers?: CourierSplit[];
 };
 
 export async function getDeliveryTeam(month: string): Promise<DeliveryTeam> {
@@ -1595,6 +1638,9 @@ export async function lookupOrdersByPhone(
 
 // ---- Store settings (integrations; secrets never come back) ----
 
+/** Carrybee's product types: 1 parcel, 2 book, 3 document. */
+export type CarrybeeProductType = 1 | 2 | 3;
+
 export type StoreSettings = {
   metaPixelId: string;
   metaTestEventCode: string;
@@ -1607,7 +1653,24 @@ export type StoreSettings = {
   pathaoPasswordSet: boolean;
   pathaoStoreId: number | null;
   pathaoItemType: "document" | "parcel" | "fragile";
+  pathaoEnabled: boolean;
   pathaoParcelWeightKg: string;
+  carrybeeEnabled: boolean;
+  carrybeeClientId: string;
+  carrybeeClientSecretSet: boolean;
+  carrybeeClientSecretHint: string | null;
+  carrybeeClientContextSet: boolean;
+  carrybeeClientContextHint: string | null;
+  carrybeeStoreId: string;
+  carrybeeProductType: CarrybeeProductType;
+  carrybeeItemWeightG: number;
+  carrybeeWebhookSecretSet: boolean;
+  carrybeeWebhookSecretHint: string | null;
+  /** Relative to the admin's origin; null until Carrybee is first switched on. */
+  carrybeeWebhookPath: string | null;
+  /** The fixed value Carrybee's panel says its integration check must get back. */
+  carrybeeIntegrationHeader: string;
+  carrybeeSandbox: boolean;
   bdcourierApiKeySet: boolean;
   bdcourierApiKeyHint: string | null;
   encryptionAvailable: boolean;
@@ -1625,7 +1688,22 @@ type ApiStoreSettings = {
   pathao_password_set: boolean;
   pathao_store_id: number | null;
   pathao_item_type: "document" | "parcel" | "fragile";
+  pathao_enabled: boolean;
   pathao_parcel_weight_kg: string | number;
+  carrybee_enabled: boolean;
+  carrybee_client_id: string;
+  carrybee_client_secret_set: boolean;
+  carrybee_client_secret_hint: string | null;
+  carrybee_client_context_set: boolean;
+  carrybee_client_context_hint: string | null;
+  carrybee_store_id: string;
+  carrybee_product_type: CarrybeeProductType;
+  carrybee_item_weight_g: number;
+  carrybee_webhook_secret_set: boolean;
+  carrybee_webhook_secret_hint: string | null;
+  carrybee_webhook_path: string | null;
+  carrybee_integration_header: string;
+  carrybee_sandbox: boolean;
   bdcourier_api_key_set: boolean;
   bdcourier_api_key_hint: string | null;
   encryption_available: boolean;
@@ -1644,7 +1722,22 @@ function mapSettings(s: ApiStoreSettings): StoreSettings {
     pathaoPasswordSet: s.pathao_password_set,
     pathaoStoreId: s.pathao_store_id,
     pathaoItemType: s.pathao_item_type,
+    pathaoEnabled: s.pathao_enabled,
     pathaoParcelWeightKg: String(s.pathao_parcel_weight_kg),
+    carrybeeEnabled: s.carrybee_enabled,
+    carrybeeClientId: s.carrybee_client_id,
+    carrybeeClientSecretSet: s.carrybee_client_secret_set,
+    carrybeeClientSecretHint: s.carrybee_client_secret_hint,
+    carrybeeClientContextSet: s.carrybee_client_context_set,
+    carrybeeClientContextHint: s.carrybee_client_context_hint,
+    carrybeeStoreId: s.carrybee_store_id,
+    carrybeeProductType: s.carrybee_product_type,
+    carrybeeItemWeightG: s.carrybee_item_weight_g,
+    carrybeeWebhookSecretSet: s.carrybee_webhook_secret_set,
+    carrybeeWebhookSecretHint: s.carrybee_webhook_secret_hint,
+    carrybeeWebhookPath: s.carrybee_webhook_path,
+    carrybeeIntegrationHeader: s.carrybee_integration_header,
+    carrybeeSandbox: s.carrybee_sandbox,
     bdcourierApiKeySet: s.bdcourier_api_key_set,
     bdcourierApiKeyHint: s.bdcourier_api_key_hint,
     encryptionAvailable: s.encryption_available,
@@ -1662,7 +1755,17 @@ export type StoreSettingsInput = {
   pathaoPassword?: string;
   pathaoStoreId: number | null;
   pathaoItemType: "document" | "parcel" | "fragile";
+  pathaoEnabled: boolean;
   pathaoParcelWeightKg: string;
+  carrybeeEnabled: boolean;
+  carrybeeClientId: string;
+  carrybeeClientSecret?: string;
+  carrybeeClientContext?: string;
+  carrybeeStoreId: string;
+  carrybeeProductType: CarrybeeProductType;
+  carrybeeItemWeightG: number;
+  carrybeeWebhookSecret?: string;
+  carrybeeIntegrationHeader: string;
   bdcourierApiKey?: string;
 };
 
@@ -1688,6 +1791,16 @@ export async function saveStoreSettings(
         pathao_store_id: input.pathaoStoreId,
         pathao_item_type: input.pathaoItemType,
         pathao_parcel_weight_kg: input.pathaoParcelWeightKg,
+        pathao_enabled: input.pathaoEnabled,
+        carrybee_enabled: input.carrybeeEnabled,
+        carrybee_client_id: input.carrybeeClientId,
+        carrybee_client_secret: input.carrybeeClientSecret ?? null,
+        carrybee_client_context: input.carrybeeClientContext ?? null,
+        carrybee_store_id: input.carrybeeStoreId,
+        carrybee_product_type: input.carrybeeProductType,
+        carrybee_item_weight_g: input.carrybeeItemWeightG,
+        carrybee_webhook_secret: input.carrybeeWebhookSecret ?? null,
+        carrybee_integration_header: input.carrybeeIntegrationHeader,
         bdcourier_api_key: input.bdcourierApiKey ?? null,
       }),
     })
@@ -1747,6 +1860,48 @@ export async function testPathao(storeId: number): Promise<PathaoTest> {
       id: Number(s.store_id ?? s.id ?? 0),
       name: String(s.store_name ?? s.name ?? ""),
       address: String(s.store_address ?? s.address ?? ""),
+    })),
+    error: r.error,
+  };
+}
+
+// ---- Carrybee connection test (saved credentials) ----
+
+export type CarrybeeTest = {
+  configured: boolean;
+  sandbox: boolean;
+  baseUrl: string;
+  storeId: string;
+  stores: {
+    id: string;
+    name: string;
+    address: string;
+    status: string;
+    isDefaultPickup: boolean;
+  }[];
+  error: string | null;
+};
+
+export async function testCarrybee(storeId: number): Promise<CarrybeeTest> {
+  const r = await request<{
+    configured: boolean;
+    sandbox: boolean;
+    base_url: string;
+    store_id: string;
+    stores: Record<string, unknown>[];
+    error: string | null;
+  }>(`/api/stores/${storeId}/settings/carrybee-test`, { method: "POST" });
+  return {
+    configured: r.configured,
+    sandbox: r.sandbox,
+    baseUrl: r.base_url,
+    storeId: r.store_id,
+    stores: r.stores.map((s) => ({
+      id: String(s.id ?? ""),
+      name: String(s.name ?? ""),
+      address: String(s.address ?? ""),
+      status: String(s.status ?? ""),
+      isDefaultPickup: Boolean(s.is_default_pickup_store),
     })),
     error: r.error,
   };

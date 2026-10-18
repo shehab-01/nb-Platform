@@ -13,6 +13,8 @@ import {
   ORDER_STATUS_LABELS,
   SOURCE_BADGE_CLASS,
   STATUS_BADGE_CLASS,
+  courierLabel,
+  courierStatusLabel,
   formatOrderDateTime,
   staffLabel,
   type Order,
@@ -187,18 +189,20 @@ export function OrderSummaryModal({
               <Field label="Handed to courier">
                 {order.courier ? "Yes" : "No"}
               </Field>
-              <Field label="Pathao consignment">
-                {order.pathaoConsignmentId ? (
-                  <span className="font-mono">{order.pathaoConsignmentId}</span>
+              <Field label={`${courierLabel(order)} consignment`}>
+                {order.courierConsignmentId ? (
+                  <span className="font-mono">{order.courierConsignmentId}</span>
                 ) : null}
               </Field>
-              <Field label="Pathao status">{order.pathaoStatus}</Field>
-              {order.pathaoDeliveryFee !== null && (
-                <Field label="Delivery fee">৳ {order.pathaoDeliveryFee}</Field>
+              <Field label="Delivery status">
+                {courierStatusLabel(order.courierStatus) || null}
+              </Field>
+              {order.courierDeliveryFee !== null && (
+                <Field label="Delivery fee">৳ {order.courierDeliveryFee}</Field>
               )}
-              {order.pathaoSentAt && (
-                <Field label="Sent to Pathao">
-                  {formatOrderDateTime(order.pathaoSentAt)}
+              {order.courierSentAt && (
+                <Field label={`Sent to ${courierLabel(order)}`}>
+                  {formatOrderDateTime(order.courierSentAt)}
                 </Field>
               )}
               <Field label="Handled by">

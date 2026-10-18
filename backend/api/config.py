@@ -79,6 +79,18 @@ class Settings:
         "PATHAO_PARSER_URL", "https://merchant.pathao.com/api/v1/address-parser"
     ).strip()
 
+    # Carrybee courier. Client id/secret/context, pickup store and parcel
+    # defaults are per store (store_settings); the environment is
+    # deployment-wide and defaults to the sandbox, like Pathao's.
+    # Live: https://developers.carrybee.com
+    carrybee_base_url: str = os.getenv(
+        "CARRYBEE_BASE_URL", "https://sandbox.carrybee.com"
+    ).rstrip("/")
+    # A public tracking page for a Carrybee parcel, with "{consignment_id}"
+    # where the id goes. Carrybee documents none yet; empty shows the
+    # consignment id without a link.
+    carrybee_tracking_url: str = os.getenv("CARRYBEE_TRACKING_URL", "").strip()
+
     # Google Drive, where expense proofs are kept (api.services.gdrive). One
     # Google account for the whole platform, connected once by a super admin
     # from Platform → System; its refresh token is stored encrypted in the

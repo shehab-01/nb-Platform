@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     Numeric,
+    SmallInteger,
     String,
     Text,
     Time,
@@ -114,16 +115,23 @@ class Order(Base):
     # Set by hand for now; the automation lands later.
     printed: Mapped[bool] = mapped_column(Boolean, default=False)
     courier: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Set once the parcel is booked with Pathao (see api.services.pathao).
-    # The consignment id is Pathao's tracking number; status and fee are
-    # whatever Pathao last told us.
-    pathao_consignment_id: Mapped[str | None] = mapped_column(String(40), index=True)
-    pathao_status: Mapped[str | None] = mapped_column(String(60))
-    pathao_delivery_fee: Mapped[int | None] = mapped_column(Integer)
-    pathao_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # When we last asked Pathao about this parcel, answered or not; the
-    # background sync asks the longest-unasked parcels first.
-    pathao_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set once the parcel is booked with a courier (api.services.courier);
+    # courier_provider says which ("pathao" or "carrybee"). The consignment
+    # id is the courier's tracking number; status and fee are whatever the
+    # courier last told us, in its own words — Pathao's as it spells them,
+    # Carrybee's as event slugs ("pickup-requested"). api.services.courier
+    # knows which words mean delivered, returned or finished.
+    courier_provider: Mapped[str | None] = mapped_column(String(20))
+    courier_consignment_id: Mapped[str | None] = mapped_column(String(40))
+    courier_status: Mapped[str | None] = mapped_column(String(60))
+    # When the current status happened, by the courier's clock. Webhooks can
+    # arrive out of order; an event older than this is not applied.
+    courier_status_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    courier_delivery_fee: Mapped[int | None] = mapped_column(Integer)
+    courier_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When we last asked the courier about this parcel, answered or not; the
+    # background syncs ask the longest-unasked parcels first.
+    courier_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Where Pathao should deliver, in its own city/zone/area ids: filled by
     # Pathao's address parser or picked by staff (see
     # api.services.pathao_address), and sent with the booking. Area is
@@ -246,6 +254,8 @@ class Order(Base):
         Index("ix_orders_store_status_created_at", "store_id", "status", "created_at"),
         Index("ix_orders_store_phone_key", "store_id", "phone_key"),
         Index("ix_orders_store_created_at", "store_id", "created_at"),
+        # The webhook's lookup: a courier names a parcel by consignment id.
+        Index("ix_orders_store_courier_consignment", "store_id", "courier_consignment_id"),
     )
 
 
@@ -740,6 +750,33 @@ class StoreSettings(Base):
     pathao_store_id: Mapped[int | None] = mapped_column(Integer)
     pathao_item_type: Mapped[str] = mapped_column(String(20), default="parcel")
     pathao_parcel_weight_kg: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=Decimal("1"))
+    # Each courier's switch on the Settings page. Off hides the courier
+    # everywhere but keeps its credentials.
+    pathao_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
+    carrybee_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
+    carrybee_client_id: Mapped[str] = mapped_column(String(120), default="", server_default="")
+    carrybee_client_secret_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
+    carrybee_client_context_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
+    # Carrybee's pickup store the parcels are booked from. A number, but
+    # Carrybee's API speaks it as a string.
+    carrybee_store_id: Mapped[str] = mapped_column(String(40), default="", server_default="")
+    # 1 parcel, 2 book, 3 document.
+    carrybee_product_type: Mapped[int] = mapped_column(SmallInteger, default=1, server_default="1")
+    carrybee_item_weight_g: Mapped[int] = mapped_column(Integer, default=500, server_default="500")
+    # What Carrybee sends in X-Carrybee-Webhook-Signature.
+    carrybee_webhook_secret_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
+    # The unguessable last part of the store's webhook URL; names the store.
+    carrybee_webhook_token: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
+    # What Carrybee's Webhook Integration page says the answer to its
+    # integration check must carry in X-CB-Webhook-Integration-Header (a
+    # value of its own, not the secret). Shown in their panel; not secret.
+    carrybee_integration_header: Mapped[str] = mapped_column(
+        String(100), default="", server_default=""
+    )
     # Superseded by bdcourier_api_key_enc; kept, unread, so old encrypted data
     # is never dropped.
     fraudbd_api_key_enc: Mapped[bytes | None] = mapped_column(LargeBinary)

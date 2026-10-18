@@ -41,7 +41,16 @@ from api.models import (
 from api.phone import bd_mobile, phone_digits, phone_key
 from api.ratelimit import client_ip, drafts_limiter, orders_limiter
 from api import catalogue, stores, tenancy
-from api.services import bdcourier, meta_capi, pathao, pathao_address, pathao_sync
+from api.services import (
+    bdcourier,
+    carrybee,
+    carrybee_sync,
+    courier,
+    meta_capi,
+    pathao,
+    pathao_address,
+    pathao_sync,
+)
 from api.schemas import (
     AddressParseIn,
     AddressParseOut,
@@ -73,11 +82,13 @@ from api.schemas import (
     StaffStatsOut,
     ManualOrderCreate,
     PhoneLookupOut,
-    PathaoFailure,
+    CourierFailure,
+    CourierOption,
+    CourierSendIn,
+    CourierSendOut,
+    CourierSplit,
     PathaoLocationIn,
     PathaoPlaceOut,
-    PathaoSendIn,
-    PathaoSendOut,
     PathaoSyncFailure,
     PathaoSyncRunOut,
     TagCreate,
@@ -575,9 +586,9 @@ async def create_order(
     return order
 
 
-# The Delivery filter's two values that are not Pathao status text. Pathao's
-# own statuses ("Pickup_Requested", "Delivered", ...) arrive as "status:<text>"
-# so no status Pathao invents can collide with these.
+# The Delivery filter's two values that are not courier status text. The
+# couriers' own statuses ("Pickup_Requested", "in-transit", ...) arrive as
+# "status:<text>" so no status a courier invents can collide with these.
 DELIVERY_NOT_SENT = "not_sent"
 DELIVERY_PENDING = "pending"
 DELIVERY_STATUS_PREFIX = "status:"
@@ -586,15 +597,15 @@ DELIVERY_STATUS_PREFIX = "status:"
 def _delivery_filter(value: str):
     """One Delivery filter value as a condition on Order."""
     if value == DELIVERY_NOT_SENT:
-        return Order.pathao_consignment_id.is_(None)
+        return Order.courier_consignment_id.is_(None)
     if value == DELIVERY_PENDING:
         return and_(
-            Order.pathao_consignment_id.is_not(None), Order.pathao_status.is_(None)
+            Order.courier_consignment_id.is_not(None), Order.courier_status.is_(None)
         )
     if value.startswith(DELIVERY_STATUS_PREFIX):
         return and_(
-            Order.pathao_consignment_id.is_not(None),
-            Order.pathao_status == value.removeprefix(DELIVERY_STATUS_PREFIX),
+            Order.courier_consignment_id.is_not(None),
+            Order.courier_status == value.removeprefix(DELIVERY_STATUS_PREFIX),
         )
     raise HTTPException(status_code=400, detail=f"Unknown delivery filter {value!r}")
 
@@ -628,6 +639,7 @@ async def list_orders(
     status: list[OrderStatus] | None = Query(None),
     source: list[OrderSource] | None = Query(None),
     delivery: list[str] | None = Query(None),
+    courier_provider: list[str] | None = Query(None),
     date_from: date | None = None,
     date_to: date | None = None,
     q: str | None = Query(None, max_length=100),
@@ -643,9 +655,12 @@ async def list_orders(
     if source:
         filters.append(Order.source.in_([s.value for s in source]))
     # Where the parcel is, as the Delivery column shows it: not booked with
-    # Pathao yet, booked with no status back, or Pathao's own status text.
+    # a courier yet, booked with no status back, or the courier's own words.
     if delivery:
         filters.append(or_(*(_delivery_filter(value) for value in delivery)))
+    # Which courier has the parcel.
+    if courier_provider:
+        filters.append(Order.courier_provider.in_(courier_provider))
     if date_from:
         filters.append(Order.created_at >= _day_start(date_from))
     if date_to:
@@ -722,20 +737,38 @@ async def delivery_statuses(
     session: AsyncSession = Depends(get_session),
     ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
 ) -> list[str]:
-    """Every Pathao status text the store's booked orders carry (within the
-    given statuses), for the Delivery filter's options. Pathao decides these
-    words, so the list comes from the data rather than a fixed vocabulary."""
+    """Every courier status the store's booked orders carry (within the
+    given statuses), for the Delivery filter's options. The couriers decide
+    these words, so the list comes from the data rather than a fixed
+    vocabulary."""
     filters = [
         Order.store_id == ctx.store.id,
-        Order.pathao_consignment_id.is_not(None),
-        Order.pathao_status.is_not(None),
+        Order.courier_consignment_id.is_not(None),
+        Order.courier_status.is_not(None),
     ]
     if status:
         filters.append(Order.status.in_(status))
     rows = await session.scalars(
-        select(distinct(Order.pathao_status)).where(*filters).order_by(Order.pathao_status)
+        select(distinct(Order.courier_status)).where(*filters).order_by(Order.courier_status)
     )
     return list(rows)
+
+
+@router.get("/couriers", response_model=list[CourierOption])
+async def list_couriers(
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
+) -> list[CourierOption]:
+    """The couriers this store can book with now: switched on in Settings and
+    fully configured. The bulk panel offers one Send button per courier."""
+    integrations = await stores.load_integrations(session, ctx.store.id)
+    if integrations is None:
+        return []
+    sandbox = {courier.PATHAO: pathao.is_sandbox(), courier.CARRYBEE: carrybee.is_sandbox()}
+    return [
+        CourierOption(name=name, label=courier.LABELS[name], sandbox=sandbox[name])
+        for name in integrations.couriers()
+    ]
 
 
 @router.get("/claims", response_model=ClaimsOut)
@@ -838,19 +871,65 @@ _IS_ORDER = and_(
 _IS_LEAD = Order.source == OrderSource.incomplete.value
 # Placed by anyone: every row that is not still an abandoned form.
 _PLACED = Order.status != OrderStatus.incomplete.value
-# Delivered means Pathao said so — archiving an order by hand never counts.
-# Credited to the month the order was placed in, not the month the parcel
-# arrived: an order from 30 September delivered on 1 October is September's.
-# The audit trail is checked as well as the current status, so a parcel that
-# was reported delivered stays counted whatever Pathao says afterwards.
+# Delivered means the courier said so — archiving an order by hand never
+# counts. Credited to the month the order was placed in, not the month the
+# parcel arrived: an order from 30 September delivered on 1 October is
+# September's. The audit trail is checked as well as the current status, so a
+# parcel that was reported delivered stays counted whatever the courier says
+# afterwards. Pathao and Carrybee both say "delivered" (api.services.courier).
 _DELIVERED = or_(
-    func.lower(Order.pathao_status) == "delivered",
+    func.lower(Order.courier_status).in_(courier.DELIVERED),
     exists().where(
         OrderEvent.order_id == Order.id,
-        OrderEvent.event_type == "pathao_status",
-        func.lower(OrderEvent.note) == "delivered",
+        OrderEvent.event_type.in_(courier.STATUS_EVENTS),
+        func.lower(OrderEvent.note).in_(courier.DELIVERED),
     ),
 )
+# Returned is the courier's word, and only for a parcel never reported delivered.
+_RETURNED = and_(func.lower(Order.courier_status).in_(courier.RETURNED), not_(_DELIVERED))
+# In transit: handed to a courier and not finished either way yet. The
+# courier's own word decides finished.
+_IN_TRANSIT = and_(
+    Order.courier_consignment_id.is_not(None),
+    not_(_DELIVERED),
+    or_(
+        Order.courier_status.is_(None),
+        func.lower(Order.courier_status).not_in(courier.FINISHED),
+    ),
+)
+
+
+async def _courier_splits(session: AsyncSession, query) -> list[CourierSplit]:
+    """Sent / delivered / returned / in transit per courier over the orders
+    `query` selects (a select of Order.id), one row per courier that has any.
+    Pathao comes first, then the rest by name."""
+    count = func.count()
+    rows = await session.execute(
+        select(
+            Order.courier_provider,
+            count,
+            count.filter(_DELIVERED),
+            count.filter(_RETURNED),
+            count.filter(_IN_TRANSIT),
+        )
+        .where(
+            Order.id.in_(query.scalar_subquery()),
+            Order.courier_consignment_id.is_not(None),
+        )
+        .group_by(Order.courier_provider)
+    )
+    splits = [
+        CourierSplit(
+            courier=name or courier.PATHAO,
+            sent=sent,
+            delivered=delivered,
+            returned=returned,
+            in_transit=in_transit,
+        )
+        for name, sent, delivered, returned, in_transit in rows
+        if (name or courier.PATHAO) in courier.COURIERS
+    ]
+    return sorted(splits, key=lambda s: courier.COURIERS.index(s.courier))
 
 
 async def _counts(
@@ -997,11 +1076,15 @@ async def dashboard(
         session, ctx.store.id, start, end, leads_only=True, limit=None
     )
 
+    month_totals = _totals(this_month)
+    month_totals.couriers = await _courier_splits(
+        session, _created_in(ctx.store.id, month_start, month_end)
+    )
     return DashboardOut(
         date_from=start_day,
         date_to=end_day,
         month=f"{end_day.year:04d}-{end_day.month:02d}",
-        this_month=_totals(this_month),
+        this_month=month_totals,
         last_month=_totals(last_month),
         period=DashboardPeriod(
             landed=period["landed"],
@@ -1013,9 +1096,20 @@ async def dashboard(
             leads=period["leads"],
             leads_processing=period["leads_processing"],
             leads_confirmed=period["leads_confirmed"],
+            couriers=await _courier_splits(session, _created_in(ctx.store.id, start, end)),
         ),
         performers=performers,
         lead_performers=lead_performers,
+    )
+
+
+def _created_in(store_id: int, start: datetime, end: datetime):
+    """The placed orders created in [start, end), as the dashboard counts them."""
+    return select(Order.id).where(
+        Order.store_id == store_id,
+        Order.created_at >= start,
+        Order.created_at < end,
+        _PLACED,
     )
 
 
@@ -1071,20 +1165,7 @@ async def dashboard_activity(
 # typed in already agreed, so counting them would credit taking dictation
 # rather than winning an order.
 _NOT_MANUAL = Order.source != OrderSource.manual.value
-# Returned is Pathao's word, and only for a parcel never reported delivered.
-_RETURNED = and_(
-    func.lower(Order.pathao_status).in_(("return", "paid_return")), not_(_DELIVERED)
-)
-# In transit: handed to Pathao and not finished either way yet. Pathao's own
-# word decides finished, the same list its status sync stops polling at.
-_IN_TRANSIT = and_(
-    Order.pathao_consignment_id.is_not(None),
-    not_(_DELIVERED),
-    or_(
-        Order.pathao_status.is_(None),
-        func.lower(Order.pathao_status).not_in(pathao_sync.SETTLED),
-    ),
-)
+# _RETURNED and _IN_TRANSIT are defined with _DELIVERED, above.
 
 
 def _dhaka_date(column):
@@ -1169,8 +1250,9 @@ async def _credited_orders(
             Order.customer_name,
             Order.source,
             Order.status,
-            Order.pathao_status,
-            Order.pathao_consignment_id,
+            Order.courier_provider,
+            Order.courier_status,
+            Order.courier_consignment_id,
             _DELIVERED.label("delivered"),
             ce.created_at,
         )
@@ -1192,8 +1274,9 @@ async def _credited_orders(
             customer_name=row.customer_name,
             source=row.source,
             status=row.status,
-            pathao_status=row.pathao_status,
-            consignment_id=row.pathao_consignment_id,
+            courier_provider=row.courier_provider,
+            courier_status=row.courier_status,
+            consignment_id=row.courier_consignment_id,
             delivered=bool(row.delivered),
             confirmed_at=row.created_at,
         )
@@ -1350,7 +1433,7 @@ async def delivery_team(
 
     A parcel belongs to the month its order was confirmed, however long it
     takes: confirmed on 31 December and delivered on 10 January is
-    December's, and until Pathao delivers or returns it, it is December's
+    December's, and until the courier delivers or returns it, it is December's
     in transit. Nothing is stored; a month's figures settle by themselves as
     the courier sync reports in. Unlike the staff pages this is about
     parcels, not people, so manual orders count.
@@ -1363,7 +1446,7 @@ async def delivery_team(
     rows = await session.execute(
         select(
             confirmed_on,
-            count.filter(Order.pathao_consignment_id.is_not(None)),
+            count.filter(Order.courier_consignment_id.is_not(None)),
             count.filter(_DELIVERED),
             count.filter(_RETURNED),
             count.filter(_IN_TRANSIT),
@@ -1391,6 +1474,10 @@ async def delivery_team(
         returned=sum(d.returned for d in days),
         in_transit=sum(d.in_transit for d in days),
         days=days,
+        couriers=await _courier_splits(
+            session,
+            select(ce.order_id).select_from(ce).where(final),
+        ),
     )
 
 
@@ -1804,41 +1891,65 @@ async def bulk_update(
 
 
 # Only orders that have been confirmed by phone, or already handed to
-# shipping, may be booked with the courier.
-PATHAO_SENDABLE = {
+# shipping, may be booked with a courier.
+COURIER_SENDABLE = {
     OrderStatus.confirmed.value,
     OrderStatus.shipped.value,
     OrderStatus.history.value,
 }
 
 
-@router.post("/pathao/send", response_model=PathaoSendOut)
-async def send_to_pathao(
-    payload: PathaoSendIn,
+async def _book(order: Order, integrations: stores.Integrations, name: str):
+    """Book one order with the named courier. Returns (consignment id,
+    status, delivery fee); raises the courier's own error type."""
+    if name == courier.CARRYBEE:
+        booked = await carrybee.create_order(order, integrations.carrybee, order.order_no)
+        return booked.consignment_id, booked.status, booked.delivery_fee
+    consignment = await pathao.create_order(order, integrations.pathao, order.order_no)
+    return consignment.consignment_id, consignment.order_status or None, consignment.delivery_fee
+
+
+def _courier_error_text(exc: Exception) -> str:
+    if isinstance(exc, carrybee.CarrybeeError):
+        return carrybee.error_text(exc)
+    if isinstance(exc, pathao.PathaoError):
+        return pathao.error_text(exc)
+    return str(exc)
+
+
+@router.post("/courier/send", response_model=CourierSendOut)
+async def send_to_courier(
+    payload: CourierSendIn,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
     ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
-) -> PathaoSendOut:
+) -> CourierSendOut:
     """
-    Book each order with Pathao and store the consignment id. Each success is
-    committed on its own, so a failure half-way never loses a booking Pathao
-    has already made. Failures come back per order with Pathao's reason.
+    Book each order with the chosen courier and store the consignment id.
+    Each success is committed on its own, so a failure half-way never loses a
+    booking the courier has already made. Failures come back per order with
+    the courier's reason. An order already booked — with either courier — is
+    refused: one parcel, one courier.
     """
+    name = payload.courier
+    label = courier.LABELS[name]
     integrations = await stores.load_integrations(session, ctx.store.id)
-    if integrations is None or not integrations.pathao.enabled:
-        raise HTTPException(status_code=503, detail="Pathao is not configured for this store")
-    cfg = integrations.pathao
-    try:
-        await pathao.get_access_token(cfg, ctx.store.id)
-    except pathao.PathaoError as exc:
-        raise HTTPException(status_code=502, detail=pathao.error_text(exc)) from exc
+    if integrations is None or name not in integrations.couriers():
+        raise HTTPException(status_code=503, detail=f"{label} is not switched on for this store")
+    if name == courier.PATHAO:
+        # Log in once up front, so bad credentials fail the batch in one line
+        # rather than once per order.
+        try:
+            await pathao.get_access_token(integrations.pathao, ctx.store.id)
+        except pathao.PathaoError as exc:
+            raise HTTPException(status_code=502, detail=pathao.error_text(exc)) from exc
 
     sent_ids: list[int] = []
-    failed: list[PathaoFailure] = []
+    failed: list[CourierFailure] = []
 
     def fail(order_id: int, reason: str) -> None:
         failed.append(
-            PathaoFailure(order_id=order_id, order_no=f"{ctx.store.order_prefix}-{order_id}", error=reason)
+            CourierFailure(order_id=order_id, order_no=f"{ctx.store.order_prefix}-{order_id}", error=reason)
         )
 
     for order_id in dict.fromkeys(payload.order_ids):
@@ -1846,11 +1957,12 @@ async def send_to_pathao(
         if order is None or order.store_id != ctx.store.id:
             fail(order_id, "Not found")
             continue
-        if order.pathao_consignment_id:
-            fail(order_id, f"Already sent to Pathao ({order.pathao_consignment_id})")
+        if order.courier_consignment_id:
+            booked_with = courier.LABELS.get(order.courier_provider or courier.PATHAO, "the courier")
+            fail(order_id, f"Already sent to {booked_with} ({order.courier_consignment_id})")
             await session.rollback()
             continue
-        if order.status not in PATHAO_SENDABLE:
+        if order.status not in COURIER_SENDABLE:
             fail(order_id, "Only confirmed, shipping or history orders can be sent")
             await session.rollback()
             continue
@@ -1859,31 +1971,37 @@ async def send_to_pathao(
             await session.rollback()
             continue
         try:
-            consignment = await pathao.create_order(order, cfg, order.order_no)
-        except pathao.PathaoError as exc:
-            fail(order_id, pathao.error_text(exc))
+            consignment_id, status, fee = await _book(order, integrations, name)
+        except (pathao.PathaoError, carrybee.CarrybeeError) as exc:
+            fail(order_id, _courier_error_text(exc))
             await session.rollback()
             await asyncio.sleep(pathao_sync.BETWEEN_CALLS_SECONDS)
             continue
-        order.pathao_consignment_id = consignment.consignment_id
-        order.pathao_status = consignment.order_status or None
-        order.pathao_delivery_fee = consignment.delivery_fee
-        order.pathao_sent_at = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)
+        order.courier_provider = name
+        order.courier_consignment_id = consignment_id
+        order.courier_status = status
+        # Left for the courier's own clock to fill: the first webhook event
+        # sets it, so a skew between its clock and ours can never make that
+        # event look older than the booking.
+        order.courier_status_at = None
+        order.courier_delivery_fee = fee
+        order.courier_sent_at = now
         _set_flag(session, order, user, "courier", True)
         session.add(
             OrderEvent(
                 store_id=order.store_id,
                 order_id=order.id,
                 actor_id=user.id,
-                event_type="pathao_sent",
-                note=consignment.consignment_id,
+                event_type=f"{name}_sent",
+                note=consignment_id,
             )
         )
         await session.commit()
         sent_ids.append(order.id)
         await asyncio.sleep(pathao_sync.BETWEEN_CALLS_SECONDS)
 
-    return PathaoSendOut(orders=await _load_orders(session, sent_ids), failed=failed)
+    return CourierSendOut(orders=await _load_orders(session, sent_ids), failed=failed)
 
 
 async def _pathao_cfg(session: AsyncSession, store_id: int) -> stores.PathaoConfig:
@@ -2065,40 +2183,55 @@ async def stop_pathao_full_sync(
     return _sync_run_out(run, ctx.store.order_prefix) if run is not None else None
 
 
-@router.post("/pathao/refresh", response_model=PathaoSendOut)
-async def refresh_pathao(
-    payload: PathaoSendIn,
+@router.post("/courier/refresh", response_model=CourierSendOut)
+async def refresh_courier(
+    payload: CourierSendIn,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
     ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
-) -> PathaoSendOut:
-    """Pull the current delivery status from Pathao for each booked order."""
+) -> CourierSendOut:
+    """Pull the current delivery status for each booked order from whichever
+    courier it was booked with."""
     integrations = await stores.load_integrations(session, ctx.store.id)
-    if integrations is None or not integrations.pathao.enabled:
-        raise HTTPException(status_code=503, detail="Pathao is not configured for this store")
-    cfg = integrations.pathao
+    if integrations is None:
+        raise HTTPException(status_code=404, detail="Unknown store")
 
     refreshed_ids: list[int] = []
-    failed: list[PathaoFailure] = []
+    failed: list[CourierFailure] = []
     for order_id in dict.fromkeys(payload.order_ids):
         order = await session.get(Order, order_id)
-        if order is None or order.store_id != ctx.store.id or not order.pathao_consignment_id:
+        if order is None or order.store_id != ctx.store.id or not order.courier_consignment_id:
             failed.append(
-                PathaoFailure(
+                CourierFailure(
                     order_id=order_id,
                     order_no=f"{ctx.store.order_prefix}-{order_id}",
-                    error="Not sent to Pathao yet",
+                    error="Not sent to a courier yet",
+                )
+            )
+            continue
+        name = order.courier_provider or courier.PATHAO
+        if name not in integrations.couriers():
+            failed.append(
+                CourierFailure(
+                    order_id=order.id,
+                    order_no=order.order_no,
+                    error=f"{courier.LABELS.get(name, name)} is switched off for this store",
                 )
             )
             continue
         try:
-            await pathao_sync.refresh_order(session, order, cfg, actor_id=user.id)
-        except pathao.PathaoError as exc:
+            if name == courier.CARRYBEE:
+                await carrybee_sync.refresh_order(
+                    session, order, integrations.carrybee, actor_id=user.id
+                )
+            else:
+                await pathao_sync.refresh_order(
+                    session, order, integrations.pathao, actor_id=user.id
+                )
+        except (pathao.PathaoError, carrybee.CarrybeeError) as exc:
             failed.append(
-                PathaoFailure(
-                    order_id=order.id,
-                    order_no=order.order_no,
-                    error=pathao.error_text(exc),
+                CourierFailure(
+                    order_id=order.id, order_no=order.order_no, error=_courier_error_text(exc)
                 )
             )
             await asyncio.sleep(pathao_sync.BETWEEN_CALLS_SECONDS)
@@ -2106,18 +2239,18 @@ async def refresh_pathao(
         refreshed_ids.append(order.id)
         await asyncio.sleep(pathao_sync.BETWEEN_CALLS_SECONDS)
     await session.commit()
-    return PathaoSendOut(orders=await _load_orders(session, refreshed_ids), failed=failed)
+    return CourierSendOut(orders=await _load_orders(session, refreshed_ids), failed=failed)
 
 
 def _reprice(
     session: AsyncSession, order: Order, user: User, pricing: OrderPricingIn
 ) -> None:
     """New unit prices for the order's lines, less a discount, as staff
-    agreed them with the customer. total_amount — what Pathao collects and
-    revenue sums — becomes the lines' sum minus the discount, worked out
-    here. Refused once the parcel is booked: Pathao already has the amount
+    agreed them with the customer. total_amount — what the courier collects
+    and revenue sums — becomes the lines' sum minus the discount, worked out
+    here. Refused once the parcel is booked: the courier already has the amount
     to collect, and a total that disagrees with it is worse than none."""
-    if order.pathao_consignment_id or order.status in (
+    if order.courier_consignment_id or order.status in (
         OrderStatus.shipped.value,
         OrderStatus.history.value,
     ):

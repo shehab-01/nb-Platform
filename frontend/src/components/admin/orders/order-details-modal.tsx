@@ -45,6 +45,8 @@ import {
   STATUS_PAGES,
   EMPTY_LOCATION,
   activeClaim,
+  courierLabel,
+  courierStatusLabel,
   formatOrderDateTime,
   sameLocation,
   staffLabel,
@@ -239,7 +241,7 @@ export function OrderDetailsModal({
   // Prices as typed. Once the parcel is booked Pathao has the amount to
   // collect, so the price is locked (the API refuses it too).
   const priceLocked =
-    order.pathaoConsignmentId !== null || order.status === "shipped" || order.status === "history";
+    order.courierConsignmentId !== null || order.status === "shipped" || order.status === "history";
   const typedPrice = (line: (typeof lines)[number]) => {
     const raw = editPrices[line.id];
     return raw === undefined ? line.unitPrice : raw === "" ? NaN : Number(raw);
@@ -711,26 +713,30 @@ export function OrderDetailsModal({
                     </p>
                   </div>
                 </div>
-                {order.pathaoConsignmentId && (
+                {order.courierConsignmentId && (
                   <div className="mt-4 rounded-lg border border-indigo-200 bg-indigo-50/60 p-3 dark:border-indigo-900 dark:bg-indigo-950/30">
                     <div className="flex items-center justify-between gap-3">
-                      <p className="text-xs text-muted-foreground uppercase">Pathao</p>
-                      {order.pathaoStatus && (
-                        <span className="text-xs font-medium">{order.pathaoStatus}</span>
+                      <p className="text-xs text-muted-foreground uppercase">{courierLabel(order)}</p>
+                      {order.courierStatus && (
+                        <span className="text-xs font-medium">{courierStatusLabel(order.courierStatus)}</span>
                       )}
                     </div>
-                    <a
-                      href={order.pathaoTrackingUrl ?? "#"}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-1 inline-flex items-center gap-1 font-mono text-sm font-semibold text-blue-700 underline underline-offset-2 dark:text-blue-400"
-                    >
-                      {order.pathaoConsignmentId}
-                      <ExternalLink className="size-3.5" />
-                    </a>
-                    {order.pathaoDeliveryFee !== null && (
+                    {order.courierTrackingUrl ? (
+                      <a
+                        href={order.courierTrackingUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 inline-flex items-center gap-1 font-mono text-sm font-semibold text-blue-700 underline underline-offset-2 dark:text-blue-400"
+                      >
+                        {order.courierConsignmentId}
+                        <ExternalLink className="size-3.5" />
+                      </a>
+                    ) : (
+                      <p className="mt-1 font-mono text-sm font-semibold">{order.courierConsignmentId}</p>
+                    )}
+                    {order.courierDeliveryFee !== null && (
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Delivery fee ৳{order.pathaoDeliveryFee}
+                        Delivery fee ৳{order.courierDeliveryFee}
                       </p>
                     )}
                   </div>

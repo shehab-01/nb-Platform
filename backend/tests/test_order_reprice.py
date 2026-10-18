@@ -60,7 +60,7 @@ def test_unchanged_total_logs_nothing():
 
 
 def test_refused_once_booked_with_the_courier():
-    for order in (_order(pathao_consignment_id="DL123"), _order(status="shipped")):
+    for order in (_order(courier_consignment_id="DL123"), _order(status="shipped")):
         with pytest.raises(HTTPException) as exc:
             _reprice(_Session(), order, STAFF, _pricing([(11, 1)]))
         assert exc.value.status_code == 409

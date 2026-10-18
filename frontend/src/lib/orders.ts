@@ -170,6 +170,33 @@ export function sameLocation(a: PathaoLocation, b: PathaoLocation): boolean {
 
 export type PathaoConfidence = "high" | "medium" | "low" | "manual";
 
+/** The couriers an order can be booked with. */
+export type CourierName = "pathao" | "carrybee";
+
+export const COURIER_LABELS: Record<CourierName, string> = {
+  pathao: "Pathao",
+  carrybee: "Carrybee",
+};
+
+/** A courier's name for the order's parcel, Pathao for old bookings that
+ * predate the second courier. */
+export function courierLabel(order: Pick<Order, "courierProvider">): string {
+  return COURIER_LABELS[order.courierProvider ?? "pathao"] ?? "Courier";
+}
+
+/**
+ * A courier status as staff read it. Pathao writes "Pickup_Requested",
+ * Carrybee "pickup-requested"; both become "Pickup Requested".
+ */
+export function courierStatusLabel(status: string | null | undefined): string {
+  if (!status) return "";
+  return status
+    .split(/[_\-\s]+/)
+    .filter(Boolean)
+    .map((word) => word[0].toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 export type OrderTag = {
   id: number;
   label: string;
@@ -223,12 +250,15 @@ export type Order = {
   autoCaptured: boolean;
   tags: OrderTag[];
   items: OrderItem[];
-  /** Pathao's tracking number once the parcel is booked; null before. */
-  pathaoConsignmentId: string | null;
-  pathaoStatus: string | null;
-  pathaoDeliveryFee: number | null;
-  pathaoSentAt: string | null;
-  pathaoTrackingUrl: string | null;
+  /** Which courier the parcel is booked with; null before booking. */
+  courierProvider: CourierName | null;
+  /** The courier's tracking number once the parcel is booked; null before. */
+  courierConsignmentId: string | null;
+  /** The courier's own word for where the parcel is (see courierStatusLabel). */
+  courierStatus: string | null;
+  courierDeliveryFee: number | null;
+  courierSentAt: string | null;
+  courierTrackingUrl: string | null;
   /** Where Pathao delivers, in its ids: from the address parser or staff. */
   pathaoLocation: PathaoLocation;
   /**

@@ -7,6 +7,8 @@ import type { PhoneLookup } from "@/lib/api";
 import {
   ORDER_STATUS_LABELS,
   STATUS_BADGE_CLASS,
+  courierLabel,
+  courierStatusLabel,
   formatOrderDateTime,
   type Order,
 } from "@/lib/orders";
@@ -52,10 +54,10 @@ function OrderRow({
               .join(", ")
           : `${order.product} × ${order.quantity}`}
       </div>
-      {order.pathaoStatus && (
+      {order.courierStatus && (
         <div className="mt-1 text-xs text-muted-foreground">
-          Pathao: {order.pathaoStatus}
-          {order.pathaoConsignmentId ? ` · ${order.pathaoConsignmentId}` : ""}
+          {courierLabel(order)}: {courierStatusLabel(order.courierStatus)}
+          {order.courierConsignmentId ? ` · ${order.courierConsignmentId}` : ""}
         </div>
       )}
     </li>

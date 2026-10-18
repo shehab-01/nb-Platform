@@ -17,7 +17,7 @@ from api.routers.proof_drops import public_router as proof_drop_public_router
 from api.routers.orders import router as orders_router
 from api.routers.products import public_router as storefront_router
 from api.routers.products import router as products_router
-from api.services import meta_capi, pathao_sync
+from api.services import carrybee_sync, meta_capi, pathao_sync
 from api.routers.stores import admin_router as stores_admin_router
 from api.routers.stores import check_router as store_check_router
 from api.routers.stores import health_router as store_health_router
@@ -28,6 +28,7 @@ from api.routers.stores import router as stores_router
 from api.routers.system import router as system_router
 from api.routers.track import router as track_router
 from api.routers.users import router as users_router
+from api.routers.webhooks import router as webhooks_router
 
 # Uvicorn configures only its own loggers; the root logger would otherwise sit
 # at WARNING and swallow the app's INFO lines — including "CAPI Purchase …
@@ -44,7 +45,9 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 async def lifespan(app: FastAPI):
     monitoring.start()
     pathao_sync.start()
+    carrybee_sync.start()
     yield
+    await carrybee_sync.stop()
     await pathao_sync.stop()
     # Let in-flight Conversions API deliveries (retries included) finish
     # before the worker goes away, so a redeploy never loses a Purchase.
@@ -78,6 +81,7 @@ app.include_router(stores_admin_router, prefix="/api")
 app.include_router(store_health_router, prefix="/api")
 app.include_router(store_check_router, prefix="/api")
 app.include_router(me_router, prefix="/api")
+app.include_router(webhooks_router, prefix="/api")
 app.include_router(store_settings_router, prefix="/api")
 app.include_router(store_content_router, prefix="/api")
 

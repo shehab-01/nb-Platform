@@ -30,6 +30,7 @@ from api import stores
 from api.db import async_session
 from api.models import Order, OrderEvent, PathaoSyncRun, Store
 from api.services import pathao
+from api.services.courier import PATHAO, PATHAO_SETTLED
 
 log = logging.getLogger("pathao_sync")
 
@@ -60,7 +61,7 @@ START_LOCK_KEY = 7_420_011
 
 # Where a parcel's story ends, as Pathao spells its statuses (compared in
 # lower case). Anything else is still in flight and worth asking about.
-SETTLED = ("delivered", "partial_delivery", "return", "paid_return", "cancelled")
+SETTLED = PATHAO_SETTLED
 
 
 def is_settled(status: str | None) -> bool:
@@ -68,13 +69,15 @@ def is_settled(status: str | None) -> bool:
 
 
 def _unsettled(store_id: int):
-    """Booked parcels of this store that have not reached a final state."""
+    """Pathao parcels of this store that have not reached a final state.
+    Carrybee's are api.services.carrybee_sync's to keep current."""
     return (
         Order.store_id == store_id,
-        Order.pathao_consignment_id.is_not(None),
+        Order.courier_provider == PATHAO,
+        Order.courier_consignment_id.is_not(None),
         or_(
-            Order.pathao_status.is_(None),
-            func.lower(Order.pathao_status).not_in(SETTLED),
+            Order.courier_status.is_(None),
+            func.lower(Order.courier_status).not_in(SETTLED),
         ),
     )
 
@@ -88,11 +91,11 @@ async def refresh_order(
     """Ask Pathao where this parcel is and record the answer on the order,
     with an audit event when it changed. Returns the status. Raises
     PathaoError when Pathao could not be asked."""
-    info = await pathao.order_info(cfg, order.store_id, order.pathao_consignment_id)
+    info = await pathao.order_info(cfg, order.store_id, order.courier_consignment_id)
     status = info.raw.get("order_status_slug") or info.order_status or None
-    order.pathao_checked_at = datetime.now(timezone.utc)
-    if status != order.pathao_status:
-        order.pathao_status = status
+    order.courier_checked_at = datetime.now(timezone.utc)
+    if status != order.courier_status:
+        order.courier_status = status
         session.add(
             OrderEvent(
                 store_id=order.store_id,
@@ -133,15 +136,15 @@ async def poll_once() -> int:
                     # past the first BATCH_LIMIT parcels in flight: they were
                     # never asked again and their deliveries never landed.
                     .order_by(
-                        Order.pathao_checked_at.asc().nulls_first(),
-                        Order.pathao_sent_at.desc().nulls_last(),
+                        Order.courier_checked_at.asc().nulls_first(),
+                        Order.courier_sent_at.desc().nulls_last(),
                     )
                     .limit(BATCH_LIMIT)
                 )
             ).all()
             for order in rows:
                 # Answered or not, this parcel goes to the back of the queue.
-                order.pathao_checked_at = datetime.now(timezone.utc)
+                order.courier_checked_at = datetime.now(timezone.utc)
                 for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
                     try:
                         await refresh_order(session, order, integrations.pathao)
@@ -152,7 +155,7 @@ async def poll_once() -> int:
                             log.warning(
                                 "Pathao sync: rate limited, backing off %ds (%s)",
                                 RATE_LIMIT_BACKOFF_SECONDS,
-                                order.pathao_consignment_id,
+                                order.courier_consignment_id,
                             )
                             await asyncio.sleep(RATE_LIMIT_BACKOFF_SECONDS)
                             continue
@@ -163,7 +166,7 @@ async def poll_once() -> int:
                         # round early and pick it up next scheduled poll.
                         log.warning(
                             "Pathao sync: %s (%s): HTTP %s %s",
-                            order.pathao_consignment_id,
+                            order.courier_consignment_id,
                             order.order_no,
                             exc.status,
                             pathao.error_text(exc),
@@ -275,7 +278,7 @@ async def full_sync(run_id: int, store_id: int, actor_id: int | None) -> None:
                 await session.scalars(
                     select(Order.id)
                     .where(*_unsettled(store_id))
-                    .order_by(Order.pathao_sent_at.asc().nulls_first(), Order.id)
+                    .order_by(Order.courier_sent_at.asc().nulls_first(), Order.id)
                 )
             ).all()
             run = await session.get(PathaoSyncRun, run_id)
@@ -291,11 +294,11 @@ async def full_sync(run_id: int, store_id: int, actor_id: int | None) -> None:
                         run.finished_at = datetime.now(timezone.utc)
                     return
                 order = await session.get(Order, order_id)
-                if order is None or not order.pathao_consignment_id:
+                if order is None or not order.courier_consignment_id:
                     run.checked += 1
                     run.heartbeat_at = datetime.now(timezone.utc)
                     continue
-                before = order.pathao_status
+                before = order.courier_status
                 error: pathao.PathaoError | None = None
                 for backoff in (*FULL_SYNC_BACKOFF_SECONDS, None):
                     try:
@@ -309,7 +312,7 @@ async def full_sync(run_id: int, store_id: int, actor_id: int | None) -> None:
                         log.warning(
                             "Pathao full sync: rate limited, backing off %ds (%s)",
                             backoff,
-                            order.pathao_consignment_id,
+                            order.courier_consignment_id,
                         )
                         # Keep the heartbeat fresh through a long back-off.
                         await session.execute(
@@ -322,11 +325,11 @@ async def full_sync(run_id: int, store_id: int, actor_id: int | None) -> None:
                 run.checked += 1
                 run.heartbeat_at = datetime.now(timezone.utc)
                 if error is not None:
-                    order.pathao_checked_at = datetime.now(timezone.utc)
+                    order.courier_checked_at = datetime.now(timezone.utc)
                     run.failed += 1
                     log.warning(
                         "Pathao full sync: %s (%s): HTTP %s %s",
-                        order.pathao_consignment_id,
+                        order.courier_consignment_id,
                         order.order_no,
                         error.status,
                         pathao.error_text(error),
@@ -337,7 +340,7 @@ async def full_sync(run_id: int, store_id: int, actor_id: int | None) -> None:
                             *run.failures,
                             {
                                 "order_id": order.id,
-                                "consignment_id": order.pathao_consignment_id,
+                                "consignment_id": order.courier_consignment_id,
                                 "error": pathao.error_text(error),
                             },
                         ]
@@ -349,9 +352,9 @@ async def full_sync(run_id: int, store_id: int, actor_id: int | None) -> None:
                         )
                         run.finished_at = datetime.now(timezone.utc)
                         return
-                elif order.pathao_status != before:
+                elif order.courier_status != before:
                     run.changed += 1
-                    if (order.pathao_status or "").lower() == "delivered":
+                    if (order.courier_status or "").lower() == "delivered":
                         run.delivered += 1
             await asyncio.sleep(FULL_SYNC_BETWEEN_CALLS_SECONDS)
 

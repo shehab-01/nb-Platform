@@ -22,6 +22,7 @@ import {
 } from "@/lib/delivery-team";
 import { bdt, dhakaToday, monthLabel } from "@/lib/staff-stats";
 import { cn } from "@/lib/utils";
+import { CourierSplitCard } from "@/components/admin/orders/courier-split";
 
 /** "6/10" — day/month, the way the team writes it. */
 function shortDay(iso: string): string {
@@ -34,7 +35,7 @@ const n = (x: number) => x.toLocaleString("en-IN");
  * The delivery team's month: the parcels of every order confirmed in it, and
  * the one team incentive they earn. A parcel belongs to the month its order
  * was confirmed — confirmed 31 December, delivered 10 January, is December's
- * — and sits in that month's in-transit figure until Pathao settles it, so
+ * — and sits in that month's in-transit figure until the courier settles it, so
  * a month's incentive keeps moving until its in-transit count reaches 0.
  * Manual orders count. Super admins only — the API refuses everyone else too.
  */
@@ -112,7 +113,7 @@ function DeliveryTeamView() {
         <Tile
           label="Confirmed"
           value={data && n(data.sent)}
-          hint="Sent to Pathao"
+          hint="Sent to a courier"
         />
         <Tile label="Delivered" value={data && n(delivered)} tone="green" />
         <Tile label="Returned" value={data && n(returned)} />
@@ -145,7 +146,7 @@ function DeliveryTeamView() {
       {data && data.in_transit > 0 && (
         <p className="-mt-2 text-sm text-muted-foreground">
           {n(data.in_transit)} of {monthLabel(month)}&apos;s parcels are still
-          with Pathao. The incentive is final once they are all delivered or
+          with the courier. The incentive is final once they are all delivered or
           returned.
           {nextTier !== undefined && (
             <>
@@ -156,6 +157,12 @@ function DeliveryTeamView() {
           )}
         </p>
       )}
+
+      <CourierSplitCard
+        title="By courier"
+        description={`${monthLabel(month)}'s parcels, by the courier that has each one`}
+        splits={data ? (data.couriers ?? []) : undefined}
+      />
 
       <div className="grid items-start gap-6 lg:grid-cols-[3fr_2fr]">
         {/* --- The grid, with this month's cell marked ----------------- */}

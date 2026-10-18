@@ -25,10 +25,11 @@ import {
   claimOrder,
   listClaims,
   listOrders,
-  refreshPathao,
+  refreshCourier,
+  listCouriers,
   releaseOrder,
   releaseOrderOnLeave,
-  sendToPathao,
+  sendToCourier,
   type Claim,
   listDeliveryStatuses,
   type OrderListParams,
@@ -39,8 +40,11 @@ import {
   ORDER_STATUSES,
   ORDER_STATUS_LABELS,
   STATUS_PAGES,
+  COURIER_LABELS,
   activeClaim,
+  courierStatusLabel,
   staffLabel,
+  type CourierName,
   type OrderSource,
   type OrderStatus,
   type Order,
@@ -81,6 +85,10 @@ function queryToParams(
     } else if (filter.id === "delivery") {
       const picked = filter.value as string[];
       if (picked.length) params.delivery = picked;
+    } else if (filter.id === "pathao") {
+      // The Consignment column, filtered by which courier has the parcel.
+      const picked = filter.value as CourierName[];
+      if (picked.length) params.courierProvider = picked;
     } else if (filter.id === "customerName") {
       const q = String(filter.value).trim();
       if (q) params.q = q;
@@ -131,7 +139,7 @@ export function OrdersView({
   showPreviousOrders?: boolean;
   /**
    * Which bulk actions ticking rows offers. "confirm" sends the batch on to
-   * Shipping; "ship" books it with Pathao and prints stickers. Omit for
+   * Shipping; "ship" books it with a courier and prints stickers. Omit for
    * lists that only ever work one order at a time.
    */
   bulkActions?: BulkMode;
@@ -177,7 +185,7 @@ export function OrdersView({
 
   // Shipping and History filter by delivery status instead of order status:
   // each holds a single order status, so where the parcel is is the useful
-  // question. Pathao names its own statuses, so the options are whatever
+  // question. The couriers name their own statuses, so the options are whatever
   // this page's orders currently carry, re-read whenever the list reloads.
   const deliveryFilter = bulkActions === "ship" || bulkActions === "history";
   const [deliveryStatuses, setDeliveryStatuses] = React.useState<string[]>([]);
@@ -193,6 +201,21 @@ export function OrdersView({
       cancelled = true;
     };
   }, [deliveryFilter, scope, orders]);
+
+  // The couriers this store can book with now, for the Send buttons.
+  const [couriers, setCouriers] = React.useState<CourierName[]>([]);
+  React.useEffect(() => {
+    if (!deliveryFilter) return;
+    let cancelled = false;
+    listCouriers()
+      .then((list) => {
+        if (!cancelled) setCouriers(list.map((c) => c.name));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [deliveryFilter]);
 
   const lastSearch = React.useRef<string | undefined>(undefined);
   const silentRef = React.useRef(false);
@@ -507,20 +530,24 @@ export function OrdersView({
         }
         refetch();
       },
-      sendToPathao: async (rows) => {
+      sendToCourier: async (rows, courier) => {
         setNotice(null);
+        const label = COURIER_LABELS[courier];
         try {
-          const result = await sendToPathao(rows.map((order) => order.id));
+          const result = await sendToCourier(
+            rows.map((order) => order.id),
+            courier
+          );
           patchRows(result.orders);
           setOutcome({
-            title: "Sent to Pathao",
+            title: `Sent to ${label}`,
             description: `${result.orders.length} of ${rows.length} parcel${
               rows.length === 1 ? "" : "s"
-            } booked. Click a consignment id to open its tracking page.`,
+            } booked with ${label}.`,
             done: result.orders.map((order) => ({
               orderNo: order.orderNo,
-              detail: order.pathaoConsignmentId ?? undefined,
-              href: order.pathaoTrackingUrl ?? undefined,
+              detail: order.courierConsignmentId ?? undefined,
+              href: order.courierTrackingUrl ?? undefined,
             })),
             failed: result.failed.map((item) => ({
               orderNo: item.orderNo,
@@ -528,22 +555,22 @@ export function OrdersView({
             })),
           });
         } catch (err) {
-          setNotice(err instanceof Error ? err.message : "Could not reach Pathao");
+          setNotice(err instanceof Error ? err.message : `Could not reach ${label}`);
         }
         refetch();
       },
-      refreshPathao: async (rows) => {
+      refreshCourier: async (rows) => {
         setNotice(null);
         try {
-          const result = await refreshPathao(rows.map((order) => order.id));
+          const result = await refreshCourier(rows.map((order) => order.id));
           patchRows(result.orders);
           if (result.failed.length) {
             setOutcome({
-              title: "Pathao status",
+              title: "Delivery status",
               description: `${result.orders.length} refreshed, ${result.failed.length} failed.`,
               done: result.orders.map((order) => ({
                 orderNo: order.orderNo,
-                detail: order.pathaoStatus ?? undefined,
+                detail: courierStatusLabel(order.courierStatus) || undefined,
               })),
               failed: result.failed.map((item) => ({
                 orderNo: item.orderNo,
@@ -552,7 +579,7 @@ export function OrdersView({
             });
           }
         } catch (err) {
-          setNotice(err instanceof Error ? err.message : "Could not reach Pathao");
+          setNotice(err instanceof Error ? err.message : "Could not reach the courier");
         }
       },
       sendToHistory: async (rows) => {
@@ -612,9 +639,10 @@ export function OrdersView({
           selectAllPage={ctx.selectAllPage}
           allPageSelected={ctx.allPageSelected}
           handlers={bulkHandlers}
+          couriers={couriers}
         />
       ) : null,
-    [bulkActions, bulkHandlers]
+    [bulkActions, bulkHandlers, couriers]
   );
 
   const rowId = React.useCallback((order: Order) => String(order.id), []);
@@ -707,7 +735,7 @@ export function OrdersView({
                   { label: "Not sent", value: "not_sent" },
                   { label: "Pending", value: "pending" },
                   ...deliveryStatuses.map((status) => ({
-                    label: status.replace(/_/g, " "),
+                    label: courierStatusLabel(status),
                     value: `status:${status}`,
                   })),
                 ],
@@ -722,6 +750,17 @@ export function OrdersView({
                   value: status.value,
                 })),
               },
+          ...(deliveryFilter
+            ? [
+                {
+                  columnId: "pathao",
+                  title: "Courier",
+                  options: (Object.keys(COURIER_LABELS) as CourierName[]).map(
+                    (courier) => ({ label: COURIER_LABELS[courier], value: courier })
+                  ),
+                },
+              ]
+            : []),
           // Every value the column can hold, not only the ones on this page:
           // the filter is a question ("which of these came in by hand?"), and
           // an empty answer is an answer.

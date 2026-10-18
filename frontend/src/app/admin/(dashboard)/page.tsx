@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/components/admin/auth-context";
+import { CourierSplitCard } from "@/components/admin/orders/courier-split";
 import { storeTitle } from "@/lib/admin-store";
 import { Label } from "@/components/ui/label";
 import {
@@ -196,7 +197,7 @@ export default function AdminDashboardPage() {
           label="Delivered this month"
           value={m?.delivered}
           previous={p?.delivered}
-          hint="Reported delivered by Pathao"
+          hint="Reported delivered by the courier"
         />
       </div>
 
@@ -254,6 +255,20 @@ export default function AdminDashboardPage() {
           </section>
         </CardContent>
       </Card>
+
+      {/* --- The couriers -------------------------------------------- */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <CourierSplitCard
+          title="By courier — this month"
+          description="Orders placed this month, by the courier that has the parcel"
+          splits={data ? (m?.couriers ?? []) : undefined}
+        />
+        <CourierSplitCard
+          title="By courier — chosen days"
+          description={rangeLabel(range)}
+          splits={data ? (d?.couriers ?? []) : undefined}
+        />
+      </div>
 
       {/* --- The people --------------------------------------------- */}
       <div className="grid gap-4 lg:grid-cols-2">

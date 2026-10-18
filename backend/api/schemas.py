@@ -459,6 +459,9 @@ class DashboardTotals(BaseModel):
     delivered: int
     # The same month's parcels by courier, for every courier that has any.
     couriers: list[CourierSplit] = []
+    # The confirmed figure by where the parcel went: "pathao", "carrybee",
+    # or "none" for not sent yet. Sums to confirmed.
+    confirmed_by_courier: dict[str, int] = {}
 
 
 class DashboardPeriod(BaseModel):
@@ -478,6 +481,8 @@ class DashboardPeriod(BaseModel):
     leads_confirmed: int
     # The chosen days' orders booked with each courier, by where they are now.
     couriers: list[CourierSplit] = []
+    # The confirmed figure by where the parcel went, as on DashboardTotals.
+    confirmed_by_courier: dict[str, int] = {}
 
 
 class Performer(BaseModel):

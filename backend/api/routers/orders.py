@@ -6,6 +6,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import (
     and_,
+    case,
     delete,
     distinct,
     exists,
@@ -658,9 +659,21 @@ async def list_orders(
     # a courier yet, booked with no status back, or the courier's own words.
     if delivery:
         filters.append(or_(*(_delivery_filter(value) for value in delivery)))
-    # Which courier has the parcel.
+    # Which courier has the parcel; "none" asks for orders not sent yet.
     if courier_provider:
-        filters.append(Order.courier_provider.in_(courier_provider))
+        named = [c for c in courier_provider if c != courier.NOT_SENT]
+        conditions = []
+        if named:
+            conditions.append(
+                and_(
+                    Order.courier_consignment_id.is_not(None),
+                    # Bookings from before courier_provider existed are Pathao's.
+                    func.coalesce(Order.courier_provider, courier.PATHAO).in_(named),
+                )
+            )
+        if courier.NOT_SENT in courier_provider:
+            conditions.append(Order.courier_consignment_id.is_(None))
+        filters.append(or_(*conditions))
     if date_from:
         filters.append(Order.created_at >= _day_start(date_from))
     if date_to:
@@ -1080,6 +1093,9 @@ async def dashboard(
     month_totals.couriers = await _courier_splits(
         session, _created_in(ctx.store.id, month_start, month_end)
     )
+    month_totals.confirmed_by_courier = await _won_by_courier(
+        session, ctx.store.id, month_start, month_end
+    )
     return DashboardOut(
         date_from=start_day,
         date_to=end_day,
@@ -1097,10 +1113,38 @@ async def dashboard(
             leads_processing=period["leads_processing"],
             leads_confirmed=period["leads_confirmed"],
             couriers=await _courier_splits(session, _created_in(ctx.store.id, start, end)),
+            confirmed_by_courier=await _won_by_courier(session, ctx.store.id, start, end),
         ),
         performers=performers,
         lead_performers=lead_performers,
     )
+
+
+# Which courier a won order went to, "none" while it is not booked yet.
+_COURIER_KEY = case(
+    (Order.courier_consignment_id.is_(None), courier.NOT_SENT),
+    else_=func.coalesce(Order.courier_provider, courier.PATHAO),
+)
+
+
+async def _won_by_courier(
+    session: AsyncSession, store_id: int, start: datetime, end: datetime
+) -> dict[str, int]:
+    """The confirmed figure (won orders created in [start, end)) split by
+    where each parcel went: a courier, or "none" for not sent yet. Sums to
+    the dashboard's Confirmed count."""
+    rows = await session.execute(
+        select(_COURIER_KEY, func.count())
+        .where(
+            Order.store_id == store_id,
+            Order.created_at >= start,
+            Order.created_at < end,
+            _PLACED,
+            Order.status.in_(WON),
+        )
+        .group_by(_COURIER_KEY)
+    )
+    return {key: n for key, n in rows}
 
 
 def _created_in(store_id: int, start: datetime, end: datetime):

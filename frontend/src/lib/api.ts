@@ -155,8 +155,8 @@ export type OrderListParams = {
   source?: OrderSource[];
   /** Delivery column values: "not_sent", "pending" or "status:<courier text>". */
   delivery?: string[];
-  /** Which courier the parcel is booked with. */
-  courierProvider?: CourierName[];
+  /** Which courier the parcel is booked with; "none" for not sent yet. */
+  courierProvider?: (CourierName | "none")[];
   dateFrom?: string;
   dateTo?: string;
   q?: string;
@@ -717,6 +717,8 @@ export type DashboardTotals = {
   delivered: number;
   /** The month's parcels by courier, for every courier that has any. */
   couriers?: CourierSplit[];
+  /** Confirmed by where the parcel went; "none" is not sent yet. */
+  confirmed_by_courier?: Partial<Record<CourierName | "none", number>>;
 };
 
 export type DashboardPeriod = {
@@ -731,6 +733,8 @@ export type DashboardPeriod = {
   leads_confirmed: number;
   /** The chosen days' orders booked with each courier. */
   couriers?: CourierSplit[];
+  /** Confirmed by where the parcel went; "none" is not sent yet. */
+  confirmed_by_courier?: Partial<Record<CourierName | "none", number>>;
 };
 
 export type Performer = {

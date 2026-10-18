@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/components/admin/auth-context";
-import { CourierBadge } from "@/components/admin/orders/courier-badge";
+import { CourierCounts } from "@/components/admin/orders/courier-badge";
 import { CourierSplitCard } from "@/components/admin/orders/courier-split";
 import { storeTitle } from "@/lib/admin-store";
 import { Label } from "@/components/ui/label";
@@ -194,16 +194,16 @@ export default function AdminDashboardPage() {
           value={m?.confirmed}
           previous={p?.confirmed}
           hint="Web, manual and recovered leads"
+          breakdown={m?.confirmed_by_courier}
         />
         <StatTile
           label="Delivered this month"
           value={m?.delivered}
           previous={p?.delivered}
           hint="Reported delivered by the courier"
-          breakdown={m?.couriers?.map((c) => ({
-            courier: c.courier,
-            value: c.delivered,
-          }))}
+          breakdown={Object.fromEntries(
+            (m?.couriers ?? []).map((c) => [c.courier, c.delivered])
+          ) as Partial<Record<CourierName, number>>}
         />
       </div>
 
@@ -232,6 +232,7 @@ export default function AdminDashboardPage() {
                 label="Confirmed"
                 value={d?.confirmed}
                 hint="Web, manual and recovered leads"
+                breakdown={d?.confirmed_by_courier}
               />
               <MiniTile label="No response" value={d?.no_response} />
               <MiniTile label="Cancelled" value={d?.cancelled} />
@@ -508,8 +509,8 @@ function StatTile({
   value: number | undefined;
   previous: number | undefined;
   hint: string;
-  /** The figure by courier, shown under it when there is any. */
-  breakdown?: { courier: CourierName; value: number }[];
+  /** The figure by courier (and "none", not sent yet), shown under it. */
+  breakdown?: Partial<Record<CourierName | "none", number>>;
 }) {
   const delta =
     value !== undefined && previous !== undefined && previous > 0
@@ -546,18 +547,7 @@ function StatTile({
             <span>vs last month ({previous.toLocaleString()})</span>
           </span>
         )}
-        {breakdown && breakdown.length > 0 && (
-          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            {breakdown.map((b) => (
-              <span key={b.courier} className="inline-flex items-center gap-1.5">
-                <CourierBadge courier={b.courier} />
-                <span className="tabular-nums font-medium text-foreground">
-                  {b.value.toLocaleString()}
-                </span>
-              </span>
-            ))}
-          </span>
-        )}
+        <CourierCounts counts={breakdown} />
         <span>{hint}</span>
       </CardContent>
     </Card>
@@ -571,10 +561,13 @@ function MiniTile({
   hint,
   emphasis = false,
   tone = "neutral",
+  breakdown,
 }: {
   label: string;
   value: number | undefined;
   hint?: string;
+  /** The figure by where the parcels went, under the number. */
+  breakdown?: Partial<Record<CourierName | "none", number>>;
   emphasis?: boolean;
   /** Amber for the leads group, so its tiles match their ground. */
   tone?: "neutral" | "amber";
@@ -601,6 +594,7 @@ function MiniTile({
           value.toLocaleString()
         )}
       </div>
+      <CourierCounts counts={breakdown} className="mt-1 text-xs" />
       {hint && <div className="text-[11px] text-muted-foreground">{hint}</div>}
     </div>
   );

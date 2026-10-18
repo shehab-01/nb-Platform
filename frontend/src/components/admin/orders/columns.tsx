@@ -332,6 +332,8 @@ export function getOrderColumns({
       enableSorting: false,
       meta: { label: "Consignment" },
       cell: ({ row }) => <ConsignmentCell order={row.original} />,
+      // The Courier filter runs on the server; nothing to do here.
+      filterFn: () => true,
     },
     {
       id: "delivery",

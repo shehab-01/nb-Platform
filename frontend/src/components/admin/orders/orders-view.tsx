@@ -87,7 +87,7 @@ function queryToParams(
       if (picked.length) params.delivery = picked;
     } else if (filter.id === "pathao") {
       // The Consignment column, filtered by which courier has the parcel.
-      const picked = filter.value as CourierName[];
+      const picked = filter.value as (CourierName | "none")[];
       if (picked.length) params.courierProvider = picked;
     } else if (filter.id === "customerName") {
       const q = String(filter.value).trim();
@@ -750,17 +750,18 @@ export function OrdersView({
                   value: status.value,
                 })),
               },
-          ...(deliveryFilter
-            ? [
-                {
-                  columnId: "pathao",
-                  title: "Courier",
-                  options: (Object.keys(COURIER_LABELS) as CourierName[]).map(
-                    (courier) => ({ label: COURIER_LABELS[courier], value: courier })
-                  ),
-                },
-              ]
-            : []),
+          // Where the parcel went, on every list: a courier, or not sent yet.
+          {
+            columnId: "pathao",
+            title: "Courier",
+            options: [
+              ...(Object.keys(COURIER_LABELS) as CourierName[]).map((courier) => ({
+                label: COURIER_LABELS[courier],
+                value: courier,
+              })),
+              { label: "Not sent", value: "none" },
+            ],
+          },
           // Every value the column can hold, not only the ones on this page:
           // the filter is a question ("which of these came in by hand?"), and
           // an empty answer is an answer.

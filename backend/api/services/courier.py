@@ -18,6 +18,9 @@ PATHAO = "pathao"
 CARRYBEE = "carrybee"
 COURIERS = (PATHAO, CARRYBEE)
 LABELS = {PATHAO: "Pathao", CARRYBEE: "Carrybee"}
+# An order not booked with any courier yet, where a courier name would go
+# (the dashboard's split and the order lists' Courier filter).
+NOT_SENT = "none"
 
 # Where a parcel's story ends, per courier: the background syncs stop asking
 # about a parcel once it says one of these (compared in lower case).

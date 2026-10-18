@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/components/admin/auth-context";
+import { CourierBadge } from "@/components/admin/orders/courier-badge";
 import { CourierSplitCard } from "@/components/admin/orders/courier-split";
 import { storeTitle } from "@/lib/admin-store";
 import { Label } from "@/components/ui/label";
@@ -45,6 +46,7 @@ import {
   type Dashboard,
   type Performer,
 } from "@/lib/api";
+import type { CourierName } from "@/lib/orders";
 import { cn } from "@/lib/utils";
 
 // --- Dates, the shop's way ---------------------------------------------------
@@ -198,6 +200,10 @@ export default function AdminDashboardPage() {
           value={m?.delivered}
           previous={p?.delivered}
           hint="Reported delivered by the courier"
+          breakdown={m?.couriers?.map((c) => ({
+            courier: c.courier,
+            value: c.delivered,
+          }))}
         />
       </div>
 
@@ -496,11 +502,14 @@ function StatTile({
   value,
   previous,
   hint,
+  breakdown,
 }: {
   label: string;
   value: number | undefined;
   previous: number | undefined;
   hint: string;
+  /** The figure by courier, shown under it when there is any. */
+  breakdown?: { courier: CourierName; value: number }[];
 }) {
   const delta =
     value !== undefined && previous !== undefined && previous > 0
@@ -535,6 +544,18 @@ function StatTile({
               {delta === null ? "—" : `${delta > 0 ? "+" : ""}${delta}%`}
             </span>
             <span>vs last month ({previous.toLocaleString()})</span>
+          </span>
+        )}
+        {breakdown && breakdown.length > 0 && (
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {breakdown.map((b) => (
+              <span key={b.courier} className="inline-flex items-center gap-1.5">
+                <CourierBadge courier={b.courier} />
+                <span className="tabular-nums font-medium text-foreground">
+                  {b.value.toLocaleString()}
+                </span>
+              </span>
+            ))}
           </span>
         )}
         <span>{hint}</span>

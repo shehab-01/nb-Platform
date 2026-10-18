@@ -115,7 +115,7 @@ class StoreSettingsUpdate(BaseModel):
     carrybee_client_id: str = Field(default="", max_length=120)
     carrybee_client_secret: str | None = Field(default=None, max_length=500)
     carrybee_client_context: str | None = Field(default=None, max_length=500)
-    carrybee_store_id: str = Field(default="", max_length=40, pattern=r"^d*$")
+    carrybee_store_id: str = Field(default="", max_length=40, pattern=r"^\d*$")
     carrybee_product_type: CarrybeeProductType = 1
     carrybee_item_weight_g: int = Field(default=500, ge=1, le=25_000)
     carrybee_webhook_secret: str | None = Field(default=None, max_length=500)

@@ -222,7 +222,13 @@ def _raise_for(status: int, body: Any) -> None:
                         texts.append(str(item))
                 errors[str(name)] = texts
         if status >= 500 and "unexpected" in message.lower():
-            message = f"{message} (check the Carrybee credentials)"
+            # Sandbox and live credentials only work on their own host, and a
+            # mismatch looks exactly like a wrong secret — say which is in use.
+            env = "sandbox" if is_sandbox() else "live"
+            message = (
+                f"{message} (check the Carrybee credentials — this server uses "
+                f"Carrybee {env}, so they must be {env} credentials)"
+            )
     elif isinstance(body, str) and body:
         message = f"{message} ({status}): {body[:200]}"
     raise CarrybeeError(message, status=status, field_errors=errors)

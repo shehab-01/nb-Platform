@@ -45,6 +45,10 @@ services:
       # Pathao's address parser (docs/PATHAO-ADDRESS-PARSER.md). Only works
       # with live tokens; set empty to switch the feature off.
       PATHAO_PARSER_URL: ${PATHAO_PARSER_URL:-https://merchant.pathao.com/api/v1/address-parser}
+      # Carrybee: credentials per store too; the environment is deployment-wide.
+      # Sandbox unless .env says https://developers.carrybee.com.
+      CARRYBEE_BASE_URL: ${CARRYBEE_BASE_URL:-https://sandbox.carrybee.com}
+      CARRYBEE_TRACKING_URL: ${CARRYBEE_TRACKING_URL:-}
       # Google Drive for expense proofs: the OAuth "Web application" client
       # and its redirect URI. The account itself is connected from
       # Platform → System; its token is kept encrypted in the database.

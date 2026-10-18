@@ -20,11 +20,12 @@ services:
     environment:
       WATCHFILES_FORCE_POLLING: "true"
       # Never a production API from a dev machine, whatever .env says:
-      # Pathao's sandbox only, and its address parser (live-only, see
+      # Pathao's and Carrybee's sandboxes only, and Pathao's address parser (live-only, see
       # docs/PATHAO-ADDRESS-PARSER.md) off. compose.yaml's own default for
       # the parser is the live URL, which an empty .env value cannot undo.
       PATHAO_BASE_URL: https://courier-api-sandbox.pathao.com
       PATHAO_PARSER_URL: ""
+      CARRYBEE_BASE_URL: https://sandbox.carrybee.com
       # Dev may share the Google account, never production's folders: its
       # own top folder in that Drive, and its own token in its own database.
       GOOGLE_DRIVE_ROOT_NAME: nbPlatform-dev

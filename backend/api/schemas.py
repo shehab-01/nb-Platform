@@ -483,6 +483,9 @@ class DashboardPeriod(BaseModel):
     couriers: list[CourierSplit] = []
     # The confirmed figure by where the parcel went, as on DashboardTotals.
     confirmed_by_courier: dict[str, int] = {}
+    # Parcels booked with each courier during the chosen days, by booking
+    # time rather than order date — what the couriers' own panels count.
+    sent_by_courier: dict[str, int] = {}
 
 
 class Performer(BaseModel):

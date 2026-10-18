@@ -735,6 +735,8 @@ export type DashboardPeriod = {
   couriers?: CourierSplit[];
   /** Confirmed by where the parcel went; "none" is not sent yet. */
   confirmed_by_courier?: Partial<Record<CourierName | "none", number>>;
+  /** Parcels booked with each courier during these days, by booking time. */
+  sent_by_courier?: Partial<Record<CourierName, number>>;
 };
 
 export type Performer = {

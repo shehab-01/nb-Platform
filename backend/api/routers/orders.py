@@ -1114,6 +1114,7 @@ async def dashboard(
             leads_confirmed=period["leads_confirmed"],
             couriers=await _courier_splits(session, _created_in(ctx.store.id, start, end)),
             confirmed_by_courier=await _won_by_courier(session, ctx.store.id, start, end),
+            sent_by_courier=await _sent_by_courier(session, ctx.store.id, start, end),
         ),
         performers=performers,
         lead_performers=lead_performers,
@@ -1145,6 +1146,26 @@ async def _won_by_courier(
         .group_by(_COURIER_KEY)
     )
     return {key: n for key, n in rows}
+
+
+async def _sent_by_courier(
+    session: AsyncSession, store_id: int, start: datetime, end: datetime
+) -> dict[str, int]:
+    """Parcels booked with each courier in [start, end), by the booking time
+    itself — not the order's date. What staff compare with the courier's own
+    panel: an order placed on Monday and sent on Tuesday is Tuesday's here."""
+    provider = func.coalesce(Order.courier_provider, courier.PATHAO)
+    rows = await session.execute(
+        select(provider, func.count())
+        .where(
+            Order.store_id == store_id,
+            Order.courier_consignment_id.is_not(None),
+            Order.courier_sent_at >= start,
+            Order.courier_sent_at < end,
+        )
+        .group_by(provider)
+    )
+    return {name: n for name, n in rows}
 
 
 def _created_in(store_id: int, start: datetime, end: datetime):

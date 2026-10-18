@@ -234,6 +234,16 @@ export default function AdminDashboardPage() {
                 hint="Web, manual and recovered leads"
                 breakdown={d?.confirmed_by_courier}
               />
+              <MiniTile
+                label="Sent to courier"
+                value={
+                  d
+                    ? Object.values(d.sent_by_courier ?? {}).reduce((sum, n) => sum + (n ?? 0), 0)
+                    : undefined
+                }
+                hint="Booked these days, whenever the order was placed"
+                breakdown={d?.sent_by_courier}
+              />
               <MiniTile label="No response" value={d?.no_response} />
               <MiniTile label="Cancelled" value={d?.cancelled} />
               <MiniTile

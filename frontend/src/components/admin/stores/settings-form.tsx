@@ -390,7 +390,7 @@ export function SettingsForm({
           </Select>
         </Field>
         <Field label="Weight per item (g)" htmlFor="cb-weight">
-          <Input id="cb-weight" type="number" step="50" min={1} max={25000} value={d.carrybeeItemWeightG} onChange={(e) => set("carrybeeItemWeightG", e.target.value)} />
+          <Input id="cb-weight" type="number" step={1} min={1} max={25000} value={d.carrybeeItemWeightG} onChange={(e) => set("carrybeeItemWeightG", e.target.value)} />
         </Field>
         <Field label="">
           <div className="flex flex-col gap-2">

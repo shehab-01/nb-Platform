@@ -530,13 +530,14 @@ export function OrdersView({
         }
         refetch();
       },
-      sendToCourier: async (rows, courier) => {
+      sendToCourier: async (rows, courier, onProgress) => {
         setNotice(null);
         const label = COURIER_LABELS[courier];
         try {
           const result = await sendToCourier(
             rows.map((order) => order.id),
-            courier
+            courier,
+            onProgress
           );
           patchRows(result.orders);
           setOutcome({

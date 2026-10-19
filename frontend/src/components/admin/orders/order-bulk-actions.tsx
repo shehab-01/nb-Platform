@@ -23,6 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import type { CourierProgress } from "@/lib/api";
 import { COURIER_LABELS, type CourierName, type Order } from "@/lib/orders";
 import type { StickerSize } from "@/lib/stickers";
 import { cn } from "@/lib/utils";
@@ -35,7 +36,11 @@ export type BulkMode = "confirm" | "ship" | "history";
 
 export type BulkHandlers = {
   sendToShipping: (orders: Order[]) => Promise<void>;
-  sendToCourier: (orders: Order[], courier: CourierName) => Promise<void>;
+  sendToCourier: (
+    orders: Order[],
+    courier: CourierName,
+    onProgress: (progress: CourierProgress) => void
+  ) => Promise<void>;
   refreshCourier: (orders: Order[]) => Promise<void>;
   printStickers: (orders: Order[], size: StickerSize) => Promise<void>;
   sendToHistory: (orders: Order[]) => Promise<void>;
@@ -95,6 +100,70 @@ function ActionButton({
   );
 }
 
+// Roughly one courier call plus the server's 1s pause between orders. Only
+// used to ease the bar across a batch while it is out; the real count moves
+// when the batch comes back.
+const EST_MS_PER_ORDER = 2500;
+
+/** A progress report plus when it arrived, i.e. when the batch went out. */
+type TimedProgress = CourierProgress & { at: number };
+
+/**
+ * Progress of a courier send. The server answers a batch at a time, so the
+ * bar eases towards the end of the batch in flight without ever reaching it,
+ * then jumps to the real count when the batch returns.
+ */
+function CourierProgressBar({
+  label,
+  progress,
+}: {
+  label: string;
+  progress: TimedProgress;
+}) {
+  const [now, setNow] = React.useState(() => Date.now());
+
+  React.useEffect(() => {
+    if (!progress.inFlight) return;
+    const timer = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(timer);
+  }, [progress.inFlight]);
+
+  const elapsed = Math.max(now - progress.at, 0);
+  const eased = progress.inFlight
+    ? progress.inFlight *
+      (1 - Math.exp(-elapsed / (progress.inFlight * EST_MS_PER_ORDER)))
+    : 0;
+  const total = Math.max(progress.total, 1);
+  const percent = Math.min(((progress.done + eased) / total) * 100, 100);
+
+  return (
+    <div className="flex flex-col gap-1.5 rounded-lg border bg-muted/40 px-4 py-3">
+      <div className="flex items-center justify-between text-xs">
+        <span className="font-medium">Sending to {label}…</span>
+        <span className="tabular-nums text-muted-foreground">
+          {progress.done} of {progress.total}
+        </span>
+      </div>
+      <div
+        className="h-2 overflow-hidden rounded-full bg-muted"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={progress.total}
+        aria-valuenow={progress.done}
+        aria-label={`Sending to ${label}`}
+      >
+        <div
+          className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Keep this page open until it finishes.
+      </p>
+    </div>
+  );
+}
+
 /**
  * The floating panel that appears while rows are ticked. Drops down from the
  * table header, over the top rows, so it sits next to the ticks that opened it.
@@ -118,6 +187,11 @@ export function OrderBulkActions({
   couriers: CourierName[];
 }) {
   const [busy, setBusy] = React.useState<string | null>(null);
+  const [progress, setProgress] = React.useState<TimedProgress | null>(null);
+  const reportProgress = React.useCallback(
+    (next: CourierProgress) => setProgress({ ...next, at: Date.now() }),
+    []
+  );
 
   const run = async (key: string, action: () => Promise<void>) => {
     setBusy(key);
@@ -125,6 +199,7 @@ export function OrderBulkActions({
       await action();
     } finally {
       setBusy(null);
+      setProgress(null);
     }
   };
 
@@ -193,9 +268,19 @@ export function OrderBulkActions({
                   primary={index === 0}
                   busy={busy === courier}
                   disabled={busy !== null || unsent.length === 0}
-                  onClick={() => run(courier, () => handlers.sendToCourier(unsent, courier))}
+                  onClick={() =>
+                    run(courier, () =>
+                      handlers.sendToCourier(unsent, courier, reportProgress)
+                    )
+                  }
                 />
               ))}
+              {progress && busy && couriers.includes(busy as CourierName) && (
+                <CourierProgressBar
+                  label={COURIER_LABELS[busy as CourierName]}
+                  progress={progress}
+                />
+              )}
               {couriers.length === 0 && (
                 <p className="text-xs text-muted-foreground">
                   No courier is switched on. An owner can turn on Pathao or

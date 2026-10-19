@@ -372,10 +372,20 @@ function mapCourierResult(data: ApiCourierResult): CourierResult {
  *
  * The server talks to the courier one order at a time — only the per-order
  * endpoint returns a consignment id, and we need that to track and print the
- * parcel — so a batch's wall time grows with its length. Twenty finishes
- * inside Cloudflare's 100s proxy timeout with room to spare.
+ * parcel — so a batch's wall time grows with its length: each order is a
+ * courier call plus a 1s pause, and Carrybee can take several seconds a call.
+ * Eight keeps a batch well inside the proxy timeouts (next.config.ts
+ * proxyTimeout, Cloudflare's 100s); twenty ran past Next's old 30s default and
+ * came back as a bare 500 with half the batch already booked.
  */
-const COURIER_BATCH = 20;
+const COURIER_BATCH = 8;
+
+/**
+ * Where a batched courier call has got to. The server answers per batch, so
+ * `done` moves in steps of COURIER_BATCH; `inFlight` is the batch now with
+ * the courier, which the progress bar eases across while it waits.
+ */
+export type CourierProgress = { done: number; inFlight: number; total: number };
 
 function chunk<T>(items: T[], size: number): T[][] {
   const batches: T[][] = [];
@@ -398,12 +408,15 @@ async function courierBatched(
   path: string,
   ids: number[],
   courier: CourierName,
-  label: string
+  label: string,
+  onProgress?: (progress: CourierProgress) => void
 ): Promise<CourierResult> {
   const merged: CourierResult = { orders: [], failed: [] };
   const batches = chunk(ids, COURIER_BATCH);
+  let done = 0;
 
   for (const [index, batch] of batches.entries()) {
+    onProgress?.({ done, inFlight: batch.length, total: ids.length });
     try {
       const result = mapCourierResult(
         await request<ApiCourierResult>(path, {
@@ -413,6 +426,7 @@ async function courierBatched(
       );
       merged.orders.push(...result.orders);
       merged.failed.push(...result.failed);
+      done += batch.length;
     } catch (err) {
       if (index === 0) throw err;
       // Some of this batch may already be booked, so the reason says "check"
@@ -429,6 +443,7 @@ async function courierBatched(
       break;
     }
   }
+  onProgress?.({ done: ids.length, inFlight: 0, total: ids.length });
   return merged;
 }
 
@@ -542,13 +557,15 @@ export async function listCouriers(): Promise<CourierOption[]> {
 /** Book each order with the courier. Successes carry the consignment id. */
 export async function sendToCourier(
   ids: number[],
-  courier: CourierName
+  courier: CourierName,
+  onProgress?: (progress: CourierProgress) => void
 ): Promise<CourierResult> {
   return courierBatched(
     "/api/orders/courier/send",
     ids,
     courier,
-    COURIER_LABELS[courier]
+    COURIER_LABELS[courier],
+    onProgress
   );
 }
 

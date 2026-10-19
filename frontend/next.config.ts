@@ -13,6 +13,12 @@ const nextConfig: NextConfig = {
     // proofs go up to 10 at 10 MB each in one request (MAX_PROOF_BYTES on the
     // API), so allow that much; anything bigger the API refuses anyway.
     proxyClientMaxBodySize: "110mb",
+    // The rewrites below give up on the API after 30s by default and answer
+    // a bare 500, while the API carries on. Courier batches book one order at
+    // a time against Pathao/Carrybee (lib/api.ts COURIER_BATCH), so a slow
+    // courier ran past that half-way through a batch. Wait as long as
+    // Cloudflare does (100s); it is the outer limit anyway.
+    proxyTimeout: 100_000,
   },
   // These rewrites are served by Next's http-proxy: every request header,
   // Cookie included, is forwarded to the API unchanged (only x-forwarded-host

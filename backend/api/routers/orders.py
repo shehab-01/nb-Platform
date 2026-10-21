@@ -1994,7 +1994,10 @@ async def send_to_courier(
     Each success is committed on its own, so a failure half-way never loses a
     booking the courier has already made. Failures come back per order with
     the courier's reason. An order already booked — with either courier — is
-    refused: one parcel, one courier.
+    refused: one parcel, one courier. The exception is `rebook`, which moves
+    an order booked with the other courier onto this one (for parcels sent to
+    the wrong courier); its old booking must be cancelled on that courier's
+    panel.
     """
     name = payload.courier
     label = courier.LABELS[name]
@@ -2022,11 +2025,17 @@ async def send_to_courier(
         if order is None or order.store_id != ctx.store.id:
             fail(order_id, "Not found")
             continue
+        previous: str | None = None
         if order.courier_consignment_id:
-            booked_with = courier.LABELS.get(order.courier_provider or courier.PATHAO, "the courier")
-            fail(order_id, f"Already sent to {booked_with} ({order.courier_consignment_id})")
-            await session.rollback()
-            continue
+            booked_provider = order.courier_provider or courier.PATHAO
+            booked_with = courier.LABELS.get(booked_provider, "the courier")
+            # rebook moves a parcel to the other courier; booking twice with
+            # the same one is never allowed.
+            if not payload.rebook or booked_provider == name:
+                fail(order_id, f"Already sent to {booked_with} ({order.courier_consignment_id})")
+                await session.rollback()
+                continue
+            previous = f"{booked_with} {order.courier_consignment_id}"
         if order.status not in COURIER_SENDABLE:
             fail(order_id, "Only confirmed, shipping or history orders can be sent")
             await session.rollback()
@@ -2052,6 +2061,7 @@ async def send_to_courier(
         order.courier_status_at = None
         order.courier_delivery_fee = fee
         order.courier_sent_at = now
+        order.courier_checked_at = None
         _set_flag(session, order, user, "courier", True)
         session.add(
             OrderEvent(
@@ -2059,7 +2069,9 @@ async def send_to_courier(
                 order_id=order.id,
                 actor_id=user.id,
                 event_type=f"{name}_sent",
-                note=consignment_id,
+                # A rebooking keeps the old consignment in the timeline, so
+                # staff can still find and cancel it.
+                note=consignment_id if previous is None else f"{consignment_id} (moved from {previous})",
             )
         )
         await session.commit()

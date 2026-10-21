@@ -4,7 +4,9 @@ import * as React from "react";
 import {
   Archive,
   Check,
+  ArrowRightLeft,
   ExternalLink,
+  FileSpreadsheet,
   FileText,
   Loader2,
   Package,
@@ -27,6 +29,20 @@ import type { CourierProgress } from "@/lib/api";
 import { COURIER_LABELS, type CourierName, type Order } from "@/lib/orders";
 import type { StickerSize } from "@/lib/stickers";
 import { cn } from "@/lib/utils";
+import { downloadXlsx } from "@/lib/xlsx";
+
+/** The selected orders as a spreadsheet: No, customer, phone, address. */
+function exportToExcel(rows: Order[]) {
+  const today = new Date().toISOString().slice(0, 10);
+  downloadXlsx(
+    `orders-${today}.xlsx`,
+    [
+      ["No", "Customer name", "Phone number", "Address"],
+      ...rows.map((order, index) => [index + 1, order.customerName, order.phone, order.address]),
+    ],
+    { sheetName: "Orders", columnWidths: [6, 28, 16, 60] }
+  );
+}
 
 /** Which bulk actions a list offers: the Confirm list hands orders to
  * shipping; the Ship list books them with the courier and prints stickers;
@@ -39,7 +55,9 @@ export type BulkHandlers = {
   sendToCourier: (
     orders: Order[],
     courier: CourierName,
-    onProgress: (progress: CourierProgress) => void
+    onProgress: (progress: CourierProgress) => void,
+    /** Move orders booked with the other courier onto this one. */
+    rebook?: boolean
   ) => Promise<void>;
   refreshCourier: (orders: Order[]) => Promise<void>;
   printStickers: (orders: Order[], size: StickerSize) => Promise<void>;
@@ -205,6 +223,16 @@ export function OrderBulkActions({
 
   const unsent = rows.filter((order) => !order.courierConsignmentId);
   const booked = rows.filter((order) => order.courierConsignmentId);
+  // TEMPORARY: lets parcels sent to the wrong courier be moved to another
+  // one. Only offered when nothing in the selection is unsent, so a normal
+  // send can never turn into a move by accident.
+  const bookedElsewhere = (courier: CourierName) =>
+    booked.filter((order) => (order.courierProvider ?? "pathao") !== courier);
+  const [confirmMove, setConfirmMove] = React.useState<CourierName | null>(null);
+  const moveRows = confirmMove ? bookedElsewhere(confirmMove) : [];
+  const moveFrom = Array.from(
+    new Set(moveRows.map((order) => COURIER_LABELS[order.courierProvider ?? "pathao"]))
+  ).join(" / ");
 
   return (
     <div className="absolute left-1/2 top-[4.25rem] z-30 w-full max-w-sm -translate-x-1/2">
@@ -255,26 +283,42 @@ export function OrderBulkActions({
           <>
             <div className="mt-4 flex flex-col gap-2 border-t pt-4">
               <SectionTitle icon={Send}>Courier services</SectionTitle>
-              {couriers.map((courier, index) => (
-                <ActionButton
-                  key={courier}
-                  icon={Send}
-                  label={`Send to ${COURIER_LABELS[courier]}`}
-                  hint={
-                    unsent.length === rows.length
-                      ? undefined
-                      : `${unsent.length} not sent yet`
-                  }
-                  primary={index === 0}
-                  busy={busy === courier}
-                  disabled={busy !== null || unsent.length === 0}
-                  onClick={() =>
-                    run(courier, () =>
-                      handlers.sendToCourier(unsent, courier, reportProgress)
-                    )
-                  }
-                />
-              ))}
+              {couriers.map((courier, index) => {
+                const elsewhere = bookedElsewhere(courier);
+                if (unsent.length === 0 && elsewhere.length > 0) {
+                  return (
+                    <ActionButton
+                      key={courier}
+                      icon={ArrowRightLeft}
+                      label={`Send to ${COURIER_LABELS[courier]}`}
+                      hint={`move ${elsewhere.length}`}
+                      busy={busy === courier}
+                      disabled={busy !== null}
+                      onClick={() => setConfirmMove(courier)}
+                    />
+                  );
+                }
+                return (
+                  <ActionButton
+                    key={courier}
+                    icon={Send}
+                    label={`Send to ${COURIER_LABELS[courier]}`}
+                    hint={
+                      unsent.length === rows.length
+                        ? undefined
+                        : `${unsent.length} not sent yet`
+                    }
+                    primary={index === 0}
+                    busy={busy === courier}
+                    disabled={busy !== null || unsent.length === 0}
+                    onClick={() =>
+                      run(courier, () =>
+                        handlers.sendToCourier(unsent, courier, reportProgress)
+                      )
+                    }
+                  />
+                );
+              })}
               {progress && busy && couriers.includes(busy as CourierName) && (
                 <CourierProgressBar
                   label={COURIER_LABELS[busy as CourierName]}
@@ -294,6 +338,13 @@ export function OrderBulkActions({
                 busy={busy === "refresh"}
                 disabled={busy !== null || booked.length === 0}
                 onClick={() => run("refresh", () => handlers.refreshCourier(booked))}
+              />
+              <ActionButton
+                icon={FileSpreadsheet}
+                label="Export to Excel"
+                hint={`${rows.length} row${rows.length === 1 ? "" : "s"}`}
+                disabled={busy !== null}
+                onClick={() => exportToExcel(rows)}
               />
             </div>
             <div className="mt-4 flex flex-col gap-2 border-t pt-4">
@@ -335,6 +386,45 @@ export function OrderBulkActions({
           </>
         )}
       </div>
+
+      <Dialog open={confirmMove !== null} onOpenChange={(open) => !open && setConfirmMove(null)}>
+        <DialogContent className="sm:max-w-md">
+          {confirmMove && (
+            <>
+              <DialogHeader>
+                <DialogTitle>
+                  Move {moveRows.length} parcel{moveRows.length === 1 ? "" : "s"} to{" "}
+                  {COURIER_LABELS[confirmMove]}?
+                </DialogTitle>
+                <DialogDescription>
+                  {moveRows.length === 1 ? "This order is" : "These orders are"} already
+                  booked with {moveFrom}. They will be booked again with{" "}
+                  {COURIER_LABELS[confirmMove]} and the order will track the new
+                  consignment. The {moveFrom} booking is not cancelled — cancel it on
+                  the {moveFrom} panel yourself.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setConfirmMove(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => {
+                    const courier = confirmMove;
+                    const target = moveRows;
+                    setConfirmMove(null);
+                    void run(courier, () =>
+                      handlers.sendToCourier(target, courier, reportProgress, true)
+                    );
+                  }}
+                >
+                  Send to {COURIER_LABELS[confirmMove]}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

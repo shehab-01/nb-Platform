@@ -530,21 +530,24 @@ export function OrdersView({
         }
         refetch();
       },
-      sendToCourier: async (rows, courier, onProgress) => {
+      sendToCourier: async (rows, courier, onProgress, rebook) => {
         setNotice(null);
         const label = COURIER_LABELS[courier];
         try {
           const result = await sendToCourier(
             rows.map((order) => order.id),
             courier,
-            onProgress
+            onProgress,
+            rebook
           );
           patchRows(result.orders);
           setOutcome({
-            title: `Sent to ${label}`,
+            title: rebook ? `Moved to ${label}` : `Sent to ${label}`,
             description: `${result.orders.length} of ${rows.length} parcel${
               rows.length === 1 ? "" : "s"
-            } booked with ${label}.`,
+            } booked with ${label}.${
+              rebook ? " Cancel their old bookings on the other courier's panel." : ""
+            }`,
             done: result.orders.map((order) => ({
               orderNo: order.orderNo,
               detail: order.courierConsignmentId ?? undefined,

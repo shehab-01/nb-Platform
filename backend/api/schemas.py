@@ -344,6 +344,11 @@ class CourierSendIn(BaseModel):
     # Which courier to book with. Ignored by refresh, which asks each order's
     # own courier.
     courier: CourierName = "pathao"
+    # Temporary escape hatch for parcels booked with the wrong courier: lets
+    # an order already booked with a *different* courier be booked again with
+    # this one. The old booking is not cancelled here — staff cancel it on
+    # the other courier's panel. Ignored by refresh.
+    rebook: bool = False
 
 
 class CourierFailure(BaseModel):

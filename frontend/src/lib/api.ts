@@ -409,7 +409,8 @@ async function courierBatched(
   ids: number[],
   courier: CourierName,
   label: string,
-  onProgress?: (progress: CourierProgress) => void
+  onProgress?: (progress: CourierProgress) => void,
+  rebook = false
 ): Promise<CourierResult> {
   const merged: CourierResult = { orders: [], failed: [] };
   const batches = chunk(ids, COURIER_BATCH);
@@ -421,7 +422,7 @@ async function courierBatched(
       const result = mapCourierResult(
         await request<ApiCourierResult>(path, {
           method: "POST",
-          body: JSON.stringify({ order_ids: batch, courier }),
+          body: JSON.stringify({ order_ids: batch, courier, rebook }),
         })
       );
       merged.orders.push(...result.orders);
@@ -558,14 +559,17 @@ export async function listCouriers(): Promise<CourierOption[]> {
 export async function sendToCourier(
   ids: number[],
   courier: CourierName,
-  onProgress?: (progress: CourierProgress) => void
+  onProgress?: (progress: CourierProgress) => void,
+  /** Move orders booked with the other courier onto this one. */
+  rebook = false
 ): Promise<CourierResult> {
   return courierBatched(
     "/api/orders/courier/send",
     ids,
     courier,
     COURIER_LABELS[courier],
-    onProgress
+    onProgress,
+    rebook
   );
 }
 

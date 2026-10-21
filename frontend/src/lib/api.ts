@@ -52,6 +52,9 @@ type ApiOrder = {
   courier_delivery_fee: number | null;
   courier_sent_at: string | null;
   courier_tracking_url: string | null;
+  previous_courier_provider?: CourierName | null;
+  previous_consignment_id?: string | null;
+  previous_tracking_url?: string | null;
   pathao_city_id?: number | null;
   pathao_zone_id?: number | null;
   pathao_area_id?: number | null;
@@ -200,6 +203,13 @@ function mapOrder(order: ApiOrder): Order {
     courierDeliveryFee: order.courier_delivery_fee ?? null,
     courierSentAt: order.courier_sent_at ?? null,
     courierTrackingUrl: order.courier_tracking_url ?? null,
+    previousCourier: order.previous_consignment_id
+      ? {
+          provider: order.previous_courier_provider ?? "pathao",
+          consignmentId: order.previous_consignment_id,
+          trackingUrl: order.previous_tracking_url ?? null,
+        }
+      : null,
     pathaoLocation: {
       cityId: order.pathao_city_id ?? null,
       zoneId: order.pathao_zone_id ?? null,

@@ -39,22 +39,55 @@ function ConsignmentCell({ order }: { order: Order }) {
   if (!order.courierConsignmentId) {
     return <span className="sr-only">Not sent</span>;
   }
+  const current = (
+    <ConsignmentLine
+      courier={order.courierProvider}
+      consignmentId={order.courierConsignmentId}
+      trackingUrl={order.courierTrackingUrl}
+    />
+  );
+  if (!order.previousCourier) return current;
+  // Moved off the wrong courier: the old booking stays visible, struck
+  // through, so staff remember to cancel it there.
+  return (
+    <span className="inline-flex flex-col gap-1">
+      {current}
+      <span className="opacity-60 line-through" title="Moved from this booking">
+        <ConsignmentLine
+          courier={order.previousCourier.provider}
+          consignmentId={order.previousCourier.consignmentId}
+          trackingUrl={order.previousCourier.trackingUrl}
+        />
+      </span>
+    </span>
+  );
+}
+
+function ConsignmentLine({
+  courier,
+  consignmentId,
+  trackingUrl,
+}: {
+  courier: Order["courierProvider"];
+  consignmentId: string;
+  trackingUrl: string | null;
+}) {
   return (
     <span className="inline-flex items-center gap-1.5">
-      <CourierBadge courier={order.courierProvider} />
-      {order.courierTrackingUrl ? (
+      <CourierBadge courier={courier} />
+      {trackingUrl ? (
         <a
-          href={order.courierTrackingUrl}
+          href={trackingUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1 font-mono text-xs font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
           onClick={(event) => event.stopPropagation()}
         >
-          {order.courierConsignmentId}
+          {consignmentId}
           <ExternalLink className="size-3" />
         </a>
       ) : (
-        <span className="font-mono text-xs font-medium">{order.courierConsignmentId}</span>
+        <span className="font-mono text-xs font-medium">{consignmentId}</span>
       )}
     </span>
   );

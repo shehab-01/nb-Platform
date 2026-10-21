@@ -2052,6 +2052,9 @@ async def send_to_courier(
             await asyncio.sleep(pathao_sync.BETWEEN_CALLS_SECONDS)
             continue
         now = datetime.now(timezone.utc)
+        if previous is not None:
+            order.previous_courier_provider = order.courier_provider or courier.PATHAO
+            order.previous_consignment_id = order.courier_consignment_id
         order.courier_provider = name
         order.courier_consignment_id = consignment_id
         order.courier_status = status

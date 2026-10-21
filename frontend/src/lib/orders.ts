@@ -254,6 +254,13 @@ export type Order = {
   courierProvider: CourierName | null;
   /** The courier's tracking number once the parcel is booked; null before. */
   courierConsignmentId: string | null;
+  /** The booking it was moved off, when it was first sent to the wrong
+   * courier; the old one must be cancelled on that courier's panel. */
+  previousCourier: {
+    provider: CourierName;
+    consignmentId: string;
+    trackingUrl: string | null;
+  } | null;
   /** The courier's own word for where the parcel is (see courierStatusLabel). */
   courierStatus: string | null;
   courierDeliveryFee: number | null;

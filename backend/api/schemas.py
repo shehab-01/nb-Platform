@@ -245,6 +245,9 @@ class OrderOut(BaseModel):
     courier_status_at: datetime | None = None
     courier_delivery_fee: int | None = None
     courier_sent_at: datetime | None = None
+    # The booking it was moved off, when it was sent to the wrong courier.
+    previous_courier_provider: str | None = None
+    previous_consignment_id: str | None = None
     # The delivery location in Pathao's ids (parser or staff), and how sure
     # the parser was: high / medium / low, or "manual" once staff chose.
     pathao_city_id: int | None = None
@@ -258,6 +261,13 @@ class OrderOut(BaseModel):
     @property
     def courier_tracking_url(self) -> str | None:
         return tracking_url(self.courier_provider, self.courier_consignment_id, self.phone)
+
+    @computed_field
+    @property
+    def previous_tracking_url(self) -> str | None:
+        return tracking_url(
+            self.previous_courier_provider, self.previous_consignment_id, self.phone
+        )
 
     # From the model: "<store prefix>-<id>".
     order_no: str

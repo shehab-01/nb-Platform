@@ -132,6 +132,10 @@ class Order(Base):
     # When we last asked the courier about this parcel, answered or not; the
     # background syncs ask the longest-unasked parcels first.
     courier_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The booking this order was moved off when it went to the wrong courier
+    # and was booked again with the other one; shown so staff can cancel it.
+    previous_courier_provider: Mapped[str | None] = mapped_column(String(20))
+    previous_consignment_id: Mapped[str | None] = mapped_column(String(40))
     # Where Pathao should deliver, in its own city/zone/area ids: filled by
     # Pathao's address parser or picked by staff (see
     # api.services.pathao_address), and sent with the booking. Area is

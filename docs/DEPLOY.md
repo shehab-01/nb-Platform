@@ -31,7 +31,7 @@ example's value.
 | `CLIENT_IP_HEADER` | `x-forwarded-for` |
 | `PATHAO_BASE_URL` | `https://api-hermes.pathao.com` when parcels go live; sandbox until then |
 | `CARRYBEE_BASE_URL` | `https://developers.carrybee.com` when Carrybee parcels go live; `https://sandbox.carrybee.com` until then |
-| `CARRYBEE_TRACKING_URL` | Empty until Carrybee gives a public tracking page; then its URL with `{consignment_id}` where the id goes |
+| `CARRYBEE_TRACKING_URL` | Leave empty: defaults to `https://merchant.carrybee.com/order-track/{consignment_id}`. Set only to point at a different tracking page |
 | `API_PORT` / `WEB_PORT` | `8001` / `8090` |
 | `UVICORN_WORKERS` | `2` |
 | `GTM_ID` | optional, else empty |

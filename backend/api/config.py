@@ -86,10 +86,13 @@ class Settings:
     carrybee_base_url: str = os.getenv(
         "CARRYBEE_BASE_URL", "https://sandbox.carrybee.com"
     ).rstrip("/")
-    # A public tracking page for a Carrybee parcel, with "{consignment_id}"
-    # where the id goes. Carrybee documents none yet; empty shows the
-    # consignment id without a link.
-    carrybee_tracking_url: str = os.getenv("CARRYBEE_TRACKING_URL", "").strip()
+    # Carrybee's tracking page for a parcel, with "{consignment_id}" where the
+    # id goes. An empty value (compose passes one when unset) falls back to
+    # the merchant panel's page.
+    carrybee_tracking_url: str = (
+        os.getenv("CARRYBEE_TRACKING_URL", "").strip()
+        or "https://merchant.carrybee.com/order-track/{consignment_id}"
+    )
 
     # Google Drive, where expense proofs are kept (api.services.gdrive). One
     # Google account for the whole platform, connected once by a super admin

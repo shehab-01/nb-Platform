@@ -764,6 +764,16 @@ class StoreSettings(Base):
     pathao_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false")
     )
+    # Set when this store books through another store's courier account (a
+    # super admin links them): credentials and the webhook are then that
+    # store's, read from its row; the switch and parcel defaults stay ours.
+    # The linked-to store never links on itself (no chains).
+    pathao_account_store_id: Mapped[int | None] = mapped_column(
+        ForeignKey("stores.id", ondelete="RESTRICT"), index=True
+    )
+    carrybee_account_store_id: Mapped[int | None] = mapped_column(
+        ForeignKey("stores.id", ondelete="RESTRICT"), index=True
+    )
     # Pathao's status webhook, as Carrybee's below: what Pathao sends in
     # X-PATHAO-Signature, the URL's store-naming token, and the value its
     # panel says the integration check must get back.

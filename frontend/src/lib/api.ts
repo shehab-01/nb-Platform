@@ -1724,6 +1724,8 @@ export type StoreSettings = {
   bdcourierApiKeySet: boolean;
   bdcourierApiKeyHint: string | null;
   encryptionAvailable: boolean;
+  pathaoSharing: CourierSharing;
+  carrybeeSharing: CourierSharing;
 };
 
 type ApiStoreSettings = {
@@ -1761,7 +1763,47 @@ type ApiStoreSettings = {
   bdcourier_api_key_set: boolean;
   bdcourier_api_key_hint: string | null;
   encryption_available: boolean;
+  pathao_sharing?: ApiCourierSharing;
+  carrybee_sharing?: ApiCourierSharing;
 };
+
+export type LinkedStore = { storeId: number; name: string };
+
+/** Who shares a store's courier account. The last three are filled for super admins only. */
+export type CourierSharing = {
+  /** The store whose account this one uses; null when it has its own. */
+  account: LinkedStore | null;
+  /** Stores using this store's account; its webhook serves them too. */
+  sharedWith: LinkedStore[];
+  canLink: boolean;
+  options: LinkedStore[];
+  /** Other stores holding the same client id as their own: link them. */
+  sameCredentials: LinkedStore[];
+};
+
+type ApiLinkedStore = { store_id: number; name: string };
+
+type ApiCourierSharing = {
+  account: ApiLinkedStore | null;
+  shared_with: ApiLinkedStore[];
+  can_link: boolean;
+  options: ApiLinkedStore[];
+  same_credentials: ApiLinkedStore[];
+};
+
+function mapLinked(s: ApiLinkedStore): LinkedStore {
+  return { storeId: s.store_id, name: s.name };
+}
+
+function mapSharing(s: ApiCourierSharing | undefined): CourierSharing {
+  return {
+    account: s?.account ? mapLinked(s.account) : null,
+    sharedWith: (s?.shared_with ?? []).map(mapLinked),
+    canLink: s?.can_link ?? false,
+    options: (s?.options ?? []).map(mapLinked),
+    sameCredentials: (s?.same_credentials ?? []).map(mapLinked),
+  };
+}
 
 function mapSettings(s: ApiStoreSettings): StoreSettings {
   return {
@@ -1799,6 +1841,8 @@ function mapSettings(s: ApiStoreSettings): StoreSettings {
     bdcourierApiKeySet: s.bdcourier_api_key_set,
     bdcourierApiKeyHint: s.bdcourier_api_key_hint,
     encryptionAvailable: s.encryption_available,
+    pathaoSharing: mapSharing(s.pathao_sharing),
+    carrybeeSharing: mapSharing(s.carrybee_sharing),
   };
 }
 
@@ -1831,6 +1875,23 @@ export type StoreSettingsInput = {
 
 export async function getStoreSettings(storeId: number): Promise<StoreSettings> {
   return mapSettings(await request<ApiStoreSettings>(`/api/stores/${storeId}/settings`));
+}
+
+/**
+ * Super admins: make the store use another store's courier account
+ * (credentials and webhook), or its own again with null.
+ */
+export async function setCourierAccount(
+  storeId: number,
+  courier: CourierName,
+  accountStoreId: number | null
+): Promise<StoreSettings> {
+  return mapSettings(
+    await request<ApiStoreSettings>(`/api/stores/${storeId}/settings/courier-account`, {
+      method: "PUT",
+      body: JSON.stringify({ courier, account_store_id: accountStoreId }),
+    })
+  );
 }
 
 export async function saveStoreSettings(

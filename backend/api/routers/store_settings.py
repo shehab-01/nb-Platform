@@ -14,13 +14,14 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import crypto, stores, tenancy
 from api.auth import get_current_user
 from api.config import settings as app_settings
 from api.db import get_session
-from api.models import StoreSettings, User, UserRole
+from api.models import Store, StoreSettings, User, UserRole
 from api.schemas import CarrybeeStatusOut, PathaoStatusOut
 from api.services import carrybee, pathao
 
@@ -101,6 +102,40 @@ class StoreSettingsOut(BaseModel):
     bdcourier_api_key_set: bool
     bdcourier_api_key_hint: str | None
     encryption_available: bool
+    pathao_sharing: "CourierSharing" = Field(default_factory=lambda: CourierSharing())
+    carrybee_sharing: "CourierSharing" = Field(default_factory=lambda: CourierSharing())
+
+
+class LinkedStore(BaseModel):
+    store_id: int
+    name: str
+
+
+class CourierSharing(BaseModel):
+    """Who shares this store's courier account, as the Settings page shows
+    it. `options` and `same_credentials` name other stores, so they are
+    filled for super admins only; everyone with "settings" sees the links
+    that affect their own store."""
+
+    # The store whose account this one uses; null when it has its own.
+    account: LinkedStore | None = None
+    # Stores using this store's account (its webhook serves them too).
+    shared_with: list[LinkedStore] = Field(default_factory=list)
+    # Super admins only: whether this store may be linked now, the stores it
+    # may be linked to, and unlinked stores holding the same client id — the
+    # case linking exists for.
+    can_link: bool = False
+    options: list[LinkedStore] = Field(default_factory=list)
+    same_credentials: list[LinkedStore] = Field(default_factory=list)
+
+
+class CourierAccountIn(BaseModel):
+    courier: Literal["pathao", "carrybee"]
+    # The store whose account to use; null to go back to this store's own.
+    account_store_id: int | None = None
+
+
+StoreSettingsOut.model_rebuild()
 
 
 class StoreSettingsUpdate(BaseModel):
@@ -131,8 +166,15 @@ class StoreSettingsUpdate(BaseModel):
     bdcourier_api_key: str | None = Field(default=None, max_length=500)
 
 
-def redact(row: StoreSettings | None) -> StoreSettingsOut:
-    """What the admin may see. Decrypts only to compute the hints."""
+def redact(
+    row: StoreSettings | None,
+    *,
+    pathao_account: StoreSettings | None = None,
+    carrybee_account: StoreSettings | None = None,
+) -> StoreSettingsOut:
+    """What the admin may see. Decrypts only to compute the hints. A store
+    sharing another's courier account (`*_account`) shows that account's
+    credentials and webhook: they are the ones in use."""
     ok = crypto.available()
 
     def peek(blob: bytes | None) -> tuple[bool, str | None]:
@@ -166,23 +208,25 @@ def redact(row: StoreSettings | None) -> StoreSettingsOut:
             bdcourier_api_key_set=False, bdcourier_api_key_hint=None,
             encryption_available=ok,
         )
+    p = pathao_account or row
+    c = carrybee_account or row
     capi = peek(row.meta_capi_token_enc)
-    secret = peek(row.pathao_client_secret_enc)
+    secret = peek(p.pathao_client_secret_enc)
     fraud = peek(row.bdcourier_api_key_enc)
-    cb_secret = peek(row.carrybee_client_secret_enc)
-    cb_context = peek(row.carrybee_client_context_enc)
-    cb_webhook = peek(row.carrybee_webhook_secret_enc)
-    p_webhook = peek(row.pathao_webhook_secret_enc)
+    cb_secret = peek(c.carrybee_client_secret_enc)
+    cb_context = peek(c.carrybee_client_context_enc)
+    cb_webhook = peek(c.carrybee_webhook_secret_enc)
+    p_webhook = peek(p.pathao_webhook_secret_enc)
     return StoreSettingsOut(
         meta_pixel_id=row.meta_pixel_id,
         meta_test_event_code=row.meta_test_event_code,
         meta_capi_token_set=capi[0],
         meta_capi_token_hint=capi[1],
-        pathao_client_id=row.pathao_client_id,
+        pathao_client_id=p.pathao_client_id,
         pathao_client_secret_set=secret[0],
         pathao_client_secret_hint=secret[1],
-        pathao_email=row.pathao_email,
-        pathao_password_set=row.pathao_password_enc is not None,
+        pathao_email=p.pathao_email,
+        pathao_password_set=p.pathao_password_enc is not None,
         pathao_store_id=row.pathao_store_id,
         pathao_item_type=row.pathao_item_type,
         pathao_enabled=row.pathao_enabled,
@@ -190,11 +234,11 @@ def redact(row: StoreSettings | None) -> StoreSettingsOut:
         pathao_webhook_secret_set=p_webhook[0],
         pathao_webhook_secret_hint=p_webhook[1],
         pathao_webhook_path=(
-            PATHAO_WEBHOOK_PATH + row.pathao_webhook_token if row.pathao_webhook_token else None
+            PATHAO_WEBHOOK_PATH + p.pathao_webhook_token if p.pathao_webhook_token else None
         ),
-        pathao_integration_header=row.pathao_integration_header,
+        pathao_integration_header=p.pathao_integration_header,
         carrybee_enabled=row.carrybee_enabled,
-        carrybee_client_id=row.carrybee_client_id,
+        carrybee_client_id=c.carrybee_client_id,
         carrybee_client_secret_set=cb_secret[0],
         carrybee_client_secret_hint=cb_secret[1],
         carrybee_client_context_set=cb_context[0],
@@ -205,9 +249,9 @@ def redact(row: StoreSettings | None) -> StoreSettingsOut:
         carrybee_webhook_secret_set=cb_webhook[0],
         carrybee_webhook_secret_hint=cb_webhook[1],
         carrybee_webhook_path=(
-            WEBHOOK_PATH + row.carrybee_webhook_token if row.carrybee_webhook_token else None
+            WEBHOOK_PATH + c.carrybee_webhook_token if c.carrybee_webhook_token else None
         ),
-        carrybee_integration_header=row.carrybee_integration_header,
+        carrybee_integration_header=c.carrybee_integration_header,
         carrybee_sandbox=carrybee.is_sandbox(),
         bdcourier_api_key_set=fraud[0],
         bdcourier_api_key_hint=fraud[1],
@@ -227,13 +271,130 @@ def apply_secret(current: bytes | None, incoming: str | None) -> bytes | None:
     return crypto.encrypt(incoming)
 
 
+COURIERS = ("pathao", "carrybee")
+
+
+def _account_column(courier: str):
+    return getattr(StoreSettings, f"{courier}_account_store_id")
+
+
+def _client_id_column(courier: str):
+    return getattr(StoreSettings, f"{courier}_client_id")
+
+
+async def _stores_where(session: AsyncSession, *conditions) -> list[LinkedStore]:
+    rows = await session.execute(
+        select(Store.id, Store.name)
+        .join(StoreSettings, StoreSettings.store_id == Store.id)
+        .where(*conditions)
+        .order_by(Store.name)
+    )
+    return [LinkedStore(store_id=sid, name=name) for sid, name in rows]
+
+
+async def _sharing(
+    session: AsyncSession, store_id: int, row: StoreSettings | None, courier: str, super_admin: bool
+) -> CourierSharing:
+    account_id = getattr(row, f"{courier}_account_store_id", None) if row else None
+    out = CourierSharing()
+    if account_id is not None:
+        store = await session.get(Store, account_id)
+        out.account = LinkedStore(store_id=account_id, name=store.name if store else f"#{account_id}")
+    out.shared_with = await _stores_where(session, _account_column(courier) == store_id)
+    if not super_admin:
+        return out
+    # A store others use cannot itself point elsewhere: no chains.
+    out.can_link = not out.shared_with
+    out.options = await _stores_where(
+        session,
+        Store.id != store_id,
+        _client_id_column(courier) != "",
+        _account_column(courier).is_(None),
+    )
+    client_id = getattr(row, f"{courier}_client_id", "") if row else ""
+    if client_id and account_id is None:
+        out.same_credentials = await _stores_where(
+            session,
+            Store.id != store_id,
+            _client_id_column(courier) == client_id,
+            _account_column(courier).is_(None),
+        )
+    return out
+
+
+async def settings_out(
+    session: AsyncSession, store_id: int, row: StoreSettings | None, ctx: tenancy.StoreContext
+) -> StoreSettingsOut:
+    """redact() with the linked accounts' rows and the sharing summary."""
+    accounts: dict[str, StoreSettings | None] = {}
+    for courier in COURIERS:
+        account_id = getattr(row, f"{courier}_account_store_id", None) if row else None
+        if account_id is not None:
+            accounts[f"{courier}_account"] = await session.get(StoreSettings, account_id)
+    out = redact(row, **accounts)
+    super_admin = ctx.role == UserRole.super_admin.value
+    out.pathao_sharing = await _sharing(session, store_id, row, "pathao", super_admin)
+    out.carrybee_sharing = await _sharing(session, store_id, row, "carrybee", super_admin)
+    return out
+
+
 @router.get("/{store_id}/settings", response_model=StoreSettingsOut)
 async def get_settings(
     store_id: int,
     session: AsyncSession = Depends(get_session),
     ctx: tenancy.StoreContext = Depends(settings_store),
 ) -> StoreSettingsOut:
-    return redact(await session.get(StoreSettings, ctx.store.id))
+    row = await session.get(StoreSettings, ctx.store.id)
+    return await settings_out(session, ctx.store.id, row, ctx)
+
+
+@router.put("/{store_id}/settings/courier-account", response_model=StoreSettingsOut)
+async def put_courier_account(
+    store_id: int,
+    payload: CourierAccountIn,
+    session: AsyncSession = Depends(get_session),
+    ctx: tenancy.StoreContext = Depends(settings_store),
+) -> StoreSettingsOut:
+    """Point this store at another store's courier account, or back to its
+    own. Super admins only: it hands one store the use of another's courier
+    credentials. The store's own saved credentials are kept, unused, so
+    going back needs nothing re-typed."""
+    if ctx.role != UserRole.super_admin.value:
+        raise HTTPException(status_code=403, detail="Only a super admin can link courier accounts")
+    courier = payload.courier
+    column = _account_column(courier)
+    row = await session.get(StoreSettings, store_id)
+    if row is None:
+        row = StoreSettings(store_id=store_id)
+        session.add(row)
+        await session.flush()
+    target = payload.account_store_id
+    if target is not None:
+        if target == store_id:
+            raise HTTPException(status_code=400, detail="A store cannot use its own account")
+        source = await session.get(StoreSettings, target)
+        if source is None or not getattr(source, f"{courier}_client_id"):
+            raise HTTPException(status_code=400, detail="That store has no account of its own to share")
+        if getattr(source, f"{courier}_account_store_id") is not None:
+            raise HTTPException(status_code=400, detail="That store itself uses another store's account")
+        users = (
+            await session.scalars(select(StoreSettings.store_id).where(column == store_id))
+        ).all()
+        if users:
+            raise HTTPException(
+                status_code=400,
+                detail="Other stores use this store's account; move them first",
+            )
+    setattr(row, f"{courier}_account_store_id", target)
+    # Back on its own account: it needs its own webhook URL again.
+    if target is None and getattr(row, f"{courier}_enabled") and not getattr(
+        row, f"{courier}_webhook_token"
+    ):
+        setattr(row, f"{courier}_webhook_token", secrets.token_urlsafe(24))
+    await session.commit()
+    await session.refresh(row)
+    stores.invalidate()
+    return await settings_out(session, store_id, row, ctx)
 
 
 @router.put("/{store_id}/settings", response_model=StoreSettingsOut)
@@ -263,47 +424,58 @@ async def put_settings(
     row.meta_pixel_id = payload.meta_pixel_id.strip()
     row.meta_test_event_code = payload.meta_test_event_code.strip()
     row.meta_capi_token_enc = apply_secret(row.meta_capi_token_enc, payload.meta_capi_token)
-    row.pathao_client_id = payload.pathao_client_id.strip()
-    row.pathao_client_secret_enc = apply_secret(row.pathao_client_secret_enc, payload.pathao_client_secret)
-    row.pathao_email = payload.pathao_email.strip().lower()
-    row.pathao_password_enc = apply_secret(row.pathao_password_enc, payload.pathao_password)
+    # A store using another store's courier account cannot change that
+    # account from here: its credentials and webhook belong to the other
+    # store's Settings. The page shows them read-only and sends them back
+    # unchanged; they are ignored.
+    if row.pathao_account_store_id is None:
+        row.pathao_client_id = payload.pathao_client_id.strip()
+        row.pathao_client_secret_enc = apply_secret(
+            row.pathao_client_secret_enc, payload.pathao_client_secret
+        )
+        row.pathao_email = payload.pathao_email.strip().lower()
+        row.pathao_password_enc = apply_secret(row.pathao_password_enc, payload.pathao_password)
+        row.pathao_webhook_secret_enc = apply_secret(
+            row.pathao_webhook_secret_enc, payload.pathao_webhook_secret
+        )
+        row.pathao_integration_header = payload.pathao_integration_header.strip()
     row.pathao_store_id = payload.pathao_store_id
     row.pathao_item_type = payload.pathao_item_type
     row.pathao_parcel_weight_kg = payload.pathao_parcel_weight_kg
-    row.pathao_webhook_secret_enc = apply_secret(
-        row.pathao_webhook_secret_enc, payload.pathao_webhook_secret
-    )
-    row.pathao_integration_header = payload.pathao_integration_header.strip()
     if payload.pathao_enabled is not None:
         row.pathao_enabled = payload.pathao_enabled
     if payload.carrybee_enabled is not None:
         row.carrybee_enabled = payload.carrybee_enabled
-    row.carrybee_client_id = payload.carrybee_client_id.strip()
-    row.carrybee_client_secret_enc = apply_secret(
-        row.carrybee_client_secret_enc, payload.carrybee_client_secret
-    )
-    row.carrybee_client_context_enc = apply_secret(
-        row.carrybee_client_context_enc, payload.carrybee_client_context
-    )
+    if row.carrybee_account_store_id is None:
+        row.carrybee_client_id = payload.carrybee_client_id.strip()
+        row.carrybee_client_secret_enc = apply_secret(
+            row.carrybee_client_secret_enc, payload.carrybee_client_secret
+        )
+        row.carrybee_client_context_enc = apply_secret(
+            row.carrybee_client_context_enc, payload.carrybee_client_context
+        )
+        row.carrybee_webhook_secret_enc = apply_secret(
+            row.carrybee_webhook_secret_enc, payload.carrybee_webhook_secret
+        )
+        row.carrybee_integration_header = payload.carrybee_integration_header.strip()
     row.carrybee_store_id = payload.carrybee_store_id.strip()
     row.carrybee_product_type = payload.carrybee_product_type
     row.carrybee_item_weight_g = payload.carrybee_item_weight_g
-    row.carrybee_webhook_secret_enc = apply_secret(
-        row.carrybee_webhook_secret_enc, payload.carrybee_webhook_secret
-    )
-    row.carrybee_integration_header = payload.carrybee_integration_header.strip()
-    # The webhook URL exists from the first time Carrybee is switched on, and
-    # then never changes: it is pasted into Carrybee's panel once.
-    if row.carrybee_enabled and not row.carrybee_webhook_token:
+    # The webhook URL exists from the first time a courier is switched on,
+    # and then never changes: it is pasted into the courier's panel once. A
+    # store on another's account uses that account's URL instead.
+    own_carrybee = row.carrybee_account_store_id is None
+    if row.carrybee_enabled and own_carrybee and not row.carrybee_webhook_token:
         row.carrybee_webhook_token = secrets.token_urlsafe(24)
-    if row.pathao_enabled and not row.pathao_webhook_token:
+    own_pathao = row.pathao_account_store_id is None
+    if row.pathao_enabled and own_pathao and not row.pathao_webhook_token:
         row.pathao_webhook_token = secrets.token_urlsafe(24)
     row.bdcourier_api_key_enc = apply_secret(row.bdcourier_api_key_enc, payload.bdcourier_api_key)
     await session.commit()
     await session.refresh(row)
     # Services read a cached, decrypted copy; drop it so the change is live.
     stores.invalidate()
-    return redact(row)
+    return await settings_out(session, store_id, row, ctx)
 
 
 @router.post("/{store_id}/settings/pathao-test", response_model=PathaoStatusOut)

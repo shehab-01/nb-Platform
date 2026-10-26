@@ -103,10 +103,13 @@ async def refresh_order(
     return order.courier_status
 
 
-async def handle_event(session: AsyncSession, store_id: int, payload: dict[str, Any]) -> str:
-    """Apply one webhook event to the store's order. Returns what happened,
-    for the log. Never raises for an unknown parcel or event: Carrybee only
-    needs to hear that we took it."""
+async def handle_event(
+    session: AsyncSession, store_ids: list[int], payload: dict[str, Any]
+) -> str:
+    """Apply one webhook event to the order it names among `store_ids` — the
+    store whose URL was called and the stores sharing its Carrybee account.
+    Returns what happened, for the log. Never raises for an unknown parcel
+    or event: Carrybee only needs to hear that we took it."""
     event = carrybee.normalise_status(str(payload.get("event") or ""))
     consignment_id = str(payload.get("consignment_id") or "").strip()
     if not event or not consignment_id:
@@ -114,7 +117,7 @@ async def handle_event(session: AsyncSession, store_id: int, payload: dict[str, 
     order = await session.scalar(
         select(Order)
         .where(
-            Order.store_id == store_id,
+            Order.store_id.in_(store_ids),
             Order.courier_provider == CARRYBEE,
             Order.courier_consignment_id == consignment_id,
         )

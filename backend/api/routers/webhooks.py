@@ -47,6 +47,17 @@ SIGNATURE_HEADER = "X-Carrybee-Webhook-Signature"
 MAX_BODY_BYTES = 64 * 1024
 
 
+async def account_store_ids(session: AsyncSession, store_id: int, column) -> list[int]:
+    """The store whose URL was called plus every store sharing its courier
+    account (`column` is StoreSettings.pathao_ or carrybee_account_store_id).
+    One merchant account has one webhook URL, so its events are for any of
+    them; the signature was checked against that account's secret."""
+    linked = (
+        await session.scalars(select(StoreSettings.store_id).where(column == store_id))
+    ).all()
+    return [store_id, *linked]
+
+
 def signature_ok(received: str | None, secret: str) -> bool:
     """Carrybee's signature header against the saved secret, in constant
     time. Its own example wraps the value in quotes, so quotes and spaces
@@ -145,7 +156,8 @@ async def carrybee_webhook(
 
     # Parcels already booked keep updating even if Carrybee has since been
     # switched off for new bookings: their story is still ours to record.
-    outcome = await carrybee_sync.handle_event(session, store_id, payload)
+    store_ids = await account_store_ids(session, store_id, StoreSettings.carrybee_account_store_id)
+    outcome = await carrybee_sync.handle_event(session, store_ids, payload)
     await session.commit()
     log.info(
         "Carrybee webhook store %s %s: %s",
@@ -218,7 +230,8 @@ async def pathao_webhook(
 
     # Parcels already booked keep updating even if Pathao has since been
     # switched off for new bookings: their story is still ours to record.
-    outcome = await pathao_sync.handle_event(session, store_id, payload)
+    store_ids = await account_store_ids(session, store_id, StoreSettings.pathao_account_store_id)
+    outcome = await pathao_sync.handle_event(session, store_ids, payload)
     await session.commit()
     log.info(
         "Pathao webhook store %s %s: %s",

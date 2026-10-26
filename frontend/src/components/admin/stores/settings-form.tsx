@@ -18,14 +18,17 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import {
+  setCourierAccount,
   testCarrybee,
   testPathao,
   type CarrybeeProductType,
   type CarrybeeTest,
+  type CourierSharing,
   type PathaoTest,
   type StoreSettings,
   type StoreSettingsInput,
 } from "@/lib/api";
+import type { CourierName } from "@/lib/orders";
 
 type ItemType = StoreSettings["pathaoItemType"];
 
@@ -110,6 +113,25 @@ export function SettingsForm({
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => {
     setD((prev) => ({ ...prev, [key]: value }));
     setDirty(true);
+  };
+
+  // Linking a courier account saves at once and reloads the form from what
+  // the server now holds; the picker is disabled while there are edits.
+  const [linking, setLinking] = React.useState<CourierName | null>(null);
+  const link = async (courier: CourierName, accountStoreId: number | null) => {
+    setLinking(courier);
+    setStatus(null);
+    try {
+      const saved = await setCourierAccount(storeId, courier, accountStoreId);
+      setCurrent(saved);
+      setD(draftFrom(saved));
+      setDirty(false);
+      setStatus({ ok: true, text: "Courier account changed" });
+    } catch (err) {
+      setStatus({ ok: false, text: err instanceof Error ? err.message : "Could not change the account" });
+    } finally {
+      setLinking(null);
+    }
   };
 
   const discard = () => {
@@ -285,18 +307,31 @@ export function SettingsForm({
         status={pathaoStatus}
         toggle={{ checked: d.pathaoEnabled, onChange: (on) => set("pathaoEnabled", on), label: "Use Pathao" }}
       >
-        <Field label="Client ID" htmlFor="p-client">
-          <Input id="p-client" maxLength={120} value={d.pathaoClientId} onChange={(e) => set("pathaoClientId", e.target.value)} />
-        </Field>
-        <Field label="Client secret" htmlFor="p-secret">
-          <SecretInput id="p-secret" isSet={current.pathaoClientSecretSet} hint={current.pathaoClientSecretHint} value={d.pathaoClientSecret} onChange={(v) => set("pathaoClientSecret", v)} />
-        </Field>
-        <Field label="Client email" htmlFor="p-email">
-          <Input id="p-email" type="email" maxLength={255} value={d.pathaoEmail} onChange={(e) => set("pathaoEmail", e.target.value)} />
-        </Field>
-        <Field label="Password" htmlFor="p-pass">
-          <SecretInput id="p-pass" isSet={current.pathaoPasswordSet} hint={null} value={d.pathaoPassword} onChange={(v) => set("pathaoPassword", v)} />
-        </Field>
+        <AccountPicker
+          courier="Pathao"
+          sharing={current.pathaoSharing}
+          busy={linking === "pathao"}
+          dirty={dirty}
+          onLink={(id) => link("pathao", id)}
+        />
+        {current.pathaoSharing.account ? (
+          <SharedAccountNote courier="Pathao" owner={current.pathaoSharing.account.name} what="client id, secret, email and password" />
+        ) : (
+          <>
+            <Field label="Client ID" htmlFor="p-client">
+              <Input id="p-client" maxLength={120} value={d.pathaoClientId} onChange={(e) => set("pathaoClientId", e.target.value)} />
+            </Field>
+            <Field label="Client secret" htmlFor="p-secret">
+              <SecretInput id="p-secret" isSet={current.pathaoClientSecretSet} hint={current.pathaoClientSecretHint} value={d.pathaoClientSecret} onChange={(v) => set("pathaoClientSecret", v)} />
+            </Field>
+            <Field label="Client email" htmlFor="p-email">
+              <Input id="p-email" type="email" maxLength={255} value={d.pathaoEmail} onChange={(e) => set("pathaoEmail", e.target.value)} />
+            </Field>
+            <Field label="Password" htmlFor="p-pass">
+              <SecretInput id="p-pass" isSet={current.pathaoPasswordSet} hint={null} value={d.pathaoPassword} onChange={(v) => set("pathaoPassword", v)} />
+            </Field>
+          </>
+        )}
         <Field label="Store ID" htmlFor="p-store">
           <Input id="p-store" inputMode="numeric" value={d.pathaoStoreId} onChange={(e) => set("pathaoStoreId", e.target.value.replace(/\D/g, ""))} />
         </Field>
@@ -371,6 +406,7 @@ export function SettingsForm({
           integrationHeaderName="X-Pathao-Merchant-Webhook-Integration-Secret"
           integrationPlaceholder="f3992ecc-…"
           url={urlOf(current.pathaoWebhookPath)}
+          sharing={current.pathaoSharing}
         />
       </Section>
 
@@ -380,15 +416,28 @@ export function SettingsForm({
         status={carrybeeStatus}
         toggle={{ checked: d.carrybeeEnabled, onChange: (on) => set("carrybeeEnabled", on), label: "Use Carrybee" }}
       >
-        <Field label="Client ID" htmlFor="cb-client">
-          <Input id="cb-client" maxLength={120} autoComplete="off" value={d.carrybeeClientId} onChange={(e) => set("carrybeeClientId", e.target.value)} />
-        </Field>
-        <Field label="Client secret" htmlFor="cb-secret">
-          <SecretInput id="cb-secret" isSet={current.carrybeeClientSecretSet} hint={current.carrybeeClientSecretHint} value={d.carrybeeClientSecret} onChange={(v) => set("carrybeeClientSecret", v)} />
-        </Field>
-        <Field label="Client context" htmlFor="cb-context">
-          <SecretInput id="cb-context" isSet={current.carrybeeClientContextSet} hint={current.carrybeeClientContextHint} value={d.carrybeeClientContext} onChange={(v) => set("carrybeeClientContext", v)} />
-        </Field>
+        <AccountPicker
+          courier="Carrybee"
+          sharing={current.carrybeeSharing}
+          busy={linking === "carrybee"}
+          dirty={dirty}
+          onLink={(id) => link("carrybee", id)}
+        />
+        {current.carrybeeSharing.account ? (
+          <SharedAccountNote courier="Carrybee" owner={current.carrybeeSharing.account.name} what="client id, secret and context" />
+        ) : (
+          <>
+            <Field label="Client ID" htmlFor="cb-client">
+              <Input id="cb-client" maxLength={120} autoComplete="off" value={d.carrybeeClientId} onChange={(e) => set("carrybeeClientId", e.target.value)} />
+            </Field>
+            <Field label="Client secret" htmlFor="cb-secret">
+              <SecretInput id="cb-secret" isSet={current.carrybeeClientSecretSet} hint={current.carrybeeClientSecretHint} value={d.carrybeeClientSecret} onChange={(v) => set("carrybeeClientSecret", v)} />
+            </Field>
+            <Field label="Client context" htmlFor="cb-context">
+              <SecretInput id="cb-context" isSet={current.carrybeeClientContextSet} hint={current.carrybeeClientContextHint} value={d.carrybeeClientContext} onChange={(v) => set("carrybeeClientContext", v)} />
+            </Field>
+          </>
+        )}
         <Field label="Pickup store ID" htmlFor="cb-store">
           <Input id="cb-store" inputMode="numeric" value={d.carrybeeStoreId} onChange={(e) => set("carrybeeStoreId", e.target.value.replace(/\D/g, ""))} />
         </Field>
@@ -466,6 +515,7 @@ export function SettingsForm({
           integrationHeaderName="X-CB-Webhook-Integration-Header"
           integrationPlaceholder="40489fe0-…"
           url={urlOf(current.carrybeeWebhookPath)}
+          sharing={current.carrybeeSharing}
         />
       </Section>
 
@@ -516,6 +566,7 @@ function WebhookFields({
   integrationHeaderName,
   integrationPlaceholder,
   url,
+  sharing,
 }: {
   courier: string;
   id: string;
@@ -528,67 +579,76 @@ function WebhookFields({
   integrationHeaderName: string;
   integrationPlaceholder: string;
   url: string | null;
+  sharing: CourierSharing;
 }) {
   // A secret generated here is shown in clear while it is still the draft,
   // so it can be copied into the courier's panel; once saved (the draft goes
   // back to "keep") only its hint is ever shown.
   const [generated, setGenerated] = React.useState<string | null>(null);
   const shown = generated !== null && secret === generated ? generated : null;
+  // On another store's account the webhook is that store's: one URL and one
+  // secret per courier account, set up once, so nothing here can make a
+  // second one.
+  const owner = sharing.account?.name;
 
   return (
     <>
-      <Field label="Webhook secret" htmlFor={id}>
-        <div className="flex flex-col gap-2">
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <SecretInput
-                id={id}
-                isSet={secretSet}
-                hint={secretHint}
-                value={secret}
-                onChange={onSecret}
+      {!owner && (
+        <>
+          <Field label="Webhook secret" htmlFor={id}>
+            <div className="flex flex-col gap-2">
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <SecretInput
+                    id={id}
+                    isSet={secretSet}
+                    hint={secretHint}
+                    value={secret}
+                    onChange={onSecret}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => {
+                    const value = randomSecret();
+                    setGenerated(value);
+                    onSecret(value);
+                  }}
+                >
+                  Generate
+                </Button>
+              </div>
+              {shown && (
+                <div className="flex items-center gap-2 text-xs">
+                  <code className="min-w-0 truncate rounded bg-muted px-2 py-1 font-mono">{shown}</code>
+                  <CopyButton text={shown} />
+                  <span className="text-muted-foreground">Copy it into {courier}, then save.</span>
+                </div>
+              )}
+            </div>
+          </Field>
+          <Field label="Integration header" htmlFor={`${id}-integration`}>
+            <div className="flex flex-col gap-1.5">
+              <Input
+                id={`${id}-integration`}
+                maxLength={100}
+                autoComplete="off"
+                className="font-mono"
+                placeholder={integrationPlaceholder}
+                value={integrationHeader}
+                onChange={(e) => onIntegrationHeader(e.target.value)}
               />
+              <p className="text-xs text-muted-foreground">
+                Copy the value {courier} shows for the header {integrationHeaderName} on its
+                Webhook Integration page.
+              </p>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="shrink-0"
-              onClick={() => {
-                const value = randomSecret();
-                setGenerated(value);
-                onSecret(value);
-              }}
-            >
-              Generate
-            </Button>
-          </div>
-          {shown && (
-            <div className="flex items-center gap-2 text-xs">
-              <code className="min-w-0 truncate rounded bg-muted px-2 py-1 font-mono">{shown}</code>
-              <CopyButton text={shown} />
-              <span className="text-muted-foreground">Copy it into {courier}, then save.</span>
-            </div>
-          )}
-        </div>
-      </Field>
-      <Field label="Integration header" htmlFor={`${id}-integration`}>
-        <div className="flex flex-col gap-1.5">
-          <Input
-            id={`${id}-integration`}
-            maxLength={100}
-            autoComplete="off"
-            className="font-mono"
-            placeholder={integrationPlaceholder}
-            value={integrationHeader}
-            onChange={(e) => onIntegrationHeader(e.target.value)}
-          />
-          <p className="text-xs text-muted-foreground">
-            Copy the value {courier} shows for the header {integrationHeaderName} on its
-            Webhook Integration page.
-          </p>
-        </div>
-      </Field>
+          </Field>
+        </>
+      )}
       <Field label="Webhook URL">
         {url ? (
           <div className="flex flex-col gap-1.5">
@@ -597,10 +657,21 @@ function WebhookFields({
               <CopyButton text={url} />
             </div>
             <p className="text-xs text-muted-foreground">
-              Paste this URL and the webhook secret into {courier} → Webhook Integration, and select all events.
-              Delivery statuses then arrive by themselves.
+              {owner
+                ? `This is ${owner}'s ${courier} webhook. It already brings this store's parcel updates too — there is nothing to paste for this store.`
+                : `Paste this URL and the webhook secret into ${courier} → Webhook Integration, and select all events. Delivery statuses then arrive by themselves.`}
             </p>
+            {!owner && sharing.sharedWith.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Also brings updates for {names(sharing.sharedWith)}, which use this store&apos;s {courier} account.
+                Changing the secret here changes it for them too.
+              </p>
+            )}
           </div>
+        ) : owner ? (
+          <p className="text-xs text-muted-foreground">
+            {owner} has no {courier} webhook URL yet. Set it up in {owner}&apos;s settings.
+          </p>
         ) : (
           <p className="text-xs text-muted-foreground">
             Switch {courier} on and save to get the store&apos;s webhook URL.
@@ -608,6 +679,100 @@ function WebhookFields({
         )}
       </Field>
     </>
+  );
+}
+
+const OWN_ACCOUNT = "own";
+
+function names(stores: { name: string }[]): string {
+  return stores.map((s) => s.name).join(", ");
+}
+
+/**
+ * Super admins: which courier account the store books through — its own,
+ * or one another store already holds. One merchant account has one webhook,
+ * so stores sharing an account share it rather than each keeping a copy
+ * (whose webhook the courier could not call). Hidden for everyone else.
+ */
+function AccountPicker({
+  courier,
+  sharing,
+  busy,
+  dirty,
+  onLink,
+}: {
+  courier: string;
+  sharing: CourierSharing;
+  busy: boolean;
+  dirty: boolean;
+  onLink: (accountStoreId: number | null) => void;
+}) {
+  if (!sharing.canLink && !sharing.account && sharing.sameCredentials.length === 0) return null;
+  const value = sharing.account ? String(sharing.account.storeId) : OWN_ACCOUNT;
+  // The current account stays listed even if it no longer qualifies.
+  const options =
+    sharing.account && !sharing.options.some((o) => o.storeId === sharing.account!.storeId)
+      ? [sharing.account, ...sharing.options]
+      : sharing.options;
+
+  return (
+    <Field label="Account" htmlFor={`${courier}-account`}>
+      <div className="flex flex-col gap-1.5">
+        {sharing.canLink ? (
+          <Select
+            value={value}
+            disabled={busy || dirty}
+            onValueChange={(v) => {
+              const next = v === OWN_ACCOUNT ? null : Number(v);
+              const target = options.find((o) => o.storeId === next)?.name;
+              const question = next === null
+                ? `Use this store's own ${courier} credentials again?`
+                : `Use ${target}'s ${courier} account for this store? Its credentials and webhook will be used; this store's own stay saved but unused.`;
+              if (window.confirm(question)) onLink(next);
+            }}
+          >
+            <SelectTrigger id={`${courier}-account`}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={OWN_ACCOUNT}>This store&apos;s own account</SelectItem>
+              {options.map((o) => (
+                <SelectItem key={o.storeId} value={String(o.storeId)}>
+                  Use {o.name}&apos;s account
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            {sharing.account
+              ? `Uses ${sharing.account.name}'s account.`
+              : `Used by ${names(sharing.sharedWith)} — it cannot use another store's account while they rely on it.`}
+          </p>
+        )}
+        {busy && <p className="text-xs text-muted-foreground">Saving…</p>}
+        {dirty && sharing.canLink && (
+          <p className="text-xs text-muted-foreground">Save or discard your edits before changing the account.</p>
+        )}
+        {sharing.sameCredentials.length > 0 && (
+          <p className="text-xs text-amber-700 dark:text-amber-400">
+            Same {courier} client id as {names(sharing.sameCredentials)}. {courier} calls only one webhook per
+            account, so link the stores: pick one store&apos;s account here, or point the other store at this one
+            from its settings.
+          </p>
+        )}
+      </div>
+    </Field>
+  );
+}
+
+/** In place of the credential fields on a store using another's account. */
+function SharedAccountNote({ courier, owner, what }: { courier: string; owner: string; what: string }) {
+  return (
+    <Field label="">
+      <p className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
+        The {courier} {what} are {owner}&apos;s and are changed in {owner}&apos;s settings. Pickup store and
+        parcel details below are this store&apos;s own.
+      </p>
+    </Field>
   );
 }
 

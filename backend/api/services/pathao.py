@@ -283,6 +283,9 @@ async def get_access_token(cfg: PathaoConfig, store_id: int, *, force: bool = Fa
     """
     if not cfg.configured:
         raise PathaoError("Pathao is not configured for this store")
+    # A store sharing another's Pathao account uses that store's token: a new
+    # login per store would only churn tokens on the one account.
+    store_id = cfg.account_store_id or store_id
     async with async_session() as session:
         row = await session.get(IntegrationToken, (store_id, PROVIDER))
         now = datetime.now(timezone.utc)

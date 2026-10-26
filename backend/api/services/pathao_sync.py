@@ -193,10 +193,11 @@ def apply_status(
     return True
 
 
-async def handle_event(session: AsyncSession, store_id: int, payload: dict) -> str:
-    """Apply one webhook event to the store's order. Returns what happened,
-    for the log. Never raises for an unknown parcel or event: Pathao only
-    needs to hear that we took it."""
+async def handle_event(session: AsyncSession, store_ids: list[int], payload: dict) -> str:
+    """Apply one webhook event to the order it names among `store_ids` — the
+    store whose URL was called and the stores sharing its Pathao account.
+    Returns what happened, for the log. Never raises for an unknown parcel
+    or event: Pathao only needs to hear that we took it."""
     raw_event = str(payload.get("event") or "")
     consignment_id = str(payload.get("consignment_id") or "").strip()
     if not raw_event.lower().startswith("order.") or not consignment_id:
@@ -205,7 +206,7 @@ async def handle_event(session: AsyncSession, store_id: int, payload: dict) -> s
     order = await session.scalar(
         select(Order)
         .where(
-            Order.store_id == store_id,
+            Order.store_id.in_(store_ids),
             Order.courier_provider == PATHAO,
             Order.courier_consignment_id == consignment_id,
         )

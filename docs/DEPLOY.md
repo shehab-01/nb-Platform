@@ -153,6 +153,13 @@ until a super admin approves them and assigns a store.
    save, then paste the store's Pathao webhook URL and that secret into
    Pathao's page with every event selected. Pathao's TEST button must pass.
    The 15-minute poll keeps running as a back-up.
+   A second store booking through the same Pathao or Carrybee merchant
+   account: as super admin, open that store's Settings and under the
+   courier pick "Use <store>'s account". It then uses that store's
+   credentials and webhook (one URL per courier account) and keeps its own
+   pickup store and parcel details. Do not type the same credentials in
+   twice — the courier calls only one webhook, and the page warns when two
+   stores hold the same client id.
 
 Adding a domain later: Admin → Stores → Edit, or from the server:
 

@@ -1685,47 +1685,67 @@ export async function lookupOrdersByPhone(
 /** Carrybee's product types: 1 parcel, 2 book, 3 document. */
 export type CarrybeeProductType = 1 | 2 | 3;
 
+/** A courier account as a store's settings show it (Settings → Courier holds the rest). */
+export type CourierAccountBrief = {
+  id: number;
+  courier: CourierName;
+  name: string;
+  clientId: string;
+  /** Pathao's merchant login email; empty for Carrybee. */
+  username: string;
+  /** Relative to the admin's origin. */
+  webhookPath: string;
+  webhookSecretSet: boolean;
+  integrationHeaderSet: boolean;
+};
+
+type ApiCourierAccountBrief = {
+  id: number;
+  courier: CourierName;
+  name: string;
+  client_id: string;
+  username: string;
+  webhook_path: string;
+  webhook_secret_set: boolean;
+  integration_header_set: boolean;
+};
+
+function mapAccountBrief(a: ApiCourierAccountBrief): CourierAccountBrief {
+  return {
+    id: a.id,
+    courier: a.courier,
+    name: a.name,
+    clientId: a.client_id,
+    username: a.username,
+    webhookPath: a.webhook_path,
+    webhookSecretSet: a.webhook_secret_set,
+    integrationHeaderSet: a.integration_header_set,
+  };
+}
+
 export type StoreSettings = {
   metaPixelId: string;
   metaTestEventCode: string;
   metaCapiTokenSet: boolean;
   metaCapiTokenHint: string | null;
-  pathaoClientId: string;
-  pathaoClientSecretSet: boolean;
-  pathaoClientSecretHint: string | null;
-  pathaoEmail: string;
-  pathaoPasswordSet: boolean;
+  /** The courier account in use; null until a super admin picks one. */
+  pathaoAccount: CourierAccountBrief | null;
   pathaoStoreId: number | null;
   pathaoItemType: "document" | "parcel" | "fragile";
   pathaoEnabled: boolean;
   pathaoParcelWeightKg: string;
-  pathaoWebhookSecretSet: boolean;
-  pathaoWebhookSecretHint: string | null;
-  /** Relative to the admin's origin; null until Pathao is first switched on. */
-  pathaoWebhookPath: string | null;
-  /** The fixed value Pathao's panel says its integration check must get back. */
-  pathaoIntegrationHeader: string;
+  carrybeeAccount: CourierAccountBrief | null;
   carrybeeEnabled: boolean;
-  carrybeeClientId: string;
-  carrybeeClientSecretSet: boolean;
-  carrybeeClientSecretHint: string | null;
-  carrybeeClientContextSet: boolean;
-  carrybeeClientContextHint: string | null;
   carrybeeStoreId: string;
   carrybeeProductType: CarrybeeProductType;
   carrybeeItemWeightG: number;
-  carrybeeWebhookSecretSet: boolean;
-  carrybeeWebhookSecretHint: string | null;
-  /** Relative to the admin's origin; null until Carrybee is first switched on. */
-  carrybeeWebhookPath: string | null;
-  /** The fixed value Carrybee's panel says its integration check must get back. */
-  carrybeeIntegrationHeader: string;
   carrybeeSandbox: boolean;
   bdcourierApiKeySet: boolean;
   bdcourierApiKeyHint: string | null;
   encryptionAvailable: boolean;
-  pathaoSharing: CourierSharing;
-  carrybeeSharing: CourierSharing;
+  /** Super admins pick the accounts, from these. */
+  canChooseAccounts: boolean;
+  accountOptions: CourierAccountBrief[];
 };
 
 type ApiStoreSettings = {
@@ -1733,77 +1753,23 @@ type ApiStoreSettings = {
   meta_test_event_code: string;
   meta_capi_token_set: boolean;
   meta_capi_token_hint: string | null;
-  pathao_client_id: string;
-  pathao_client_secret_set: boolean;
-  pathao_client_secret_hint: string | null;
-  pathao_email: string;
-  pathao_password_set: boolean;
+  pathao_account: ApiCourierAccountBrief | null;
   pathao_store_id: number | null;
   pathao_item_type: "document" | "parcel" | "fragile";
   pathao_enabled: boolean;
   pathao_parcel_weight_kg: string | number;
-  pathao_webhook_secret_set: boolean;
-  pathao_webhook_secret_hint: string | null;
-  pathao_webhook_path: string | null;
-  pathao_integration_header: string;
+  carrybee_account: ApiCourierAccountBrief | null;
   carrybee_enabled: boolean;
-  carrybee_client_id: string;
-  carrybee_client_secret_set: boolean;
-  carrybee_client_secret_hint: string | null;
-  carrybee_client_context_set: boolean;
-  carrybee_client_context_hint: string | null;
   carrybee_store_id: string;
   carrybee_product_type: CarrybeeProductType;
   carrybee_item_weight_g: number;
-  carrybee_webhook_secret_set: boolean;
-  carrybee_webhook_secret_hint: string | null;
-  carrybee_webhook_path: string | null;
-  carrybee_integration_header: string;
   carrybee_sandbox: boolean;
   bdcourier_api_key_set: boolean;
   bdcourier_api_key_hint: string | null;
   encryption_available: boolean;
-  pathao_sharing?: ApiCourierSharing;
-  carrybee_sharing?: ApiCourierSharing;
+  can_choose_accounts: boolean;
+  account_options: ApiCourierAccountBrief[];
 };
-
-export type LinkedStore = { storeId: number; name: string };
-
-/** Who shares a store's courier account. The last three are filled for super admins only. */
-export type CourierSharing = {
-  /** The store whose account this one uses; null when it has its own. */
-  account: LinkedStore | null;
-  /** Stores using this store's account; its webhook serves them too. */
-  sharedWith: LinkedStore[];
-  canLink: boolean;
-  options: LinkedStore[];
-  /** Other stores holding the same client id as their own: link them. */
-  sameCredentials: LinkedStore[];
-};
-
-type ApiLinkedStore = { store_id: number; name: string };
-
-type ApiCourierSharing = {
-  account: ApiLinkedStore | null;
-  shared_with: ApiLinkedStore[];
-  can_link: boolean;
-  options: ApiLinkedStore[];
-  same_credentials: ApiLinkedStore[];
-};
-
-function mapLinked(s: ApiLinkedStore): LinkedStore {
-  return { storeId: s.store_id, name: s.name };
-}
-
-function mapSharing(s: ApiCourierSharing | undefined): CourierSharing {
-  return {
-    account: s?.account ? mapLinked(s.account) : null,
-    sharedWith: (s?.shared_with ?? []).map(mapLinked),
-    canLink: s?.can_link ?? false,
-    options: (s?.options ?? []).map(mapLinked),
-    sameCredentials: (s?.same_credentials ?? []).map(mapLinked),
-  };
-}
 
 function mapSettings(s: ApiStoreSettings): StoreSettings {
   return {
@@ -1811,38 +1777,22 @@ function mapSettings(s: ApiStoreSettings): StoreSettings {
     metaTestEventCode: s.meta_test_event_code,
     metaCapiTokenSet: s.meta_capi_token_set,
     metaCapiTokenHint: s.meta_capi_token_hint,
-    pathaoClientId: s.pathao_client_id,
-    pathaoClientSecretSet: s.pathao_client_secret_set,
-    pathaoClientSecretHint: s.pathao_client_secret_hint,
-    pathaoEmail: s.pathao_email,
-    pathaoPasswordSet: s.pathao_password_set,
+    pathaoAccount: s.pathao_account ? mapAccountBrief(s.pathao_account) : null,
     pathaoStoreId: s.pathao_store_id,
     pathaoItemType: s.pathao_item_type,
     pathaoEnabled: s.pathao_enabled,
     pathaoParcelWeightKg: String(s.pathao_parcel_weight_kg),
-    pathaoWebhookSecretSet: s.pathao_webhook_secret_set,
-    pathaoWebhookSecretHint: s.pathao_webhook_secret_hint,
-    pathaoWebhookPath: s.pathao_webhook_path,
-    pathaoIntegrationHeader: s.pathao_integration_header,
+    carrybeeAccount: s.carrybee_account ? mapAccountBrief(s.carrybee_account) : null,
     carrybeeEnabled: s.carrybee_enabled,
-    carrybeeClientId: s.carrybee_client_id,
-    carrybeeClientSecretSet: s.carrybee_client_secret_set,
-    carrybeeClientSecretHint: s.carrybee_client_secret_hint,
-    carrybeeClientContextSet: s.carrybee_client_context_set,
-    carrybeeClientContextHint: s.carrybee_client_context_hint,
     carrybeeStoreId: s.carrybee_store_id,
     carrybeeProductType: s.carrybee_product_type,
     carrybeeItemWeightG: s.carrybee_item_weight_g,
-    carrybeeWebhookSecretSet: s.carrybee_webhook_secret_set,
-    carrybeeWebhookSecretHint: s.carrybee_webhook_secret_hint,
-    carrybeeWebhookPath: s.carrybee_webhook_path,
-    carrybeeIntegrationHeader: s.carrybee_integration_header,
     carrybeeSandbox: s.carrybee_sandbox,
     bdcourierApiKeySet: s.bdcourier_api_key_set,
     bdcourierApiKeyHint: s.bdcourier_api_key_hint,
     encryptionAvailable: s.encryption_available,
-    pathaoSharing: mapSharing(s.pathao_sharing),
-    carrybeeSharing: mapSharing(s.carrybee_sharing),
+    canChooseAccounts: s.can_choose_accounts,
+    accountOptions: s.account_options.map(mapAccountBrief),
   };
 }
 
@@ -1851,25 +1801,17 @@ export type StoreSettingsInput = {
   metaPixelId: string;
   metaCapiToken?: string;
   metaTestEventCode: string;
-  pathaoClientId: string;
-  pathaoClientSecret?: string;
-  pathaoEmail: string;
-  pathaoPassword?: string;
+  /** Super admins only; left out (undefined) it is not touched. */
+  pathaoCourierAccountId?: number | null;
   pathaoStoreId: number | null;
   pathaoItemType: "document" | "parcel" | "fragile";
   pathaoEnabled: boolean;
   pathaoParcelWeightKg: string;
-  pathaoWebhookSecret?: string;
-  pathaoIntegrationHeader: string;
+  carrybeeCourierAccountId?: number | null;
   carrybeeEnabled: boolean;
-  carrybeeClientId: string;
-  carrybeeClientSecret?: string;
-  carrybeeClientContext?: string;
   carrybeeStoreId: string;
   carrybeeProductType: CarrybeeProductType;
   carrybeeItemWeightG: number;
-  carrybeeWebhookSecret?: string;
-  carrybeeIntegrationHeader: string;
   bdcourierApiKey?: string;
 };
 
@@ -1877,57 +1819,161 @@ export async function getStoreSettings(storeId: number): Promise<StoreSettings> 
   return mapSettings(await request<ApiStoreSettings>(`/api/stores/${storeId}/settings`));
 }
 
-/**
- * Super admins: make the store use another store's courier account
- * (credentials and webhook), or its own again with null.
- */
-export async function setCourierAccount(
-  storeId: number,
-  courier: CourierName,
-  accountStoreId: number | null
-): Promise<StoreSettings> {
-  return mapSettings(
-    await request<ApiStoreSettings>(`/api/stores/${storeId}/settings/courier-account`, {
-      method: "PUT",
-      body: JSON.stringify({ courier, account_store_id: accountStoreId }),
-    })
-  );
-}
-
 export async function saveStoreSettings(
   storeId: number,
   input: StoreSettingsInput
 ): Promise<StoreSettings> {
+  const body: Record<string, unknown> = {
+    meta_pixel_id: input.metaPixelId,
+    meta_capi_token: input.metaCapiToken ?? null,
+    meta_test_event_code: input.metaTestEventCode,
+    pathao_store_id: input.pathaoStoreId,
+    pathao_item_type: input.pathaoItemType,
+    pathao_parcel_weight_kg: input.pathaoParcelWeightKg,
+    pathao_enabled: input.pathaoEnabled,
+    carrybee_enabled: input.carrybeeEnabled,
+    carrybee_store_id: input.carrybeeStoreId,
+    carrybee_product_type: input.carrybeeProductType,
+    carrybee_item_weight_g: input.carrybeeItemWeightG,
+    bdcourier_api_key: input.bdcourierApiKey ?? null,
+  };
+  // Sent only when chosen: the API acts on an account id only if present.
+  if (input.pathaoCourierAccountId !== undefined) {
+    body.pathao_courier_account_id = input.pathaoCourierAccountId;
+  }
+  if (input.carrybeeCourierAccountId !== undefined) {
+    body.carrybee_courier_account_id = input.carrybeeCourierAccountId;
+  }
   return mapSettings(
     await request<ApiStoreSettings>(`/api/stores/${storeId}/settings`, {
       method: "PUT",
-      body: JSON.stringify({
-        meta_pixel_id: input.metaPixelId,
-        meta_capi_token: input.metaCapiToken ?? null,
-        meta_test_event_code: input.metaTestEventCode,
-        pathao_client_id: input.pathaoClientId,
-        pathao_client_secret: input.pathaoClientSecret ?? null,
-        pathao_email: input.pathaoEmail,
-        pathao_password: input.pathaoPassword ?? null,
-        pathao_store_id: input.pathaoStoreId,
-        pathao_item_type: input.pathaoItemType,
-        pathao_parcel_weight_kg: input.pathaoParcelWeightKg,
-        pathao_enabled: input.pathaoEnabled,
-        pathao_webhook_secret: input.pathaoWebhookSecret ?? null,
-        pathao_integration_header: input.pathaoIntegrationHeader,
-        carrybee_enabled: input.carrybeeEnabled,
-        carrybee_client_id: input.carrybeeClientId,
-        carrybee_client_secret: input.carrybeeClientSecret ?? null,
-        carrybee_client_context: input.carrybeeClientContext ?? null,
-        carrybee_store_id: input.carrybeeStoreId,
-        carrybee_product_type: input.carrybeeProductType,
-        carrybee_item_weight_g: input.carrybeeItemWeightG,
-        carrybee_webhook_secret: input.carrybeeWebhookSecret ?? null,
-        carrybee_integration_header: input.carrybeeIntegrationHeader,
-        bdcourier_api_key: input.bdcourierApiKey ?? null,
-      }),
+      body: JSON.stringify(body),
     })
   );
+}
+
+// ---- Courier accounts (Settings → Courier, super admin) ----
+
+export type CourierAccount = CourierAccountBrief & {
+  clientSecretSet: boolean;
+  clientSecretHint: string | null;
+  passwordSet: boolean;
+  clientContextSet: boolean;
+  clientContextHint: string | null;
+  webhookSecretHint: string | null;
+  integrationHeader: string;
+  sandbox: boolean;
+  /** The stores booking through it; an account in use cannot be deleted. */
+  usedBy: { storeId: number; name: string }[];
+};
+
+type ApiCourierAccount = ApiCourierAccountBrief & {
+  client_secret_set: boolean;
+  client_secret_hint: string | null;
+  password_set: boolean;
+  client_context_set: boolean;
+  client_context_hint: string | null;
+  webhook_secret_hint: string | null;
+  integration_header: string;
+  sandbox: boolean;
+  used_by: { store_id: number; name: string }[];
+};
+
+function mapAccount(a: ApiCourierAccount): CourierAccount {
+  return {
+    ...mapAccountBrief(a),
+    clientSecretSet: a.client_secret_set,
+    clientSecretHint: a.client_secret_hint,
+    passwordSet: a.password_set,
+    clientContextSet: a.client_context_set,
+    clientContextHint: a.client_context_hint,
+    webhookSecretHint: a.webhook_secret_hint,
+    integrationHeader: a.integration_header,
+    sandbox: a.sandbox,
+    usedBy: a.used_by.map((s) => ({ storeId: s.store_id, name: s.name })),
+  };
+}
+
+/** Secret fields: undefined keeps the stored value, "" clears it, text sets it. */
+export type CourierAccountInput = {
+  courier: CourierName;
+  name: string;
+  clientId: string;
+  clientSecret?: string;
+  /** Pathao only. */
+  username: string;
+  password?: string;
+  /** Carrybee only. */
+  clientContext?: string;
+  webhookSecret?: string;
+  integrationHeader: string;
+};
+
+function accountBody(input: CourierAccountInput): string {
+  return JSON.stringify({
+    courier: input.courier,
+    name: input.name,
+    client_id: input.clientId,
+    client_secret: input.clientSecret ?? null,
+    username: input.username,
+    password: input.password ?? null,
+    client_context: input.clientContext ?? null,
+    webhook_secret: input.webhookSecret ?? null,
+    integration_header: input.integrationHeader,
+  });
+}
+
+export async function listCourierAccounts(): Promise<CourierAccount[]> {
+  return (await request<ApiCourierAccount[]>("/api/courier-accounts")).map(mapAccount);
+}
+
+export async function createCourierAccount(input: CourierAccountInput): Promise<CourierAccount> {
+  return mapAccount(
+    await request<ApiCourierAccount>("/api/courier-accounts", {
+      method: "POST",
+      body: accountBody(input),
+    })
+  );
+}
+
+export async function updateCourierAccount(
+  id: number,
+  input: CourierAccountInput
+): Promise<CourierAccount> {
+  return mapAccount(
+    await request<ApiCourierAccount>(`/api/courier-accounts/${id}`, {
+      method: "PUT",
+      body: accountBody(input),
+    })
+  );
+}
+
+export async function deleteCourierAccount(id: number): Promise<void> {
+  await requestVoid(`/api/courier-accounts/${id}`, { method: "DELETE" });
+}
+
+export type CourierAccountTest = {
+  sandbox: boolean;
+  /** The courier's pickup stores this account can book from. */
+  stores: { id: string; name: string; address: string }[];
+  error: string | null;
+};
+
+export async function testCourierAccount(id: number): Promise<CourierAccountTest> {
+  const r = await request<{ sandbox: boolean; stores: Record<string, unknown>[]; error: string | null }>(
+    `/api/courier-accounts/${id}/test`,
+    { method: "POST" }
+  );
+  return {
+    sandbox: r.sandbox,
+    // Pathao spells them store_id / store_name, Carrybee id / name.
+    stores: r.stores.map((s) => ({
+      id: String(s.store_id ?? s.id ?? ""),
+      name: String(s.store_name ?? s.name ?? ""),
+      address: String(s.store_address ?? s.address ?? ""),
+    })),
+    error: r.error,
+  };
 }
 
 // ---- Store content (the template's pictures, per store) ----

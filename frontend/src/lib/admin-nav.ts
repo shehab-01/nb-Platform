@@ -14,6 +14,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "/admin/stores/new": "New store",
   "/admin/templates": "Templates",
   "/admin/settings": "Store settings",
+  "/admin/settings/courier": "Courier accounts",
   "/admin/users": "Users & access",
   "/admin/system": "System",
   // Every order list names itself once, in STATUS_PAGES.

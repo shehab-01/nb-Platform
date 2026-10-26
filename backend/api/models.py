@@ -5,6 +5,7 @@ from decimal import Decimal
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Enum,
@@ -737,6 +738,56 @@ class StoreUser(Base):
     )
 
 
+class CourierAccount(Base):
+    """
+    One Pathao or Carrybee merchant account: its credentials, its status
+    webhook (one URL per account — the courier calls exactly one) and, for
+    Pathao, its login token. Stores pick one per courier in their settings
+    (store_settings.*_courier_account_id), so stores booking through the same
+    account share one copy of all of it.
+
+    Platform-level, like users, so no store_id: managed by super admins on
+    Settings → Courier. Nothing tenant-scoped is read through an account
+    without a store filter — a webhook event is matched only among the
+    parcels of the stores that use it.
+    """
+
+    __tablename__ = "courier_accounts"
+    __table_args__ = (
+        CheckConstraint("courier IN ('pathao', 'carrybee')", name="ck_courier_accounts_courier"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # api.services.courier.PATHAO or CARRYBEE.
+    courier: Mapped[str] = mapped_column(String(20), nullable=False)
+    # What staff call it in the pickers ("Nature Bazar Pathao").
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    client_id: Mapped[str] = mapped_column(String(120), default="", server_default="")
+    client_secret_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
+    # Pathao's merchant login; unused for Carrybee.
+    username: Mapped[str] = mapped_column(String(255), default="", server_default="")
+    password_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
+    # Carrybee's third static header; unused for Pathao.
+    client_context_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
+    # The unguessable last part of the account's webhook URL.
+    webhook_token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    # What the courier sends in its signature header.
+    webhook_secret_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
+    # What the courier's panel says its integration check must get back.
+    # Shown in that panel; not secret.
+    integration_header: Mapped[str] = mapped_column(String(100), default="", server_default="")
+    # Pathao's OAuth token, issued once and shared by every store and worker.
+    access_token: Mapped[str | None] = mapped_column(Text)
+    refresh_token: Mapped[str | None] = mapped_column(Text)
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
 class StoreSettings(Base):
     """
     Per-store integration configuration. Secrets are Fernet ciphertext in the
@@ -764,10 +815,22 @@ class StoreSettings(Base):
     pathao_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false")
     )
-    # Set when this store books through another store's courier account (a
-    # super admin links them): credentials and the webhook are then that
-    # store's, read from its row; the switch and parcel defaults stay ours.
-    # The linked-to store never links on itself (no chains).
+    # The courier accounts this store books through (Settings → Courier),
+    # chosen by a super admin. Credentials and the webhook live on the
+    # account; the switch and parcel defaults (pickup store, weight, type)
+    # are the store's own.
+    pathao_courier_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("courier_accounts.id", ondelete="RESTRICT"), index=True
+    )
+    carrybee_courier_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("courier_accounts.id", ondelete="RESTRICT"), index=True
+    )
+    # Superseded by courier_accounts (0053) and no longer read: the per-store
+    # courier credentials and webhook columns (pathao_client_id, _email,
+    # _client_secret_enc, _password_enc, _webhook_*, _integration_header and
+    # their carrybee_ counterparts) and 0052's *_account_store_id links just
+    # below. The old webhook tokens are still accepted, so a URL pasted into
+    # a courier's panel before 0053 keeps working. Kept so nothing is dropped.
     pathao_account_store_id: Mapped[int | None] = mapped_column(
         ForeignKey("stores.id", ondelete="RESTRICT"), index=True
     )

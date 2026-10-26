@@ -92,7 +92,16 @@ const storeNav: NavItem[] = [
     ],
   },
   { title: "Products", url: "/admin/products", icon: Package, permission: "catalogue.read" },
-  { title: "Settings", url: "/admin/settings", icon: Settings, permission: "settings" },
+  {
+    title: "Settings",
+    url: "/admin/settings",
+    icon: Settings,
+    permission: "settings",
+    children: [
+      { title: "Store", url: "/admin/settings" },
+      { title: "Courier", url: "/admin/settings/courier", superAdmin: true },
+    ],
+  },
 ];
 
 /** The platform: stores and people. Super admin only; no store role reaches it. */

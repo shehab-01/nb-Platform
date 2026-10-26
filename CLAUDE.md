@@ -32,7 +32,10 @@ are), `docs/ARCHITECTURE-V1.md` (what we inherited), `DEV.md` (running it),
   into `<script id="nb-store">`; `lib/store-public.ts` reads it. Services
   take a per-store `MetaConfig` / `PathaoConfig` / `CarrybeeConfig` from
   `stores.load_integrations()`, never `settings.*`. Per-store secrets live in
-  `store_settings.*_enc`, encrypted by `api/crypto.py` under
+  `store_settings.*_enc`; courier credentials and webhooks live in
+  `courier_accounts.*_enc` (platform-level, super admin, Settings → Courier),
+  which each store picks per courier and stores on one merchant account
+  share. All are encrypted by `api/crypto.py` under
   `APP_ENCRYPTION_KEY`, and the API returns only set-flags and a 4-char hint.
   Never add an endpoint or log line that emits a decrypted value.
 - Templates are code: self-contained component sets under
@@ -57,7 +60,7 @@ are), `docs/ARCHITECTURE-V1.md` (what we inherited), `DEV.md` (running it),
 ```
 backend/   FastAPI. api/models.py, api/routers/*, api/services/* (meta_capi,
            pathao, pathao_address, carrybee, courier), api/stores.py (host → store), api/tenancy.py
-           (memberships, X-Admin-Store), alembic/versions (0001–0052), scripts/seed_dev.py,
+           (memberships, X-Admin-Store), alembic/versions (0001–0053), scripts/seed_dev.py,
            tests/ (pytest, no DB)
 frontend/  Next.js 16 App Router. src/proxy.ts (host routing), src/lib/store.ts
            (server-side store config), src/lib/admin-store.ts (+ lib/http.ts:

@@ -1,25 +1,26 @@
 """Couriers calling us: Carrybee's and Pathao's status webhooks.
 
-Each store gets its own URL, /api/webhooks/carrybee/<token>, shown on its
-Settings page and pasted into Carrybee's Webhook Integration page. The token
-is random and names the store — Carrybee's payload only carries Carrybee's
-own pickup-store id, which is not ours to resolve by. It reaches the API
-through the web app's /api rewrite like every other call, on whichever of
-our hostnames the URL was copied from.
+Each courier account (Settings → Courier) has its own URL,
+/api/webhooks/<courier>/<token>, pasted once into that merchant account's
+Webhook Integration page — a courier calls one URL per account. The token is
+random and names the account; every store using the account (its
+store_settings.*_courier_account_id) gets the events, each matched only
+among those stores' parcels. URLs from before accounts existed named a store
+and are still accepted, as that store's account. The call reaches the API
+through the web app's /api rewrite like every other, on whichever of our
+hostnames the URL was copied from.
 
 Two kinds of request arrive:
 
-- The integration check ({"event": "webhook.integration"}), sent when the URL
-  is saved in Carrybee's panel. It carries the webhook secret in
-  X-CB-Webhook-Integration-Header, and Carrybee wants 202 with that header
-  set to the fixed value its Webhook Integration page shows (saved in the
-  store's settings). It changes nothing here.
-- Order events. Each carries X-Carrybee-Webhook-Signature, which must equal
-  the webhook secret saved for the store (the one typed into Carrybee's
-  panel); anything else is refused before the body is read as an event.
+- The integration check, sent when the URL is saved in the courier's panel.
+  It wants 202 with a header set to the fixed value that panel shows (saved
+  on the account). It changes nothing here.
+- Order events, each carrying a signature header that must equal the
+  account's webhook secret; anything else is refused before the body is
+  read as an event.
 
 Every accepted event is answered 202 whether or not it matched a parcel:
-Carrybee only needs to know we took it.
+the courier only needs to know we took it.
 """
 from __future__ import annotations
 
@@ -35,8 +36,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import stores
 from api.db import get_session
-from api.models import StoreSettings
+from api.models import CourierAccount, StoreSettings
 from api.services import carrybee_sync, pathao_sync
+from api.services.courier import CARRYBEE, LABELS, PATHAO
 
 log = logging.getLogger("webhooks")
 
@@ -47,20 +49,61 @@ SIGNATURE_HEADER = "X-Carrybee-Webhook-Signature"
 MAX_BODY_BYTES = 64 * 1024
 
 
-async def account_store_ids(session: AsyncSession, store_id: int, column) -> list[int]:
-    """The store whose URL was called plus every store sharing its courier
-    account (`column` is StoreSettings.pathao_ or carrybee_account_store_id).
-    One merchant account has one webhook URL, so its events are for any of
-    them; the signature was checked against that account's secret."""
-    linked = (
-        await session.scalars(select(StoreSettings.store_id).where(column == store_id))
-    ).all()
-    return [store_id, *linked]
+async def resolve_account(
+    session: AsyncSession, courier: str, token: str
+) -> CourierAccount | None:
+    """The courier account a webhook URL names: by its own token, or — for
+    a URL pasted before accounts existed — by the old per-store token, as
+    that store's account."""
+    account = await session.scalar(
+        select(CourierAccount).where(
+            CourierAccount.courier == courier, CourierAccount.webhook_token == token
+        )
+    )
+    if account is not None:
+        return account
+    old_token = getattr(StoreSettings, f"{courier}_webhook_token")
+    account_id = await session.scalar(
+        select(getattr(StoreSettings, f"{courier}_courier_account_id")).where(old_token == token)
+    )
+    return await session.get(CourierAccount, account_id) if account_id is not None else None
+
+
+async def account_store_ids(session: AsyncSession, courier: str, account_id: int) -> list[int]:
+    """Every store booking through the account: its events may be for any of
+    them, and for no one else."""
+    column = getattr(StoreSettings, f"{courier}_courier_account_id")
+    return list(
+        (await session.scalars(select(StoreSettings.store_id).where(column == account_id))).all()
+    )
+
+
+async def _account_or_404(session: AsyncSession, courier: str, token: str) -> CourierAccount:
+    account = await resolve_account(session, courier, token)
+    if account is None:
+        # Logged without the token: a stale URL in the courier's panel shows
+        # up here, and nowhere else.
+        log.warning("%s webhook refused: unknown URL token", LABELS[courier])
+        raise HTTPException(status_code=404, detail="Unknown webhook")
+    return account
+
+
+async def _read_json(request: Request) -> tuple[bytes, dict]:
+    raw = await request.body()
+    if len(raw) > MAX_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="Too large")
+    try:
+        payload = json.loads(raw or b"{}")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Body is not JSON") from None
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Body is not a JSON object")
+    return raw, payload
 
 
 def signature_ok(received: str | None, secret: str) -> bool:
-    """Carrybee's signature header against the saved secret, in constant
-    time. Its own example wraps the value in quotes, so quotes and spaces
+    """The signature header against the saved secret, in constant time.
+    Carrybee's own example wraps the value in quotes, so quotes and spaces
     around it are not part of it."""
     if not received or not secret:
         return False
@@ -109,38 +152,22 @@ async def carrybee_webhook(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-    store_id = await session.scalar(
-        select(StoreSettings.store_id).where(StoreSettings.carrybee_webhook_token == token)
-    )
-    if store_id is None:
-        # Logged without the token: a stale URL in the courier's panel shows
-        # up here, and nowhere else.
-        log.warning("Carrybee webhook refused: unknown URL token")
-        raise HTTPException(status_code=404, detail="Unknown webhook")
-
-    raw = await request.body()
-    if len(raw) > MAX_BODY_BYTES:
-        raise HTTPException(status_code=413, detail="Too large")
-    try:
-        payload = json.loads(raw or b"{}")
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Body is not JSON") from None
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="Body is not a JSON object")
-
-    integrations = await stores.load_integrations(session, store_id)
-    cfg = integrations.carrybee if integrations else stores.CarrybeeConfig()
+    account = await _account_or_404(session, CARRYBEE, token)
+    raw, payload = await _read_json(request)
+    cfg = stores.carrybee_config(account, None)
     secret = cfg.webhook_secret
 
     if payload.get("event") == "webhook.integration":
         # Carrybee sends the webhook secret in this header and wants back the
         # fixed value its panel shows — a different one. Echoing is only a
-        # fallback for a store that has not saved that value yet.
+        # fallback for an account that has not saved that value yet.
         received = request.headers.get(INTEGRATION_HEADER, "")
         if secret and received and not signature_ok(received, secret):
-            log.warning("Carrybee integration check for store %s: secret does not match", store_id)
+            log.warning(
+                "Carrybee integration check for account %s: secret does not match", account.id
+            )
             raise HTTPException(status_code=401, detail="Bad secret")
-        log.info("Carrybee webhook integration check for store %s", store_id)
+        log.info("Carrybee webhook integration check for account %s", account.id)
         answer = cfg.integration_header or received
         return Response(status_code=202, headers={INTEGRATION_HEADER: answer})
 
@@ -148,20 +175,20 @@ async def carrybee_webhook(
     if not (signature_ok(received, secret) or hmac_ok(received, secret, raw)):
         # Never log the header or the secret: either could be the real one.
         log.warning(
-            "Carrybee webhook for store %s refused: bad or missing signature (%s)",
-            store_id,
+            "Carrybee webhook for account %s refused: bad or missing signature (%s)",
+            account.id,
             describe_signature(request.headers, received, secret),
         )
         raise HTTPException(status_code=401, detail="Bad signature")
 
     # Parcels already booked keep updating even if Carrybee has since been
     # switched off for new bookings: their story is still ours to record.
-    store_ids = await account_store_ids(session, store_id, StoreSettings.carrybee_account_store_id)
+    store_ids = await account_store_ids(session, CARRYBEE, account.id)
     outcome = await carrybee_sync.handle_event(session, store_ids, payload)
     await session.commit()
     log.info(
-        "Carrybee webhook store %s %s: %s",
-        store_id,
+        "Carrybee webhook account %s %s: %s",
+        account.id,
         payload.get("consignment_id"),
         outcome,
     )
@@ -181,38 +208,22 @@ async def pathao_webhook(
     session: AsyncSession = Depends(get_session),
 ) -> Response:
     """Pathao's status webhook, the same shape as Carrybee's: the token in
-    the URL names the store, X-PATHAO-Signature must equal the secret saved
-    for it, and every answer carries the integration header Pathao's panel
-    asks for. That value is shown in their panel, not a secret.
+    the URL names the account, X-PATHAO-Signature must equal its secret, and
+    every answer carries the integration header Pathao's panel asks for.
+    That value is shown in their panel, not a secret.
 
     Pathao's integration check is not documented beyond "the response must
     carry the header", so any request that is not an order event (no
     consignment id) is treated as one: answered 202 with the header, and
     nothing changes."""
-    store_id = await session.scalar(
-        select(StoreSettings.store_id).where(StoreSettings.pathao_webhook_token == token)
-    )
-    if store_id is None:
-        log.warning("Pathao webhook refused: unknown URL token")
-        raise HTTPException(status_code=404, detail="Unknown webhook")
-
-    raw = await request.body()
-    if len(raw) > MAX_BODY_BYTES:
-        raise HTTPException(status_code=413, detail="Too large")
-    try:
-        payload = json.loads(raw or b"{}")
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Body is not JSON") from None
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="Body is not a JSON object")
-
-    integrations = await stores.load_integrations(session, store_id)
-    cfg = integrations.pathao if integrations else stores.PathaoConfig()
+    account = await _account_or_404(session, PATHAO, token)
+    raw, payload = await _read_json(request)
+    cfg = stores.pathao_config(account, None)
     headers = {PATHAO_INTEGRATION_HEADER: cfg.integration_header} if cfg.integration_header else {}
 
     if not payload.get("consignment_id"):
         log.info(
-            "Pathao webhook check for store %s (event %r)", store_id, payload.get("event")
+            "Pathao webhook check for account %s (event %r)", account.id, payload.get("event")
         )
         return Response(status_code=202, headers=headers)
 
@@ -222,20 +233,20 @@ async def pathao_webhook(
     ):
         # Never log the header or the secret: either could be the real one.
         log.warning(
-            "Pathao webhook for store %s refused: bad or missing signature (%s)",
-            store_id,
+            "Pathao webhook for account %s refused: bad or missing signature (%s)",
+            account.id,
             describe_signature(request.headers, received, cfg.webhook_secret),
         )
         raise HTTPException(status_code=401, detail="Bad signature", headers=headers)
 
     # Parcels already booked keep updating even if Pathao has since been
     # switched off for new bookings: their story is still ours to record.
-    store_ids = await account_store_ids(session, store_id, StoreSettings.pathao_account_store_id)
+    store_ids = await account_store_ids(session, PATHAO, account.id)
     outcome = await pathao_sync.handle_event(session, store_ids, payload)
     await session.commit()
     log.info(
-        "Pathao webhook store %s %s: %s",
-        store_id,
+        "Pathao webhook account %s %s: %s",
+        account.id,
         payload.get("consignment_id"),
         outcome,
     )

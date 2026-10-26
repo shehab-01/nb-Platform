@@ -9,7 +9,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 from api import crypto
-from api.models import Order, OrderItem
+from api.models import CourierAccount, Order, OrderItem
 from api.routers.webhooks import describe_signature, hmac_ok, signature_ok
 from api.services import carrybee, courier
 from api.services.carrybee_sync import apply_status
@@ -169,22 +169,20 @@ def test_integrations_switches_and_couriers(monkeypatch):
     monkeypatch.setenv("APP_ENCRYPTION_KEY", Fernet.generate_key().decode())
     row = SimpleNamespace(
         meta_pixel_id="", meta_capi_token_enc=None, meta_test_event_code="",
-        pathao_client_id="", pathao_client_secret_enc=None, pathao_email="",
-        pathao_password_enc=None, pathao_store_id=None, pathao_item_type="parcel",
+        pathao_courier_account_id=None, pathao_store_id=None, pathao_item_type="parcel",
         pathao_parcel_weight_kg=1, pathao_enabled=True,
-        pathao_webhook_secret_enc=None, pathao_webhook_token="ptok",
-        pathao_integration_header="",
         bdcourier_api_key_enc=None,
-        carrybee_enabled=True, carrybee_client_id="id",
-        carrybee_client_secret_enc=crypto.encrypt("s"),
-        carrybee_client_context_enc=crypto.encrypt("c"),
+        carrybee_courier_account_id=8, carrybee_enabled=True,
         carrybee_store_id="3753", carrybee_product_type=1, carrybee_item_weight_g=500,
-        carrybee_webhook_secret_enc=None, carrybee_webhook_token="tok",
-        carrybee_integration_header="40489fe0",
+    )
+    account = CourierAccount(
+        id=8, courier="carrybee", name="NB Carrybee", client_id="id", username="",
+        client_secret_enc=crypto.encrypt("s"), client_context_enc=crypto.encrypt("c"),
+        webhook_token="tok", integration_header="40489fe0",
     )
     store = SimpleNamespace(id=1, order_prefix="NB")
-    got = integrations_from(store, row)  # type: ignore[arg-type]
-    # Pathao is switched on but has no credentials, so it is not offered.
+    got = integrations_from(store, row, carrybee_account=account)  # type: ignore[arg-type]
+    # Pathao is switched on but has no account, so it is not offered.
     assert got.couriers() == ["carrybee"]
     assert got.carrybee.client_secret == "s" and got.carrybee.webhook_token == "tok"
     assert got.carrybee.integration_header == "40489fe0"

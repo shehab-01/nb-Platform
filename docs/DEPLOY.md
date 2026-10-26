@@ -132,34 +132,29 @@ until a super admin approves them and assigns a store.
 
 1. Platform → Stores → New store: domain `store.naturebazar.bd`, name, order
    prefix, template, pictures.
-2. Switch to it → Settings: Pixel ID, CAPI token, test event code; Pathao
-   client id/secret/email/password → **Test connection** → pick the store id;
-   item type, weight; BDCourier key.
-3. Products: add and activate.
-4. Users: approve staff, assign to the store with a role.
-5. Verify Meta with the test event code from the live domain (browser + server
+2. Settings → Courier (super admin): add the Pathao and/or Carrybee merchant
+   account — client id/secret, Pathao's email/password or Carrybee's client
+   context — and **Test connection**. One account per merchant account at the
+   courier, however many of our stores book through it. For its webhook: copy
+   the integration header value from the courier's Webhook Integration page
+   (`X-Pathao-Merchant-Webhook-Integration-Secret` /
+   `X-CB-Webhook-Integration-Header`) into "Integration header", generate a
+   webhook secret, save, then paste the account's webhook URL and that secret
+   into the courier's page with every event selected. Its test must pass.
+   The couriers must reach the admin domain over HTTPS; the URL goes through
+   the web app's `/api` rewrite like every other call. The polls keep running
+   as a back-up.
+3. Switch to the store → Settings: Pixel ID, CAPI token, test event code;
+   under Pathao and Carrybee pick the account, **Test connection** → pick the
+   pickup store id; item type, weight; BDCourier key. A second store on the
+   same courier account picks the same account and keeps its own pickup
+   store — never type the credentials in twice.
+4. Products: add and activate.
+5. Users: approve staff, assign to the store with a role.
+6. Verify Meta with the test event code from the live domain (browser + server
    pairs marked deduplicated in Events Manager), then clear the code. Book
-   one sandbox Pathao parcel, then switch `PATHAO_BASE_URL` to live.
-   For Carrybee: switch it on in Settings, copy the "header value should be
-   exactly" value from Carrybee → Webhook Integration into "Integration
-   header", save, then paste the store's webhook URL (shown under Carrybee)
-   and the webhook secret into that Carrybee page with every event selected. Carrybee must be able to
-   reach the admin domain over HTTPS; the URL goes through the web app's
-   `/api` rewrite like every other call. Book one sandbox parcel, watch its
-   status arrive, then switch `CARRYBEE_BASE_URL` to live.
-   Pathao's webhook is set up the same way: under Pathao in Settings, copy
-   the `X-Pathao-Merchant-Webhook-Integration-Secret` value from Pathao →
-   Webhook Integration into "Integration header", generate a webhook secret,
-   save, then paste the store's Pathao webhook URL and that secret into
-   Pathao's page with every event selected. Pathao's TEST button must pass.
-   The 15-minute poll keeps running as a back-up.
-   A second store booking through the same Pathao or Carrybee merchant
-   account: as super admin, open that store's Settings and under the
-   courier pick "Use <store>'s account". It then uses that store's
-   credentials and webhook (one URL per courier account) and keeps its own
-   pickup store and parcel details. Do not type the same credentials in
-   twice — the courier calls only one webhook, and the page warns when two
-   stores hold the same client id.
+   one sandbox parcel with each courier, watch its status arrive, then switch
+   `PATHAO_BASE_URL` / `CARRYBEE_BASE_URL` to live.
 
 Adding a domain later: Admin → Stores → Edit, or from the server:
 

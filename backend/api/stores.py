@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api import crypto
 from api.config import settings
 from api.db import get_session
-from api.models import Store, StoreDomain, StoreSettings
+from api.models import CourierAccount, Store, StoreDomain, StoreSettings
 
 STORE_HOST_HEADER = "x-store-host"
 STORE_SLUG_HEADER = "x-store-slug"
@@ -281,9 +281,9 @@ class PathaoConfig:
     integration_header: str = ""
     # The store's switch for Pathao on its Settings page.
     switched_on: bool = True
-    # The store whose Pathao account this one shares, if any. Its login token
-    # is then used too, so one account holds one token.
-    account_store_id: int | None = None
+    # The courier account (courier_accounts.id) the credentials came from;
+    # its login token is shared by every store on it.
+    account_id: int | None = None
 
     @property
     def configured(self) -> bool:
@@ -314,8 +314,8 @@ class CarrybeeConfig:
     # The value the integration check must get back (Carrybee's panel shows it).
     integration_header: str = ""
     switched_on: bool = True
-    # The store whose Carrybee account this one shares, if any.
-    account_store_id: int | None = None
+    # The courier account (courier_accounts.id) the credentials came from.
+    account_id: int | None = None
 
     @property
     def configured(self) -> bool:
@@ -357,27 +357,60 @@ def _decrypt(blob: bytes | None) -> str:
         return ""
 
 
+def pathao_config(account: CourierAccount | None, row: StoreSettings | None) -> PathaoConfig:
+    """The account's credentials and webhook with the store's own switch and
+    parcel defaults. No account: nothing to log in with. No row (the Courier
+    page testing an account): a stand-in pickup store, switched off."""
+    a = account
+    return PathaoConfig(
+        client_id=a.client_id if a else "",
+        client_secret=_decrypt(a.client_secret_enc) if a else "",
+        username=a.username if a else "",
+        password=_decrypt(a.password_enc) if a else "",
+        webhook_secret=_decrypt(a.webhook_secret_enc) if a else "",
+        webhook_token=a.webhook_token if a else "",
+        integration_header=a.integration_header if a else "",
+        account_id=a.id if a else None,
+        store_id=int(row.pathao_store_id or 0) if row else (1 if a else 0),
+        item_type=(row.pathao_item_type if row else None) or "parcel",
+        unit_weight_kg=float(row.pathao_parcel_weight_kg or 1) if row else 1.0,
+        switched_on=bool(row.pathao_enabled) if row else False,
+    )
+
+
+def carrybee_config(account: CourierAccount | None, row: StoreSettings | None) -> CarrybeeConfig:
+    """As pathao_config, for Carrybee."""
+    a = account
+    return CarrybeeConfig(
+        client_id=a.client_id if a else "",
+        client_secret=_decrypt(a.client_secret_enc) if a else "",
+        client_context=_decrypt(a.client_context_enc) if a else "",
+        webhook_secret=_decrypt(a.webhook_secret_enc) if a else "",
+        webhook_token=a.webhook_token if a else "",
+        integration_header=a.integration_header if a else "",
+        account_id=a.id if a else None,
+        store_id=(row.carrybee_store_id or "") if row else ("-" if a else ""),
+        product_type=int(row.carrybee_product_type or 1) if row else 1,
+        unit_weight_g=int(row.carrybee_item_weight_g or 500) if row else 500,
+        switched_on=bool(row.carrybee_enabled) if row else False,
+    )
+
+
 def integrations_from(
     store: Store,
     row: StoreSettings | None,
     *,
-    pathao_account: StoreSettings | None = None,
-    carrybee_account: StoreSettings | None = None,
+    pathao_account: CourierAccount | None = None,
+    carrybee_account: CourierAccount | None = None,
 ) -> Integrations:
     """Decrypted, ready to use. Pure apart from decryption, for tests.
-
-    `pathao_account` / `carrybee_account` are the rows of the stores whose
-    courier account this one shares (store_settings.*_account_store_id):
-    credentials and webhook come from there, the switch and parcel defaults
-    from the store's own row."""
+    `*_account` are the courier accounts the store's row picks."""
     if row is None:
         return Integrations(
             store_id=store.id, order_prefix=store.order_prefix or "NB",
             meta=MetaConfig(), pathao=PathaoConfig(switched_on=False),
             carrybee=CarrybeeConfig(switched_on=False),
         )
-    p = pathao_account or row
-    c = carrybee_account or row
     return Integrations(
         store_id=store.id,
         order_prefix=store.order_prefix or "NB",
@@ -386,34 +419,9 @@ def integrations_from(
             access_token=_decrypt(row.meta_capi_token_enc),
             test_event_code=row.meta_test_event_code or "",
         ),
-        pathao=PathaoConfig(
-            client_id=p.pathao_client_id or "",
-            client_secret=_decrypt(p.pathao_client_secret_enc),
-            username=p.pathao_email or "",
-            password=_decrypt(p.pathao_password_enc),
-            store_id=int(row.pathao_store_id or 0),
-            item_type=row.pathao_item_type or "parcel",
-            unit_weight_kg=float(row.pathao_parcel_weight_kg or 1),
-            webhook_secret=_decrypt(p.pathao_webhook_secret_enc),
-            webhook_token=p.pathao_webhook_token or "",
-            integration_header=p.pathao_integration_header or "",
-            switched_on=bool(row.pathao_enabled),
-            account_store_id=pathao_account.store_id if pathao_account is not None else None,
-        ),
+        pathao=pathao_config(pathao_account, row),
         bdcourier_api_key=_decrypt(row.bdcourier_api_key_enc),
-        carrybee=CarrybeeConfig(
-            client_id=c.carrybee_client_id or "",
-            client_secret=_decrypt(c.carrybee_client_secret_enc),
-            client_context=_decrypt(c.carrybee_client_context_enc),
-            store_id=row.carrybee_store_id or "",
-            product_type=int(row.carrybee_product_type or 1),
-            unit_weight_g=int(row.carrybee_item_weight_g or 500),
-            webhook_secret=_decrypt(c.carrybee_webhook_secret_enc),
-            webhook_token=c.carrybee_webhook_token or "",
-            integration_header=c.carrybee_integration_header or "",
-            switched_on=bool(row.carrybee_enabled),
-            account_store_id=carrybee_account.store_id if carrybee_account is not None else None,
-        ),
+        carrybee=carrybee_config(carrybee_account, row),
     )
 
 
@@ -430,11 +438,11 @@ async def load_integrations(session: AsyncSession, store_id: int) -> Integration
         _integrations.put(key, None)
         return None
     row = await session.get(StoreSettings, store_id)
-    accounts = {}
+    accounts: dict[str, CourierAccount | None] = {}
     for courier in ("pathao", "carrybee"):
-        account_id = getattr(row, f"{courier}_account_store_id", None) if row else None
-        if account_id is not None and account_id != store_id:
-            accounts[f"{courier}_account"] = await session.get(StoreSettings, account_id)
+        account_id = getattr(row, f"{courier}_courier_account_id", None) if row else None
+        if account_id is not None:
+            accounts[f"{courier}_account"] = await session.get(CourierAccount, account_id)
     value = integrations_from(store, row, **accounts)
     _integrations.put(key, value)  # type: ignore[arg-type]
     return value

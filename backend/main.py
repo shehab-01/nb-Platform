@@ -29,6 +29,7 @@ from api.routers.system import router as system_router
 from api.routers.track import router as track_router
 from api.routers.users import router as users_router
 from api.routers.webhooks import router as webhooks_router
+from api.routers.courier_accounts import router as courier_accounts_router
 
 # Uvicorn configures only its own loggers; the root logger would otherwise sit
 # at WARNING and swallow the app's INFO lines — including "CAPI Purchase …
@@ -84,6 +85,7 @@ app.include_router(store_check_router, prefix="/api")
 app.include_router(me_router, prefix="/api")
 app.include_router(webhooks_router, prefix="/api")
 app.include_router(store_settings_router, prefix="/api")
+app.include_router(courier_accounts_router, prefix="/api")
 app.include_router(store_content_router, prefix="/api")
 
 # Uploaded product images. settings.media_root is a mounted volume, so the

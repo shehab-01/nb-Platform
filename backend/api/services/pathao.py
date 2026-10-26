@@ -21,13 +21,12 @@ import requests
 
 from api.config import settings
 from api.db import async_session
-from api.models import IntegrationToken, Order
+from api.models import CourierAccount, Order
 from api.phone import bd_mobile
 from api.stores import PathaoConfig
 
 log = logging.getLogger("pathao")
 
-PROVIDER = "pathao"
 TIMEOUT_SECONDS = 20
 # Re-issue this long before the token actually dies, so a request never
 # starts with a token that expires mid-flight.
@@ -227,20 +226,23 @@ def _raise_for(status: int, body: Any) -> None:
 # --- Tokens -----------------------------------------------------------------
 
 
-def _token_row_from(body: dict, store_id: int) -> IntegrationToken:
+@dataclass
+class _Token:
+    access_token: str
+    refresh_token: str | None
+    expires_at: datetime
+
+
+def _token_from(body: dict) -> _Token:
     expires_in = int(body.get("expires_in") or 0)
-    return IntegrationToken(
-        store_id=store_id,
-        provider=PROVIDER,
+    return _Token(
         access_token=str(body["access_token"]),
         refresh_token=body.get("refresh_token"),
         expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
     )
 
 
-async def _issue_token(
-    cfg: PathaoConfig, store_id: int, refresh_token: str | None
-) -> IntegrationToken:
+async def _issue_token(cfg: PathaoConfig, refresh_token: str | None) -> _Token:
     """Ask Pathao for a token: by refresh token when we have one, else by
     password. A dead refresh token silently falls back to the password."""
     base = {"client_id": cfg.client_id, "client_secret": cfg.client_secret}
@@ -252,7 +254,7 @@ async def _issue_token(
             None,
         )
         if status == 200 and isinstance(body, dict) and body.get("access_token"):
-            return _token_row_from(body, store_id)
+            return _token_from(body)
         log.warning("Pathao refresh token rejected (%s); using password grant", status)
 
     status, body = await asyncio.to_thread(
@@ -272,34 +274,42 @@ async def _issue_token(
             f"Pathao login failed ({status}): {detail or 'no access token returned'}",
             status=status,
         )
-    return _token_row_from(body, store_id)
+    return _token_from(body)
 
 
 async def get_access_token(cfg: PathaoConfig, store_id: int, *, force: bool = False) -> str:
-    """A usable bearer token for this store, issued or refreshed as needed.
+    """A usable bearer token for the store's Pathao account, issued or
+    refreshed as needed. Kept on the courier account, so every store and
+    worker on one account shares one login.
 
     Uses its own DB session so the caller's transaction (which may hold row
     locks on orders) is never committed from here.
     """
-    if not cfg.configured:
+    if not cfg.configured or cfg.account_id is None:
         raise PathaoError("Pathao is not configured for this store")
-    # A store sharing another's Pathao account uses that store's token: a new
-    # login per store would only churn tokens on the one account.
-    store_id = cfg.account_store_id or store_id
     async with async_session() as session:
-        row = await session.get(IntegrationToken, (store_id, PROVIDER))
+        account = await session.get(CourierAccount, cfg.account_id)
+        if account is None:
+            raise PathaoError("This store's Pathao account no longer exists")
         now = datetime.now(timezone.utc)
-        if row and not force and row.expires_at - EXPIRY_MARGIN > now:
-            return row.access_token
-        fresh = await _issue_token(cfg, store_id, row.refresh_token if row else None)
-        if row is None:
-            session.add(fresh)
-        else:
-            row.access_token = fresh.access_token
-            row.refresh_token = fresh.refresh_token
-            row.expires_at = fresh.expires_at
+        if (
+            account.access_token
+            and account.token_expires_at
+            and not force
+            and account.token_expires_at - EXPIRY_MARGIN > now
+        ):
+            return account.access_token
+        fresh = await _issue_token(cfg, account.refresh_token)
+        account.access_token = fresh.access_token
+        account.refresh_token = fresh.refresh_token
+        account.token_expires_at = fresh.expires_at
         await session.commit()
-        log.info("Pathao token issued for store %s; expires %s", store_id, fresh.expires_at.isoformat())
+        log.info(
+            "Pathao token issued for account %s (store %s); expires %s",
+            cfg.account_id,
+            store_id,
+            fresh.expires_at.isoformat(),
+        )
         return fresh.access_token
 
 

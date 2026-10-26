@@ -65,34 +65,20 @@ def test_redact_exposes_flags_and_hints_only(monkeypatch):
     row = SimpleNamespace(
         meta_pixel_id="123", meta_test_event_code="TEST1",
         meta_capi_token_enc=crypto.encrypt("EAABtoken9999"),
-        pathao_client_id="cid", pathao_client_secret_enc=None,
-        pathao_email="a@b.c", pathao_password_enc=crypto.encrypt("pw"),
-        pathao_store_id=7, pathao_item_type="parcel",
+        pathao_courier_account_id=None, pathao_store_id=7, pathao_item_type="parcel",
         pathao_parcel_weight_kg=Decimal("1.5"), pathao_enabled=True,
-        pathao_webhook_secret_enc=crypto.encrypt("phooksecret2222"),
-        pathao_webhook_token="ptok", pathao_integration_header="f3992ecc",
-        carrybee_enabled=True, carrybee_client_id="cb-id",
-        carrybee_client_secret_enc=crypto.encrypt("cbsecret4321"),
-        carrybee_client_context_enc=crypto.encrypt("cbcontext8765"),
+        carrybee_courier_account_id=None, carrybee_enabled=True,
         carrybee_store_id="3753", carrybee_product_type=1, carrybee_item_weight_g=500,
-        carrybee_webhook_secret_enc=crypto.encrypt("hooksecret1111"),
-        carrybee_webhook_token="tok123", carrybee_integration_header="40489fe0",
         bdcourier_api_key_enc=crypto.encrypt("courierkey0001"),
     )
     out = redact(row)  # type: ignore[arg-type]
     dumped = out.model_dump_json()
-    assert "EAABtoken9999" not in dumped and "courierkey0001" not in dumped and '"pw"' not in dumped
-    for secret in ("cbsecret4321", "cbcontext8765", "hooksecret1111", "phooksecret2222"):
-        assert secret not in dumped
-    assert out.pathao_webhook_secret_set and out.pathao_webhook_secret_hint == "2222"
-    assert out.pathao_webhook_path == "/api/webhooks/pathao/ptok"
-    assert out.carrybee_client_secret_hint == "4321"
-    assert out.carrybee_client_context_set and out.carrybee_webhook_secret_set
-    assert out.carrybee_webhook_path == "/api/webhooks/carrybee/tok123"
+    assert "EAABtoken9999" not in dumped and "courierkey0001" not in dumped
     assert out.meta_capi_token_set and out.meta_capi_token_hint == "9999"
-    assert not out.pathao_client_secret_set and out.pathao_client_secret_hint is None
-    assert out.pathao_password_set
     assert out.bdcourier_api_key_hint == "0001"
+    # No account picked: nothing to show, and no options for a non-admin.
+    assert out.pathao_account is None and out.carrybee_account is None
+    assert not out.can_choose_accounts and out.account_options == []
     assert out.encryption_available
 
 
@@ -102,5 +88,5 @@ def test_redact_empty_defaults(monkeypatch):
     assert out.pathao_item_type == "parcel"
     assert out.pathao_parcel_weight_kg == Decimal("1")
     assert not out.pathao_enabled and not out.carrybee_enabled
-    assert out.carrybee_webhook_path is None
+    assert out.pathao_account is None
     assert not out.encryption_available

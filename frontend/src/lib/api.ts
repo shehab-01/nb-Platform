@@ -588,7 +588,7 @@ export async function refreshCourier(ids: number[]): Promise<CourierResult> {
   return courierBatched("/api/orders/courier/refresh", ids, "pathao", "the courier");
 }
 
-export type PathaoSyncStatus =
+export type CourierSyncStatus =
   | "running"
   | "stopping"
   | "done"
@@ -596,9 +596,10 @@ export type PathaoSyncStatus =
   | "failed"
   | "interrupted";
 
-export type PathaoSyncRun = {
+export type CourierSyncRun = {
   id: number;
-  status: PathaoSyncStatus;
+  courier: CourierName;
+  status: CourierSyncStatus;
   total: number;
   checked: number;
   changed: number;
@@ -610,9 +611,10 @@ export type PathaoSyncRun = {
   finishedAt: string | null;
 };
 
-type ApiPathaoSyncRun = {
+type ApiCourierSyncRun = {
   id: number;
-  status: PathaoSyncStatus;
+  courier: CourierName;
+  status: CourierSyncStatus;
   total: number;
   checked: number;
   changed: number;
@@ -624,10 +626,11 @@ type ApiPathaoSyncRun = {
   finished_at: string | null;
 };
 
-function mapSyncRun(run: ApiPathaoSyncRun | null): PathaoSyncRun | null {
+function mapSyncRun(run: ApiCourierSyncRun | null): CourierSyncRun | null {
   if (!run) return null;
   return {
     id: run.id,
+    courier: run.courier,
     status: run.status,
     total: run.total,
     checked: run.checked,
@@ -646,21 +649,25 @@ function mapSyncRun(run: ApiPathaoSyncRun | null): PathaoSyncRun | null {
   };
 }
 
-/** The store's latest full Pathao sync (running or finished), if any. */
-export async function getPathaoFullSync(): Promise<PathaoSyncRun | null> {
-  return mapSyncRun(await request<ApiPathaoSyncRun | null>("/api/orders/pathao/sync-all"));
+/** The store's latest full sync with this courier (running or finished), if any. */
+export async function getCourierFullSync(courier: CourierName): Promise<CourierSyncRun | null> {
+  return mapSyncRun(
+    await request<ApiCourierSyncRun | null>(`/api/orders/courier/${courier}/sync-all`)
+  );
 }
 
-/** Start a full Pathao sync; returns the running one if already going. */
-export async function startPathaoFullSync(): Promise<PathaoSyncRun> {
+/** Start a full sync with the courier; returns the running one if already going. */
+export async function startCourierFullSync(courier: CourierName): Promise<CourierSyncRun> {
   return mapSyncRun(
-    await request<ApiPathaoSyncRun>("/api/orders/pathao/sync-all", { method: "POST" })
+    await request<ApiCourierSyncRun>(`/api/orders/courier/${courier}/sync-all`, {
+      method: "POST",
+    })
   )!;
 }
 
-export async function stopPathaoFullSync(): Promise<PathaoSyncRun | null> {
+export async function stopCourierFullSync(courier: CourierName): Promise<CourierSyncRun | null> {
   return mapSyncRun(
-    await request<ApiPathaoSyncRun | null>("/api/orders/pathao/sync-all/stop", {
+    await request<ApiCourierSyncRun | null>(`/api/orders/courier/${courier}/sync-all/stop`, {
       method: "POST",
     })
   );
@@ -1692,6 +1699,12 @@ export type StoreSettings = {
   pathaoItemType: "document" | "parcel" | "fragile";
   pathaoEnabled: boolean;
   pathaoParcelWeightKg: string;
+  pathaoWebhookSecretSet: boolean;
+  pathaoWebhookSecretHint: string | null;
+  /** Relative to the admin's origin; null until Pathao is first switched on. */
+  pathaoWebhookPath: string | null;
+  /** The fixed value Pathao's panel says its integration check must get back. */
+  pathaoIntegrationHeader: string;
   carrybeeEnabled: boolean;
   carrybeeClientId: string;
   carrybeeClientSecretSet: boolean;
@@ -1727,6 +1740,10 @@ type ApiStoreSettings = {
   pathao_item_type: "document" | "parcel" | "fragile";
   pathao_enabled: boolean;
   pathao_parcel_weight_kg: string | number;
+  pathao_webhook_secret_set: boolean;
+  pathao_webhook_secret_hint: string | null;
+  pathao_webhook_path: string | null;
+  pathao_integration_header: string;
   carrybee_enabled: boolean;
   carrybee_client_id: string;
   carrybee_client_secret_set: boolean;
@@ -1761,6 +1778,10 @@ function mapSettings(s: ApiStoreSettings): StoreSettings {
     pathaoItemType: s.pathao_item_type,
     pathaoEnabled: s.pathao_enabled,
     pathaoParcelWeightKg: String(s.pathao_parcel_weight_kg),
+    pathaoWebhookSecretSet: s.pathao_webhook_secret_set,
+    pathaoWebhookSecretHint: s.pathao_webhook_secret_hint,
+    pathaoWebhookPath: s.pathao_webhook_path,
+    pathaoIntegrationHeader: s.pathao_integration_header,
     carrybeeEnabled: s.carrybee_enabled,
     carrybeeClientId: s.carrybee_client_id,
     carrybeeClientSecretSet: s.carrybee_client_secret_set,
@@ -1794,6 +1815,8 @@ export type StoreSettingsInput = {
   pathaoItemType: "document" | "parcel" | "fragile";
   pathaoEnabled: boolean;
   pathaoParcelWeightKg: string;
+  pathaoWebhookSecret?: string;
+  pathaoIntegrationHeader: string;
   carrybeeEnabled: boolean;
   carrybeeClientId: string;
   carrybeeClientSecret?: string;
@@ -1829,6 +1852,8 @@ export async function saveStoreSettings(
         pathao_item_type: input.pathaoItemType,
         pathao_parcel_weight_kg: input.pathaoParcelWeightKg,
         pathao_enabled: input.pathaoEnabled,
+        pathao_webhook_secret: input.pathaoWebhookSecret ?? null,
+        pathao_integration_header: input.pathaoIntegrationHeader,
         carrybee_enabled: input.carrybeeEnabled,
         carrybee_client_id: input.carrybeeClientId,
         carrybee_client_secret: input.carrybeeClientSecret ?? null,

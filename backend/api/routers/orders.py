@@ -47,6 +47,7 @@ from api.services import (
     carrybee,
     carrybee_sync,
     courier,
+    courier_full_sync,
     meta_capi,
     pathao,
     pathao_address,
@@ -87,11 +88,12 @@ from api.schemas import (
     CourierOption,
     CourierSendIn,
     CourierSendOut,
+    CourierName,
     CourierSplit,
+    CourierSyncFailure,
+    CourierSyncRunOut,
     PathaoLocationIn,
     PathaoPlaceOut,
-    PathaoSyncFailure,
-    PathaoSyncRunOut,
     TagCreate,
 )
 
@@ -2204,17 +2206,18 @@ async def parse_order_address(
     return await _get_fresh_order(session, order_id)
 
 
-def _sync_run_out(run: PathaoSyncRun, prefix: str) -> PathaoSyncRunOut:
-    return PathaoSyncRunOut(
+def _sync_run_out(run: PathaoSyncRun, prefix: str) -> CourierSyncRunOut:
+    return CourierSyncRunOut(
         id=run.id,
-        status=pathao_sync.run_state(run),
+        courier=run.provider,
+        status=courier_full_sync.run_state(run),
         total=run.total,
         checked=run.checked,
         changed=run.changed,
         delivered=run.delivered,
         failed=run.failed,
         failures=[
-            PathaoSyncFailure(
+            CourierSyncFailure(
                 order_id=f["order_id"],
                 order_no=f"{prefix}-{f['order_id']}",
                 consignment_id=f["consignment_id"],
@@ -2228,38 +2231,45 @@ def _sync_run_out(run: PathaoSyncRun, prefix: str) -> PathaoSyncRunOut:
     )
 
 
-@router.get("/pathao/sync-all", response_model=PathaoSyncRunOut | None)
-async def get_pathao_full_sync(
+@router.get("/courier/{name}/sync-all", response_model=CourierSyncRunOut | None)
+async def get_courier_full_sync(
+    name: CourierName,
     session: AsyncSession = Depends(get_session),
     ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
-) -> PathaoSyncRunOut | None:
-    """The store's latest full sync — the one running, or the last one."""
-    run = await pathao_sync.latest_run(session, ctx.store.id)
+) -> CourierSyncRunOut | None:
+    """The store's latest full sync with this courier — the one running, or
+    the last one."""
+    run = await courier_full_sync.latest_run(session, ctx.store.id, name)
     return _sync_run_out(run, ctx.store.order_prefix) if run is not None else None
 
 
-@router.post("/pathao/sync-all", response_model=PathaoSyncRunOut)
-async def start_pathao_full_sync(
+@router.post("/courier/{name}/sync-all", response_model=CourierSyncRunOut)
+async def start_courier_full_sync(
+    name: CourierName,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
     ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
-) -> PathaoSyncRunOut:
-    """Ask Pathao about every parcel not yet delivered or returned, oldest
-    first, in the background. Pressing it while a sync runs returns that one."""
+) -> CourierSyncRunOut:
+    """Ask the courier about every one of its parcels not yet delivered or
+    returned, oldest first, in the background. Pressing it while a sync with
+    that courier runs returns that one."""
     integrations = await stores.load_integrations(session, ctx.store.id)
-    if integrations is None or not integrations.pathao.enabled:
-        raise HTTPException(status_code=503, detail="Pathao is not configured for this store")
-    run = await pathao_sync.start_full_sync(session, ctx.store.id, user.id)
+    if integrations is None or name not in integrations.couriers():
+        raise HTTPException(
+            status_code=503, detail=f"{courier.LABELS[name]} is not configured for this store"
+        )
+    run = await courier_full_sync.start_full_sync(session, ctx.store.id, name, user.id)
     return _sync_run_out(run, ctx.store.order_prefix)
 
 
-@router.post("/pathao/sync-all/stop", response_model=PathaoSyncRunOut | None)
-async def stop_pathao_full_sync(
+@router.post("/courier/{name}/sync-all/stop", response_model=CourierSyncRunOut | None)
+async def stop_courier_full_sync(
+    name: CourierName,
     session: AsyncSession = Depends(get_session),
     ctx: tenancy.StoreContext = Depends(tenancy.require("orders")),
-) -> PathaoSyncRunOut | None:
-    """Stop the running full sync after the parcel it is on."""
-    run = await pathao_sync.request_stop(session, ctx.store.id)
+) -> CourierSyncRunOut | None:
+    """Stop the running full sync with this courier after the parcel it is on."""
+    run = await courier_full_sync.request_stop(session, ctx.store.id, name)
     return _sync_run_out(run, ctx.store.order_prefix) if run is not None else None
 
 

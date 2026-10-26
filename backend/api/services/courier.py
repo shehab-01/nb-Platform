@@ -24,7 +24,14 @@ NOT_SENT = "none"
 
 # Where a parcel's story ends, per courier: the background syncs stop asking
 # about a parcel once it says one of these (compared in lower case).
-PATHAO_SETTLED = ("delivered", "partial_delivery", "return", "paid_return", "cancelled")
+PATHAO_SETTLED = (
+    "delivered",
+    "partial_delivery",
+    "return",
+    "paid_return",
+    "cancelled",
+    "returned_to_merchant",
+)
 CARRYBEE_SETTLED = (
     "delivered",
     "partial-delivery",
@@ -40,6 +47,8 @@ DELIVERED = ("delivered",)
 RETURNED = (
     "return",
     "paid_return",
+    "return_in_transit",
+    "returned_to_merchant",
     "returned",
     "paid-return",
     "returned-at-sorting",

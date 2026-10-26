@@ -147,6 +147,12 @@ until a super admin approves them and assigns a store.
    reach the admin domain over HTTPS; the URL goes through the web app's
    `/api` rewrite like every other call. Book one sandbox parcel, watch its
    status arrive, then switch `CARRYBEE_BASE_URL` to live.
+   Pathao's webhook is set up the same way: under Pathao in Settings, copy
+   the `X-Pathao-Merchant-Webhook-Integration-Secret` value from Pathao →
+   Webhook Integration into "Integration header", generate a webhook secret,
+   save, then paste the store's Pathao webhook URL and that secret into
+   Pathao's page with every event selected. Pathao's TEST button must pass.
+   The 15-minute poll keeps running as a back-up.
 
 Adding a domain later: Admin → Stores → Edit, or from the server:
 

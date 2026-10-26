@@ -1,7 +1,7 @@
 "use client";
 
 import { OrdersView } from "@/components/admin/orders/orders-view";
-import { PathaoFullSync } from "@/components/admin/orders/pathao-full-sync";
+import { CourierFullSync } from "@/components/admin/orders/courier-full-sync";
 
 /**
  * The archive: finished orders moved off the Shipping list by hand, so that
@@ -13,7 +13,7 @@ import { PathaoFullSync } from "@/components/admin/orders/pathao-full-sync";
 export default function HistoryOrdersPage() {
   return (
     <div className="flex flex-col gap-4">
-      <PathaoFullSync />
+      <CourierFullSync />
       <OrdersView
         statusOptions={["history"]}
         initialStatuses={["history"]}

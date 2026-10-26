@@ -17,7 +17,7 @@ from api.routers.proof_drops import public_router as proof_drop_public_router
 from api.routers.orders import router as orders_router
 from api.routers.products import public_router as storefront_router
 from api.routers.products import router as products_router
-from api.services import carrybee_sync, meta_capi, pathao_sync
+from api.services import carrybee_sync, courier_full_sync, meta_capi, pathao_sync
 from api.routers.stores import admin_router as stores_admin_router
 from api.routers.stores import check_router as store_check_router
 from api.routers.stores import health_router as store_health_router
@@ -49,6 +49,7 @@ async def lifespan(app: FastAPI):
     yield
     await carrybee_sync.stop()
     await pathao_sync.stop()
+    await courier_full_sync.stop()
     # Let in-flight Conversions API deliveries (retries included) finish
     # before the worker goes away, so a redeploy never loses a Purchase.
     await meta_capi.drain()

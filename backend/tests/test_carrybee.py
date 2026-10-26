@@ -10,7 +10,7 @@ from cryptography.fernet import Fernet
 
 from api import crypto
 from api.models import Order, OrderItem
-from api.routers.webhooks import signature_ok
+from api.routers.webhooks import describe_signature, hmac_ok, signature_ok
 from api.services import carrybee, courier
 from api.services.carrybee_sync import apply_status
 from api.stores import CarrybeeConfig, PathaoConfig, integrations_from
@@ -140,6 +140,28 @@ def test_signature_matches_saved_secret_only():
     assert not signature_ok("", "")
 
 
+def test_hmac_signature_of_the_body_is_accepted():
+    import base64
+    import hashlib
+    import hmac as _hmac
+
+    body = b'{"event":"order.delivered","consignment_id":"CB1"}'
+    digest = _hmac.new(b"ecomsecret", body, hashlib.sha256).digest()
+    assert hmac_ok(digest.hex(), "ecomsecret", body)
+    assert hmac_ok("sha256=" + digest.hex().upper(), "ecomsecret", body)
+    assert hmac_ok(base64.b64encode(digest).decode(), "ecomsecret", body)
+    assert not hmac_ok(digest.hex(), "other", body)
+    assert not hmac_ok(digest.hex(), "ecomsecret", body + b" ")
+    assert not hmac_ok(None, "ecomsecret", body)
+
+
+def test_refusal_description_never_carries_values():
+    headers = {"X-Carrybee-Webhook-Signature": "topsecret", "Content-Type": "application/json"}
+    text = describe_signature(headers, "topsecret", "different")
+    assert "topsecret" not in text and "different" not in text
+    assert "X-Carrybee-Webhook-Signature" in text and "length 9" in text
+
+
 # --- per-store config ------------------------------------------------------------------
 
 
@@ -150,6 +172,8 @@ def test_integrations_switches_and_couriers(monkeypatch):
         pathao_client_id="", pathao_client_secret_enc=None, pathao_email="",
         pathao_password_enc=None, pathao_store_id=None, pathao_item_type="parcel",
         pathao_parcel_weight_kg=1, pathao_enabled=True,
+        pathao_webhook_secret_enc=None, pathao_webhook_token="ptok",
+        pathao_integration_header="",
         bdcourier_api_key_enc=None,
         carrybee_enabled=True, carrybee_client_id="id",
         carrybee_client_secret_enc=crypto.encrypt("s"),

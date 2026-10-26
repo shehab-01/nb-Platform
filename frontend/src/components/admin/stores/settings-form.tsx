@@ -41,6 +41,8 @@ type Draft = {
   pathaoStoreId: string;
   pathaoItemType: ItemType;
   pathaoParcelWeightKg: string;
+  pathaoWebhookSecret?: string;
+  pathaoIntegrationHeader: string;
   carrybeeEnabled: boolean;
   carrybeeClientId: string;
   carrybeeClientSecret?: string;
@@ -63,6 +65,7 @@ function draftFrom(settings: StoreSettings): Draft {
     pathaoStoreId: settings.pathaoStoreId != null ? String(settings.pathaoStoreId) : "",
     pathaoItemType: settings.pathaoItemType,
     pathaoParcelWeightKg: settings.pathaoParcelWeightKg,
+    pathaoIntegrationHeader: settings.pathaoIntegrationHeader,
     carrybeeEnabled: settings.carrybeeEnabled,
     carrybeeClientId: settings.carrybeeClientId,
     carrybeeStoreId: settings.carrybeeStoreId,
@@ -102,9 +105,6 @@ export function SettingsForm({
   const [testing, setTesting] = React.useState<"pathao" | "carrybee" | null>(null);
   const [test, setTest] = React.useState<PathaoTest | null>(null);
   const [cbTest, setCbTest] = React.useState<CarrybeeTest | null>(null);
-  // A webhook secret generated here, shown in clear until saved so it can be
-  // copied into Carrybee's panel; after saving only its hint is ever shown.
-  const [newHookSecret, setNewHookSecret] = React.useState<string | null>(null);
   // Edits since the last save: the tests run against saved credentials only.
   const [dirty, setDirty] = React.useState(false);
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => {
@@ -114,7 +114,6 @@ export function SettingsForm({
 
   const discard = () => {
     setD(draftFrom(current));
-    setNewHookSecret(null);
     setDirty(false);
     setStatus(null);
   };
@@ -153,6 +152,8 @@ export function SettingsForm({
         pathaoStoreId: d.pathaoStoreId === "" ? null : Number(d.pathaoStoreId),
         pathaoItemType: d.pathaoItemType,
         pathaoParcelWeightKg: d.pathaoParcelWeightKg,
+        pathaoWebhookSecret: d.pathaoWebhookSecret,
+        pathaoIntegrationHeader: d.pathaoIntegrationHeader.trim(),
         carrybeeEnabled: d.carrybeeEnabled,
         carrybeeClientId: d.carrybeeClientId.trim(),
         carrybeeClientSecret: d.carrybeeClientSecret,
@@ -171,12 +172,12 @@ export function SettingsForm({
         metaCapiToken: undefined,
         pathaoClientSecret: undefined,
         pathaoPassword: undefined,
+        pathaoWebhookSecret: undefined,
         carrybeeClientSecret: undefined,
         carrybeeClientContext: undefined,
         carrybeeWebhookSecret: undefined,
         bdcourierApiKey: undefined,
       }));
-      setNewHookSecret(null);
       setStatus({ ok: true, text: "Saved" });
       setDirty(false);
       return true;
@@ -255,15 +256,14 @@ export function SettingsForm({
     ? { label: "Connected", tone: "good" }
     : { label: "Not set", tone: "neutral" };
 
-  // The admin's own origin: Carrybee posts to it, and the /api rewrite takes
-  // the call to the API. Empty while server-rendering.
+  // The admin's own origin: the couriers post to it, and the /api rewrite
+  // takes the call to the API. Empty while server-rendering.
   const origin = React.useSyncExternalStore(
     noSubscribe,
     () => window.location.origin,
     () => ""
   );
-  const webhookUrl =
-    current.carrybeeWebhookPath && origin ? `${origin}${current.carrybeeWebhookPath}` : null;
+  const urlOf = (path: string | null) => (path && origin ? `${origin}${path}` : null);
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-6">
@@ -359,6 +359,19 @@ export function SettingsForm({
             )}
           </div>
         </Field>
+        <WebhookFields
+          courier="Pathao"
+          id="p-hook"
+          secretSet={current.pathaoWebhookSecretSet}
+          secretHint={current.pathaoWebhookSecretHint}
+          secret={d.pathaoWebhookSecret}
+          onSecret={(v) => set("pathaoWebhookSecret", v)}
+          integrationHeader={d.pathaoIntegrationHeader}
+          onIntegrationHeader={(v) => set("pathaoIntegrationHeader", v)}
+          integrationHeaderName="X-Pathao-Merchant-Webhook-Integration-Secret"
+          integrationPlaceholder="f3992ecc-…"
+          url={urlOf(current.pathaoWebhookPath)}
+        />
       </Section>
 
       <Section
@@ -441,77 +454,19 @@ export function SettingsForm({
             )}
           </div>
         </Field>
-        <Field label="Webhook secret" htmlFor="cb-hook">
-          <div className="flex flex-col gap-2">
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <SecretInput
-                  id="cb-hook"
-                  isSet={current.carrybeeWebhookSecretSet}
-                  hint={current.carrybeeWebhookSecretHint}
-                  value={d.carrybeeWebhookSecret}
-                  onChange={(v) => {
-                    setNewHookSecret(null);
-                    set("carrybeeWebhookSecret", v);
-                  }}
-                />
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="shrink-0"
-                onClick={() => {
-                  const secret = randomSecret();
-                  setNewHookSecret(secret);
-                  set("carrybeeWebhookSecret", secret);
-                }}
-              >
-                Generate
-              </Button>
-            </div>
-            {newHookSecret && (
-              <div className="flex items-center gap-2 text-xs">
-                <code className="min-w-0 truncate rounded bg-muted px-2 py-1 font-mono">{newHookSecret}</code>
-                <CopyButton text={newHookSecret} />
-                <span className="text-muted-foreground">Copy it into Carrybee, then save.</span>
-              </div>
-            )}
-          </div>
-        </Field>
-        <Field label="Integration header" htmlFor="cb-integration">
-          <div className="flex flex-col gap-1.5">
-            <Input
-              id="cb-integration"
-              maxLength={100}
-              autoComplete="off"
-              className="font-mono"
-              placeholder="40489fe0-…"
-              value={d.carrybeeIntegrationHeader}
-              onChange={(e) => set("carrybeeIntegrationHeader", e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">
-              Copy the value Carrybee shows under &ldquo;The header
-              X-CB-Webhook-Integration-Header value should be exactly&rdquo;.
-            </p>
-          </div>
-        </Field>
-        <Field label="Webhook URL">
-          {webhookUrl ? (
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-center gap-2">
-                <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1.5 font-mono text-xs">{webhookUrl}</code>
-                <CopyButton text={webhookUrl} />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Paste this URL and the webhook secret into Carrybee → Webhook Integration, and select all events.
-                Delivery statuses then arrive by themselves.
-              </p>
-            </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">Switch Carrybee on and save to get the store&apos;s webhook URL.</p>
-          )}
-        </Field>
+        <WebhookFields
+          courier="Carrybee"
+          id="cb-hook"
+          secretSet={current.carrybeeWebhookSecretSet}
+          secretHint={current.carrybeeWebhookSecretHint}
+          secret={d.carrybeeWebhookSecret}
+          onSecret={(v) => set("carrybeeWebhookSecret", v)}
+          integrationHeader={d.carrybeeIntegrationHeader}
+          onIntegrationHeader={(v) => set("carrybeeIntegrationHeader", v)}
+          integrationHeaderName="X-CB-Webhook-Integration-Header"
+          integrationPlaceholder="40489fe0-…"
+          url={urlOf(current.carrybeeWebhookPath)}
+        />
       </Section>
 
       <Section title="BDCourier" note="Delivery ratio lookup" status={bdcourierStatus}>
@@ -541,6 +496,118 @@ export function SettingsForm({
         </p>
       </div>
     </form>
+  );
+}
+
+/**
+ * A courier's status webhook: the secret it signs with, the value its
+ * integration check must get back, and the store's URL to paste into its
+ * panel. Pathao and Carrybee ask for the same three things.
+ */
+function WebhookFields({
+  courier,
+  id,
+  secretSet,
+  secretHint,
+  secret,
+  onSecret,
+  integrationHeader,
+  onIntegrationHeader,
+  integrationHeaderName,
+  integrationPlaceholder,
+  url,
+}: {
+  courier: string;
+  id: string;
+  secretSet: boolean;
+  secretHint: string | null;
+  secret: string | undefined;
+  onSecret: (value: string | undefined) => void;
+  integrationHeader: string;
+  onIntegrationHeader: (value: string) => void;
+  integrationHeaderName: string;
+  integrationPlaceholder: string;
+  url: string | null;
+}) {
+  // A secret generated here is shown in clear while it is still the draft,
+  // so it can be copied into the courier's panel; once saved (the draft goes
+  // back to "keep") only its hint is ever shown.
+  const [generated, setGenerated] = React.useState<string | null>(null);
+  const shown = generated !== null && secret === generated ? generated : null;
+
+  return (
+    <>
+      <Field label="Webhook secret" htmlFor={id}>
+        <div className="flex flex-col gap-2">
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <SecretInput
+                id={id}
+                isSet={secretSet}
+                hint={secretHint}
+                value={secret}
+                onChange={onSecret}
+              />
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              onClick={() => {
+                const value = randomSecret();
+                setGenerated(value);
+                onSecret(value);
+              }}
+            >
+              Generate
+            </Button>
+          </div>
+          {shown && (
+            <div className="flex items-center gap-2 text-xs">
+              <code className="min-w-0 truncate rounded bg-muted px-2 py-1 font-mono">{shown}</code>
+              <CopyButton text={shown} />
+              <span className="text-muted-foreground">Copy it into {courier}, then save.</span>
+            </div>
+          )}
+        </div>
+      </Field>
+      <Field label="Integration header" htmlFor={`${id}-integration`}>
+        <div className="flex flex-col gap-1.5">
+          <Input
+            id={`${id}-integration`}
+            maxLength={100}
+            autoComplete="off"
+            className="font-mono"
+            placeholder={integrationPlaceholder}
+            value={integrationHeader}
+            onChange={(e) => onIntegrationHeader(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            Copy the value {courier} shows for the header {integrationHeaderName} on its
+            Webhook Integration page.
+          </p>
+        </div>
+      </Field>
+      <Field label="Webhook URL">
+        {url ? (
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-2">
+              <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1.5 font-mono text-xs">{url}</code>
+              <CopyButton text={url} />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Paste this URL and the webhook secret into {courier} → Webhook Integration, and select all events.
+              Delivery statuses then arrive by themselves.
+            </p>
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Switch {courier} on and save to get the store&apos;s webhook URL.
+          </p>
+        )}
+      </Field>
+    </>
   );
 }
 

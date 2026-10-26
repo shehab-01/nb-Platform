@@ -69,6 +69,8 @@ def test_redact_exposes_flags_and_hints_only(monkeypatch):
         pathao_email="a@b.c", pathao_password_enc=crypto.encrypt("pw"),
         pathao_store_id=7, pathao_item_type="parcel",
         pathao_parcel_weight_kg=Decimal("1.5"), pathao_enabled=True,
+        pathao_webhook_secret_enc=crypto.encrypt("phooksecret2222"),
+        pathao_webhook_token="ptok", pathao_integration_header="f3992ecc",
         carrybee_enabled=True, carrybee_client_id="cb-id",
         carrybee_client_secret_enc=crypto.encrypt("cbsecret4321"),
         carrybee_client_context_enc=crypto.encrypt("cbcontext8765"),
@@ -80,8 +82,10 @@ def test_redact_exposes_flags_and_hints_only(monkeypatch):
     out = redact(row)  # type: ignore[arg-type]
     dumped = out.model_dump_json()
     assert "EAABtoken9999" not in dumped and "courierkey0001" not in dumped and '"pw"' not in dumped
-    for secret in ("cbsecret4321", "cbcontext8765", "hooksecret1111"):
+    for secret in ("cbsecret4321", "cbcontext8765", "hooksecret1111", "phooksecret2222"):
         assert secret not in dumped
+    assert out.pathao_webhook_secret_set and out.pathao_webhook_secret_hint == "2222"
+    assert out.pathao_webhook_path == "/api/webhooks/pathao/ptok"
     assert out.carrybee_client_secret_hint == "4321"
     assert out.carrybee_client_context_set and out.carrybee_webhook_secret_set
     assert out.carrybee_webhook_path == "/api/webhooks/carrybee/tok123"

@@ -439,17 +439,22 @@ class MetaCapiFailedEvent(Base):
 
 class PathaoSyncRun(Base):
     """
-    One staff-started pass over every unsettled parcel of a store (see
-    api.services.pathao_sync.full_sync). Progress lives here rather than in
-    memory because the API runs several workers: the one doing the work is
-    rarely the one answering the progress poll.
+    One staff-started pass over every unsettled parcel of a store with one
+    courier (see api.services.courier_full_sync). Progress lives here rather
+    than in memory because the API runs several workers: the one doing the
+    work is rarely the one answering the progress poll. The table predates
+    Carrybee, hence its name.
     """
 
     __tablename__ = "pathao_sync_runs"
-    __table_args__ = (Index("ix_pathao_sync_runs_store_id_id", "store_id", "id"),)
+    __table_args__ = (
+        Index("ix_pathao_sync_runs_store_id_provider_id", "store_id", "provider", "id"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="CASCADE"))
+    # api.services.courier.PATHAO or CARRYBEE.
+    provider: Mapped[str] = mapped_column(String(20), nullable=False)
     started_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
@@ -758,6 +763,14 @@ class StoreSettings(Base):
     # everywhere but keeps its credentials.
     pathao_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false")
+    )
+    # Pathao's status webhook, as Carrybee's below: what Pathao sends in
+    # X-PATHAO-Signature, the URL's store-naming token, and the value its
+    # panel says the integration check must get back.
+    pathao_webhook_secret_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
+    pathao_webhook_token: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
+    pathao_integration_header: Mapped[str] = mapped_column(
+        String(100), default="", server_default=""
     )
     carrybee_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false")

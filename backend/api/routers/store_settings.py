@@ -58,6 +58,7 @@ ItemType = Literal["document", "parcel", "fragile"]
 CarrybeeProductType = Literal[1, 2, 3]
 
 WEBHOOK_PATH = "/api/webhooks/carrybee/"
+PATHAO_WEBHOOK_PATH = "/api/webhooks/pathao/"
 
 
 class StoreSettingsOut(BaseModel):
@@ -76,6 +77,11 @@ class StoreSettingsOut(BaseModel):
     pathao_item_type: str
     pathao_enabled: bool
     pathao_parcel_weight_kg: Decimal
+    pathao_webhook_secret_set: bool
+    pathao_webhook_secret_hint: str | None
+    # Where Pathao should post status changes, like carrybee_webhook_path.
+    pathao_webhook_path: str | None
+    pathao_integration_header: str
     carrybee_enabled: bool
     carrybee_client_id: str
     carrybee_client_secret_set: bool
@@ -111,6 +117,8 @@ class StoreSettingsUpdate(BaseModel):
     # switches a courier off by leaving the field out.
     pathao_enabled: bool | None = None
     pathao_parcel_weight_kg: Decimal = Field(default=Decimal("1"), ge=Decimal("0.5"), le=Decimal("10"))
+    pathao_webhook_secret: str | None = Field(default=None, max_length=500)
+    pathao_integration_header: str = Field(default="", max_length=100)
     carrybee_enabled: bool | None = None
     carrybee_client_id: str = Field(default="", max_length=120)
     carrybee_client_secret: str | None = Field(default=None, max_length=500)
@@ -146,6 +154,8 @@ def redact(row: StoreSettings | None) -> StoreSettingsOut:
             pathao_email="", pathao_password_set=False, pathao_store_id=None,
             pathao_item_type="parcel", pathao_enabled=False,
             pathao_parcel_weight_kg=Decimal("1"),
+            pathao_webhook_secret_set=False, pathao_webhook_secret_hint=None,
+            pathao_webhook_path=None, pathao_integration_header="",
             carrybee_enabled=False, carrybee_client_id="",
             carrybee_client_secret_set=False, carrybee_client_secret_hint=None,
             carrybee_client_context_set=False, carrybee_client_context_hint=None,
@@ -162,6 +172,7 @@ def redact(row: StoreSettings | None) -> StoreSettingsOut:
     cb_secret = peek(row.carrybee_client_secret_enc)
     cb_context = peek(row.carrybee_client_context_enc)
     cb_webhook = peek(row.carrybee_webhook_secret_enc)
+    p_webhook = peek(row.pathao_webhook_secret_enc)
     return StoreSettingsOut(
         meta_pixel_id=row.meta_pixel_id,
         meta_test_event_code=row.meta_test_event_code,
@@ -176,6 +187,12 @@ def redact(row: StoreSettings | None) -> StoreSettingsOut:
         pathao_item_type=row.pathao_item_type,
         pathao_enabled=row.pathao_enabled,
         pathao_parcel_weight_kg=row.pathao_parcel_weight_kg,
+        pathao_webhook_secret_set=p_webhook[0],
+        pathao_webhook_secret_hint=p_webhook[1],
+        pathao_webhook_path=(
+            PATHAO_WEBHOOK_PATH + row.pathao_webhook_token if row.pathao_webhook_token else None
+        ),
+        pathao_integration_header=row.pathao_integration_header,
         carrybee_enabled=row.carrybee_enabled,
         carrybee_client_id=row.carrybee_client_id,
         carrybee_client_secret_set=cb_secret[0],
@@ -231,7 +248,7 @@ async def put_settings(
             payload.meta_capi_token, payload.pathao_client_secret,
             payload.pathao_password, payload.bdcourier_api_key,
             payload.carrybee_client_secret, payload.carrybee_client_context,
-            payload.carrybee_webhook_secret,
+            payload.carrybee_webhook_secret, payload.pathao_webhook_secret,
         )
     )
     if wants_secret and not crypto.available():
@@ -253,6 +270,10 @@ async def put_settings(
     row.pathao_store_id = payload.pathao_store_id
     row.pathao_item_type = payload.pathao_item_type
     row.pathao_parcel_weight_kg = payload.pathao_parcel_weight_kg
+    row.pathao_webhook_secret_enc = apply_secret(
+        row.pathao_webhook_secret_enc, payload.pathao_webhook_secret
+    )
+    row.pathao_integration_header = payload.pathao_integration_header.strip()
     if payload.pathao_enabled is not None:
         row.pathao_enabled = payload.pathao_enabled
     if payload.carrybee_enabled is not None:
@@ -275,6 +296,8 @@ async def put_settings(
     # then never changes: it is pasted into Carrybee's panel once.
     if row.carrybee_enabled and not row.carrybee_webhook_token:
         row.carrybee_webhook_token = secrets.token_urlsafe(24)
+    if row.pathao_enabled and not row.pathao_webhook_token:
+        row.pathao_webhook_token = secrets.token_urlsafe(24)
     row.bdcourier_api_key_enc = apply_secret(row.bdcourier_api_key_enc, payload.bdcourier_api_key)
     await session.commit()
     await session.refresh(row)

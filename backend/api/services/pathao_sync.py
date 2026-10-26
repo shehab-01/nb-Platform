@@ -11,8 +11,8 @@ Runs inside the API process, like the traffic-minutes flusher. With several
 worker processes only one polls at a time: the batch takes a transaction-level
 advisory lock, and a worker that finds it taken simply skips its turn.
 
-Staff can also start a full sync (full_sync): one pass over every unsettled
-parcel of their store, oldest booking first, with its progress recorded in
+Staff can also start a full sync (api.services.courier_full_sync): one pass
+over every unsettled parcel of their store, with its progress recorded in
 pathao_sync_runs. While one runs, the poll leaves that store alone so the two
 never ask Pathao about the same parcels side by side.
 """
@@ -21,15 +21,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import stores
 from api.db import async_session
-from api.models import Order, OrderEvent, PathaoSyncRun, Store
-from api.services import pathao
+from api.models import Order, OrderEvent, Store
+from api.services import courier_full_sync, pathao
 from api.services.courier import PATHAO, PATHAO_SETTLED
 
 log = logging.getLogger("pathao_sync")
@@ -45,19 +45,6 @@ RATE_LIMIT_BACKOFF_SECONDS = 30
 RATE_LIMIT_MAX_RETRIES = 2
 # Any arbitrary constant; it only has to be the same in every worker.
 ADVISORY_LOCK_KEY = 7_420_010
-
-# A full sync is thousands of calls in a row, so it goes a little slower than
-# the poll, and waits out a 429 for longer before giving up on the run.
-FULL_SYNC_BETWEEN_CALLS_SECONDS = 1.5
-FULL_SYNC_BACKOFF_SECONDS = (30, 60, 120, 240)
-# A running run whose heartbeat is older than this lost its worker (deploy,
-# restart) and is reported as interrupted; a new one may start.
-RUN_STALE_AFTER = timedelta(minutes=5)
-# Enough to see a pattern without growing a row without bound.
-FAILURES_KEPT = 500
-# Serialises starting a run per store across workers (high bits; the store
-# id fills the low 32).
-START_LOCK_KEY = 7_420_011
 
 # Where a parcel's story ends, as Pathao spells its statuses (compared in
 # lower case). Anything else is still in flight and worth asking about.
@@ -93,9 +80,13 @@ async def refresh_order(
     PathaoError when Pathao could not be asked."""
     info = await pathao.order_info(cfg, order.store_id, order.courier_consignment_id)
     status = info.raw.get("order_status_slug") or info.order_status or None
-    order.courier_checked_at = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    order.courier_checked_at = now
     if status != order.courier_status:
         order.courier_status = status
+        # The answer is true as of now, so a webhook event from before it,
+        # arriving late, cannot put an older status back.
+        order.courier_status_at = now
         session.add(
             OrderEvent(
                 store_id=order.store_id,
@@ -106,6 +97,132 @@ async def refresh_order(
             )
         )
     return status
+
+
+# --- Webhook ------------------------------------------------------------------
+
+# Pathao's webhook names a status by event ("order.pickup-requested") while
+# its order-info call, which the poll reads, spells it as a slug
+# ("Pickup_Requested"). Events become the poll's spelling, so one order
+# never carries two spellings of the same state and the Delivery filter lists
+# each state once. Keys are the event with "order." removed and "-" / "_"
+# unified; several spellings of one event are listed where Pathao's docs and
+# panel disagree.
+WEBHOOK_STATUSES = {
+    "pickup-requested": "Pickup_Requested",
+    "assigned-for-pickup": "Assigned_for_Pickup",
+    "picked": "Picked",
+    "pickup": "Picked",
+    "picked-up": "Picked",
+    "pickup-failed": "Pickup_Failed",
+    "pickup-cancelled": "Pickup_Cancelled",
+    "pickup-canceled": "Pickup_Cancelled",
+    "at-the-sorting-hub": "At_the_Sorting_HUB",
+    "in-transit": "In_Transit",
+    "received-at-last-mile-hub": "Received_at_Last_Mile_HUB",
+    "assigned-for-delivery": "Assigned_for_Delivery",
+    "delivered": "Delivered",
+    "partial-delivery": "Partial_Delivery",
+    "return": "Return",
+    "returned": "Return",
+    "delivery-failed": "Delivery_Failed",
+    "on-hold": "On_Hold",
+    "paid-return": "Paid_Return",
+    "exchange": "Exchange",
+    "exchanged": "Exchange",
+    "return-id-created": "Return_Id_Created",
+    "return-in-transit": "Return_In_Transit",
+    "returned-to-merchant": "Returned_To_Merchant",
+}
+# Events that report bookkeeping or money, never where the parcel is. The
+# payment invoice in particular comes after "Delivered" and must not
+# replace it.
+NOT_A_STATUS = {"created", "updated", "paid", "payment-invoice", "invoice"}
+
+
+def webhook_event(raw: str | None) -> str:
+    """The event's key in WEBHOOK_STATUSES: "order.Pickup_Requested" and
+    "order.pickup-requested" both become "pickup-requested"."""
+    text = (raw or "").strip().lower()
+    if text.startswith("order."):
+        text = text[len("order."):]
+    return "-".join(part for part in text.replace("_", "-").replace(" ", "-").split("-") if part)
+
+
+def parse_time(raw: object) -> datetime | None:
+    """The event's ISO 8601 "timestamp" with its zone, or None."""
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return value if value.tzinfo is not None else None
+
+
+def apply_status(
+    session: AsyncSession,
+    order: Order,
+    status: str,
+    at: datetime | None,
+) -> bool:
+    """Put a status the webhook reported on the order, with an audit event
+    when it changed. Returns whether it did. An event older than the status
+    the order already has is ignored: webhooks can arrive out of order, and
+    the poll stamps what it read with the time it read it."""
+    now = datetime.now(timezone.utc)
+    if at is not None and at > now:
+        # A clock ahead of ours must not shut out every later event.
+        at = now
+    if at is not None and order.courier_status_at is not None and at < order.courier_status_at:
+        return False
+    if at is not None:
+        order.courier_status_at = at
+    if status.lower() == (order.courier_status or "").lower():
+        # The same state, perhaps in the poll's capitalisation; keep that.
+        return False
+    order.courier_status = status
+    session.add(
+        OrderEvent(
+            store_id=order.store_id,
+            order_id=order.id,
+            event_type="pathao_status",
+            note=status,
+        )
+    )
+    return True
+
+
+async def handle_event(session: AsyncSession, store_id: int, payload: dict) -> str:
+    """Apply one webhook event to the store's order. Returns what happened,
+    for the log. Never raises for an unknown parcel or event: Pathao only
+    needs to hear that we took it."""
+    raw_event = str(payload.get("event") or "")
+    consignment_id = str(payload.get("consignment_id") or "").strip()
+    if not raw_event.lower().startswith("order.") or not consignment_id:
+        return f"ignored: {raw_event or 'no event'}"
+    event = webhook_event(raw_event)
+    order = await session.scalar(
+        select(Order)
+        .where(
+            Order.store_id == store_id,
+            Order.courier_provider == PATHAO,
+            Order.courier_consignment_id == consignment_id,
+        )
+        .with_for_update(of=Order)
+    )
+    if order is None:
+        # Booked from Pathao's own panel, or for another of our stores.
+        return f"ignored: unknown consignment {consignment_id}"
+    if event in NOT_A_STATUS:
+        return f"ignored: {event}"
+    status = WEBHOOK_STATUSES.get(event)
+    if status is None:
+        # A status this code has not met. The poll will read it in Pathao's
+        # own spelling; guessing one here could list the state twice.
+        return f"ignored: unknown event {raw_event}"
+    changed = apply_status(session, order, status, parse_time(payload.get("timestamp")))
+    return f"{status}: {'applied' if changed else 'unchanged'}"
 
 
 async def poll_once() -> int:
@@ -122,7 +239,7 @@ async def poll_once() -> int:
             await session.scalars(select(Store.id).where(Store.is_active.is_(True)))
         ).all()
         for store_id in store_ids:
-            if await live_run(session, store_id) is not None:
+            if await courier_full_sync.live_run(session, store_id, PATHAO) is not None:
                 # Staff are running a full sync for this store right now.
                 continue
             integrations = await stores.load_integrations(session, store_id)
@@ -178,202 +295,6 @@ async def poll_once() -> int:
         return asked
 
 
-# --- Full sync, started by staff ---------------------------------------------
-
-
-def run_is_live(run: PathaoSyncRun) -> bool:
-    return run.status in ("running", "stopping") and (
-        run.heartbeat_at > datetime.now(timezone.utc) - RUN_STALE_AFTER
-    )
-
-
-def run_state(run: PathaoSyncRun) -> str:
-    """The status staff see: a run whose worker died reads "interrupted"."""
-    if run.status in ("running", "stopping") and not run_is_live(run):
-        return "interrupted"
-    return run.status
-
-
-async def latest_run(session: AsyncSession, store_id: int) -> PathaoSyncRun | None:
-    return await session.scalar(
-        select(PathaoSyncRun)
-        .where(PathaoSyncRun.store_id == store_id)
-        .order_by(PathaoSyncRun.id.desc())
-        .limit(1)
-    )
-
-
-async def live_run(session: AsyncSession, store_id: int) -> PathaoSyncRun | None:
-    run = await latest_run(session, store_id)
-    return run if run is not None and run_is_live(run) else None
-
-
-async def start_full_sync(
-    session: AsyncSession, store_id: int, actor_id: int | None
-) -> PathaoSyncRun:
-    """Record a new run and start it in this worker, unless one is already
-    going for the store — then that one is returned. Commits."""
-    # Two staff (or two workers) pressing Sync at once must not start two.
-    await session.execute(
-        select(func.pg_advisory_xact_lock((START_LOCK_KEY << 32) | store_id))
-    )
-    current = await live_run(session, store_id)
-    if current is not None:
-        await session.commit()
-        return current
-    run = PathaoSyncRun(store_id=store_id, started_by=actor_id, status="running")
-    session.add(run)
-    await session.commit()
-    await session.refresh(run)
-    _spawn(full_sync(run.id, store_id, actor_id))
-    return run
-
-
-async def request_stop(session: AsyncSession, store_id: int) -> PathaoSyncRun | None:
-    """Ask the live run to stop after the parcel it is on. Commits."""
-    run = await live_run(session, store_id)
-    if run is None:
-        return None
-    await session.execute(
-        update(PathaoSyncRun)
-        .where(PathaoSyncRun.id == run.id, PathaoSyncRun.status == "running")
-        .values(status="stopping")
-    )
-    await session.commit()
-    await session.refresh(run)
-    return run
-
-
-async def _finish(run_id: int, status: str, error: str | None = None) -> None:
-    async with async_session() as session, session.begin():
-        await session.execute(
-            update(PathaoSyncRun)
-            .where(PathaoSyncRun.id == run_id)
-            .values(
-                status=status,
-                error=error,
-                finished_at=func.now(),
-                heartbeat_at=func.now(),
-            )
-        )
-
-
-async def full_sync(run_id: int, store_id: int, actor_id: int | None) -> None:
-    """Ask Pathao about every unsettled parcel of the store once, oldest
-    booking first, one call at a time. Each parcel is committed on its own,
-    so the lists show the answers as they arrive and a crash keeps them."""
-    try:
-        async with async_session() as session, session.begin():
-            integrations = await stores.load_integrations(session, store_id)
-            if integrations is None or not integrations.pathao.enabled:
-                run = await session.get(PathaoSyncRun, run_id)
-                run.status = "failed"
-                run.error = "Pathao is not configured for this store"
-                run.finished_at = datetime.now(timezone.utc)
-                return
-            cfg = integrations.pathao
-            # Fixed at the start, so "812 of 2,000" means the same 2,000
-            # throughout even as parcels settle along the way.
-            order_ids = (
-                await session.scalars(
-                    select(Order.id)
-                    .where(*_unsettled(store_id))
-                    .order_by(Order.courier_sent_at.asc().nulls_first(), Order.id)
-                )
-            ).all()
-            run = await session.get(PathaoSyncRun, run_id)
-            run.total = len(order_ids)
-            run.heartbeat_at = datetime.now(timezone.utc)
-
-        for order_id in order_ids:
-            async with async_session() as session, session.begin():
-                run = await session.get(PathaoSyncRun, run_id)
-                if run is None or run.status != "running":
-                    if run is not None and run.status == "stopping":
-                        run.status = "stopped"
-                        run.finished_at = datetime.now(timezone.utc)
-                    return
-                order = await session.get(Order, order_id)
-                if order is None or not order.courier_consignment_id:
-                    run.checked += 1
-                    run.heartbeat_at = datetime.now(timezone.utc)
-                    continue
-                before = order.courier_status
-                error: pathao.PathaoError | None = None
-                for backoff in (*FULL_SYNC_BACKOFF_SECONDS, None):
-                    try:
-                        await refresh_order(session, order, cfg, actor_id=actor_id)
-                        error = None
-                        break
-                    except pathao.PathaoError as exc:
-                        error = exc
-                        if not pathao.is_rate_limited(exc) or backoff is None:
-                            break
-                        log.warning(
-                            "Pathao full sync: rate limited, backing off %ds (%s)",
-                            backoff,
-                            order.courier_consignment_id,
-                        )
-                        # Keep the heartbeat fresh through a long back-off.
-                        await session.execute(
-                            update(PathaoSyncRun)
-                            .where(PathaoSyncRun.id == run_id)
-                            .values(heartbeat_at=func.now())
-                        )
-                        await asyncio.sleep(backoff)
-
-                run.checked += 1
-                run.heartbeat_at = datetime.now(timezone.utc)
-                if error is not None:
-                    order.courier_checked_at = datetime.now(timezone.utc)
-                    run.failed += 1
-                    log.warning(
-                        "Pathao full sync: %s (%s): HTTP %s %s",
-                        order.courier_consignment_id,
-                        order.order_no,
-                        error.status,
-                        pathao.error_text(error),
-                    )
-                    if len(run.failures) < FAILURES_KEPT:
-                        # A new list, so SQLAlchemy sees the JSONB change.
-                        run.failures = [
-                            *run.failures,
-                            {
-                                "order_id": order.id,
-                                "consignment_id": order.courier_consignment_id,
-                                "error": pathao.error_text(error),
-                            },
-                        ]
-                    if pathao.is_rate_limited(error):
-                        run.status = "failed"
-                        run.error = (
-                            "Pathao kept refusing requests (too many). "
-                            "Wait a while and start the sync again."
-                        )
-                        run.finished_at = datetime.now(timezone.utc)
-                        return
-                elif order.courier_status != before:
-                    run.changed += 1
-                    if (order.courier_status or "").lower() == "delivered":
-                        run.delivered += 1
-            await asyncio.sleep(FULL_SYNC_BETWEEN_CALLS_SECONDS)
-
-        await _finish(run_id, "done")
-    except Exception:  # noqa: BLE001 - the run must end visibly, never hang
-        log.exception("Pathao full sync %s failed", run_id)
-        await _finish(run_id, "failed", "The sync stopped on an unexpected error")
-
-
-# Strong references so a running sync is not garbage-collected mid-way.
-_runs: set[asyncio.Task] = set()
-
-
-def _spawn(coro) -> None:
-    task = asyncio.create_task(coro)
-    _runs.add(task)
-    task.add_done_callback(_runs.discard)
-
-
 async def _loop() -> None:
     await asyncio.sleep(FIRST_POLL_DELAY_SECONDS)
     while True:
@@ -397,5 +318,3 @@ def start() -> None:
 async def stop() -> None:
     if _task is not None:
         _task.cancel()
-    for task in list(_runs):
-        task.cancel()

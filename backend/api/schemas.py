@@ -380,17 +380,18 @@ class CourierOption(BaseModel):
     sandbox: bool
 
 
-class PathaoSyncFailure(BaseModel):
+class CourierSyncFailure(BaseModel):
     order_id: int
     order_no: str
     consignment_id: str
     error: str
 
 
-class PathaoSyncRunOut(BaseModel):
-    """A staff-started full Pathao sync and how far it has got."""
+class CourierSyncRunOut(BaseModel):
+    """A staff-started full sync with one courier and how far it has got."""
 
     id: int
+    courier: CourierName
     # running | stopping | done | stopped | failed | interrupted
     status: str
     total: int
@@ -398,7 +399,7 @@ class PathaoSyncRunOut(BaseModel):
     changed: int
     delivered: int
     failed: int
-    failures: list[PathaoSyncFailure]
+    failures: list[CourierSyncFailure]
     error: str | None
     started_at: datetime
     finished_at: datetime | None

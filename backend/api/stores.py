@@ -275,6 +275,10 @@ class PathaoConfig:
     store_id: int = 0
     item_type: str = "parcel"
     unit_weight_kg: float = 1.0
+    webhook_secret: str = ""
+    webhook_token: str = ""
+    # The value the integration check must get back (Pathao's panel shows it).
+    integration_header: str = ""
     # The store's switch for Pathao on its Settings page.
     switched_on: bool = True
 
@@ -372,6 +376,9 @@ def integrations_from(store: Store, row: StoreSettings | None) -> Integrations:
             store_id=int(row.pathao_store_id or 0),
             item_type=row.pathao_item_type or "parcel",
             unit_weight_kg=float(row.pathao_parcel_weight_kg or 1),
+            webhook_secret=_decrypt(row.pathao_webhook_secret_enc),
+            webhook_token=row.pathao_webhook_token or "",
+            integration_header=row.pathao_integration_header or "",
             switched_on=bool(row.pathao_enabled),
         ),
         bdcourier_api_key=_decrypt(row.bdcourier_api_key_enc),

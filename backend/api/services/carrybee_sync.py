@@ -4,9 +4,9 @@ Carrybee posts every status change to the store's webhook
 (api.routers.webhooks), so the normal path costs no calls at all: the event
 lands on the order within seconds. Webhooks can be lost, though — a deploy,
 an outage, a Carrybee retry that gave up — so a slow poll backs them up:
-every hour, each unsettled Carrybee parcel that nobody has heard about for
+every half hour, each unsettled Carrybee parcel that nobody has heard about for
 STALE_AFTER is asked about once. With webhooks working that is a handful of
-calls; without them it still settles every parcel within a few hours.
+calls; without them every parcel is still at most a few hours behind.
 
 Events can also arrive out of order. Each carries Carrybee's own timestamp,
 kept in orders.courier_status_at, and an event older than the status the
@@ -29,15 +29,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api import stores
 from api.db import async_session
 from api.models import Order, OrderEvent, Store
-from api.services import carrybee
+from api.services import carrybee, courier_full_sync
 from api.services.courier import CARRYBEE, CARRYBEE_SETTLED
 
 log = logging.getLogger("carrybee_sync")
 
-POLL_EVERY_SECONDS = 60 * 60
+POLL_EVERY_SECONDS = 30 * 60
 FIRST_POLL_DELAY_SECONDS = 120
-STALE_AFTER = timedelta(hours=6)
-BATCH_LIMIT = 200
+# Short enough that a missed webhook is not noticed by staff first.
+STALE_AFTER = timedelta(hours=2)
+# ~1,500 parcels are in flight at once; 200 a round left each one asked only
+# every few hours while webhooks were not arriving.
+BATCH_LIMIT = 600
 BETWEEN_CALLS_SECONDS = 1.0
 # Any constant, different from the Pathao poller's.
 ADVISORY_LOCK_KEY = 7_420_020
@@ -58,8 +61,13 @@ def apply_status(
     """Put a status Carrybee reported on the order, with an audit event when
     it changed. Returns whether it did. A status older than the one the
     order has (by Carrybee's clock) is ignored."""
-    if not status:
+    if not status or status in NOT_A_STATUS:
         return False
+    now = datetime.now(timezone.utc)
+    if at is not None and at > now:
+        # A timestamp ahead of our clock (a zone written wrongly) would make
+        # every real event until then look older and be dropped.
+        at = now
     if at is not None and order.courier_status_at is not None and at < order.courier_status_at:
         return False
     if at is not None:
@@ -163,6 +171,9 @@ async def poll_once() -> int:
             await session.scalars(select(Store.id).where(Store.is_active.is_(True)))
         ).all()
         for store_id in store_ids:
+            if await courier_full_sync.live_run(session, store_id, CARRYBEE) is not None:
+                # Staff are running a full sync for this store right now.
+                continue
             integrations = await stores.load_integrations(session, store_id)
             if integrations is None or not integrations.carrybee.enabled:
                 continue

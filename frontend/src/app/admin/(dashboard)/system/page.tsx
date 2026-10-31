@@ -679,7 +679,9 @@ export default function SystemPage() {
               </Table>
             </div>
             <p className="text-xs text-muted-foreground">
-              One order per phone number per {data.rate_limits.order_cooldown_hours}h.
+              {data.rate_limits.order_cooldown_hours > 0
+                ? `One order per phone number per ${data.rate_limits.order_cooldown_hours}h.`
+                : "One storefront order per phone number, ever."}
               {data.rate_limits.limiters.some((l) => l.seen_blind_requests) && (
                 <span className="ml-1 text-[#b97f00] dark:text-[#fab219]">
                   <AlertTriangle className="mr-1 inline size-3" />

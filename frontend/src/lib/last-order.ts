@@ -6,7 +6,11 @@
 // "we'll call you on…" — instead of an empty form that would only refuse them.
 
 const KEY = "nb_last_order";
-/** Matches ORDER_COOLDOWN_HOURS on the API. */
+/**
+ * How long this device shows the confirmation in place of the form. The API
+ * refuses the number for good; this stays short so someone else on the same
+ * phone can still order with their own number.
+ */
 const REMEMBER_MS = 24 * 60 * 60_000;
 
 export type LastOrder = {

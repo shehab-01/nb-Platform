@@ -453,23 +453,24 @@ async def create_order(
             else "Nothing is on sale right now",
         )
 
-    # One order per number per cooldown window. This is an index lookup on
-    # phone_key, so it stays fast however large the table grows; only the
-    # handful of rows for this one number are ever touched. Incomplete rows
-    # don't count — an abandoned form isn't an order.
-    cooldown_start = datetime.now(timezone.utc) - timedelta(
-        hours=settings.order_cooldown_hours
-    )
-    recent = await session.scalar(
-        select(Order.id)
-        .where(
-            Order.store_id == store.id,
-            Order.phone_key == key,
-            Order.status != OrderStatus.incomplete.value,
-            Order.created_at >= cooldown_start,
+    # One storefront order per number. With ORDER_COOLDOWN_HOURS=0 (the
+    # default) that is for good: any earlier order from this number in this
+    # store, cancelled ones included, refuses the new one; staff can still
+    # take a repeat order from the admin. A positive value narrows it back to
+    # a window. This is an index lookup on phone_key, so it stays fast however
+    # large the table grows. Incomplete rows don't count — an abandoned form
+    # isn't an order.
+    filters = [
+        Order.store_id == store.id,
+        Order.phone_key == key,
+        Order.status != OrderStatus.incomplete.value,
+    ]
+    if settings.order_cooldown_hours > 0:
+        filters.append(
+            Order.created_at
+            >= datetime.now(timezone.utc) - timedelta(hours=settings.order_cooldown_hours)
         )
-        .limit(1)
-    )
+    recent = await session.scalar(select(Order.id).where(*filters).limit(1))
     if recent is not None:
         # Deliberately says nothing beyond "not now": no order number, no
         # name, nothing a stranger could learn by trying numbers.

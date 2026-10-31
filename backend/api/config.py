@@ -37,9 +37,11 @@ class Settings:
     # this window while it is open.
     claim_ttl_minutes: int = int(os.getenv("CLAIM_TTL_MINUTES", "10"))
 
-    # One order per phone number per this many hours. Stops double-taps and
-    # repeat spam without any state beyond the orders table itself.
-    order_cooldown_hours: int = int(os.getenv("ORDER_COOLDOWN_HOURS", "24"))
+    # One storefront order per phone number per this many hours; 0 (the
+    # default) means ever — a number that has ordered once is refused for
+    # good. Stops double-taps and repeat orders without any state beyond the
+    # orders table itself.
+    order_cooldown_hours: int = int(os.getenv("ORDER_COOLDOWN_HOURS", "0"))
 
     # Per-IP limits on the public endpoints, per window; 0 disables one.
     # Generous on purpose: mobile carriers here put thousands of customers

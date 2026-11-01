@@ -22,11 +22,14 @@ const GOLD_THEME: Record<string, string> = {
  * campaign pitch and a pulsing gold button first, then the how-to strip,
  * prizes, product showcase and offer, each fading up as it scrolls into
  * view, and finally the classic order card restyled as a cream receipt.
- * Every picture comes from `store.content` (the store's own or the default).
+ * Every picture comes from `store.content` (the store's own or the default);
+ * the headline and draw date from `store.options`.
  */
 export function Storefront(props: StorefrontProps) {
   const c = props.store.content;
   const s = props.store.contentSrcset;
+  // The headline and draw date are the store's own words (store.options).
+  const o = props.store.options;
   // The dark ground and gold are this template's look, not something a
   // store's saved palette (made for the light classic page) should be able
   // to undo: the template's values win, anything else passes through.
@@ -95,9 +98,9 @@ export function Storefront(props: StorefrontProps) {
             <section className="c2-intro">
               <span className="c2-kicker">নেচার বাজার মিলিয়নিয়ার ক্যাম্পেইন</span>
               <h1>
-                <span className="c2-line">ফাইনাল ড্র</span>
+                <span className="c2-line">{o.headline}</span>
                 <br />
-                <span className="c2-line">অক্টোবর ৩০ তারিখ</span>
+                <span className="c2-line">{o.draw_date}</span>
               </h1>
               <p>
                 স্পেশাল আচার কম্বো অর্ডার করে অংশ নিন দশ লাখ টাকা ক্যাশ ও এক হাজার+ গিফট

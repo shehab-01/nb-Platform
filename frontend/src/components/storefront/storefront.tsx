@@ -315,7 +315,7 @@ export function Storefront({ product }: { product: StorefrontProduct }) {
               </label>
               {submitError === "address" && (
                 <p className="form-error">
-                  সম্পূর্ণ ঠিকানা লিখুন — বাসা/রোড, এলাকা, জেলা (কমপক্ষে ৩ শব্দ, শুধু সংখ্যা নয়)।
+                  সম্পূর্ণ ঠিকানা লিখুন — বাসা/রোড, এলাকা, জেলা (কমপক্ষে ২ শব্দ, শুধু সংখ্যা নয়)।
                 </p>
               )}
               {submitError === "phone" && (

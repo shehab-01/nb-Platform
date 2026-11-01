@@ -3,16 +3,16 @@ What counts as a usable delivery address on the storefront.
 
 Customers were submitting a single word ("Dhaka") or just a number, which no
 courier can deliver to and which costs a confirmation call to fix. The rule is
-deliberately loose: at least three words, and not only numbers. Applied only
+deliberately loose: at least two words, and not only numbers. Applied only
 when an order is actually placed; autosaved drafts keep whatever was typed.
 The browser mirrors this rule in lib/address.ts.
 """
 import re
 
-ADDRESS_MIN_WORDS = 3
+ADDRESS_MIN_WORDS = 2
 ADDRESS_RULE = (
-    f"Address must have at least {ADDRESS_MIN_WORDS} words (house/road, area, "
-    "district) and cannot be only numbers"
+    f"Address must have at least {ADDRESS_MIN_WORDS} words (e.g. area, district) "
+    "and cannot be only numbers"
 )
 
 # A word is a run of characters containing a letter or a digit, broken by

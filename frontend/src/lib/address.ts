@@ -1,13 +1,13 @@
 /**
  * What counts as a usable delivery address, checked when the order form is
  * submitted. Customers were sending one word ("Dhaka") or just a number, so
- * the rule is: at least three words, and not only numbers. Mirrors
+ * the rule is: at least two words, and not only numbers. Mirrors
  * api/address.py, which is the real guard; this copy exists so the customer
  * is asked to fix it before the request leaves the browser. Autosaved drafts
  * are never checked: an abandoned form is a lead, however rough.
  */
 
-export const ADDRESS_MIN_WORDS = 3;
+export const ADDRESS_MIN_WORDS = 2;
 
 // A word is a run of characters containing a letter or a digit, broken by
 // spaces or by the separators people type in place of them ("khairtul,03,

@@ -16,9 +16,14 @@ describe("isValidAddress", () => {
     "Mirpur Dhaka",
     "Mirpur,Dhaka",
     "মিরপুর ঢাকা",
+    "Dhaka",
+    "ঢাকা",
+    ",,,Tongi,,,",
+    "- , . Dhaka",
+    "Dhaka, - -",
   ])("accepts %s", (a) => expect(isValidAddress(a)).toBe(true));
 
-  it.each(["", "Dhaka", "12 34", "12 34 56", "১২ ৩৪ ৫৬", "- , . Dhaka", "Dhaka, - -", "12,34,56", ",,,Tongi,,,"])(
+  it.each(["", "   ", "- , .", "12", "12 34", "12 34 56", "১২ ৩৪ ৫৬", "12,34,56"])(
     "rejects %s",
     (a) => expect(isValidAddress(a)).toBe(false),
   );

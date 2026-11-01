@@ -5,8 +5,47 @@ import { useEffect, useState } from "react";
 import "@/templates/classic/landing.css";
 import "./campaign2.css";
 import { ProductPicture } from "@/components/storefront/product-picture";
+import { EXTRA_BANNER_KEYS } from "@/templates/catalog";
 import { Storefront as Classic } from "@/templates/classic/storefront";
 import type { StorefrontProps } from "@/templates/types";
+
+/** How long each hero banner stays before the next fades in. */
+const SLIDE_MS = 4000;
+
+/**
+ * The hero banners, taking turns on their own: no arrows, no dots. All are
+ * stacked in one grid cell, so the box keeps the banner's height and only
+ * opacity changes. Only the first is the LCP and loads eagerly. Stops while
+ * the tab is hidden, so a background tab does not keep cycling.
+ */
+function HeroSlider({ slides }: { slides: { src: string; srcSet?: string }[] }) {
+  const [active, setActive] = useState(0);
+  const count = slides.length;
+  useEffect(() => {
+    if (count < 2) return;
+    const id = window.setInterval(() => {
+      if (!document.hidden) setActive((i) => (i + 1) % count);
+    }, SLIDE_MS);
+    return () => window.clearInterval(id);
+  }, [count]);
+
+  return (
+    <div className="c2-slides">
+      {slides.map((slide, i) => (
+        <div key={i} className="c2-slide" data-active={i === active || undefined} aria-hidden={i !== active}>
+          <ProductPicture
+            src={slide.src}
+            srcSet={slide.srcSet}
+            alt="Campaign"
+            width={1146}
+            height={672}
+            priority={i === 0}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /** The classic page's colour variables, retuned for a dark ground. */
 const GOLD_THEME: Record<string, string> = {
@@ -30,6 +69,8 @@ export function Storefront(props: StorefrontProps) {
   const s = props.store.contentSrcset;
   // The headline and draw date are the store's own words (store.options).
   const o = props.store.options;
+  // The first banner always shows; the extra ones join only once uploaded.
+  const banners = ["banner", ...EXTRA_BANNER_KEYS].filter((key) => c[key]);
   // The dark ground and gold are this template's look, not something a
   // store's saved palette (made for the light classic page) should be able
   // to undo: the template's values win, anything else passes through.
@@ -92,7 +133,7 @@ export function Storefront(props: StorefrontProps) {
         beforeProduct={
           <div className="c2">
             <section className="c2-hero">
-              <ProductPicture src={c.banner} srcSet={s.banner} alt="Campaign" width={1146} height={672} priority />
+              <HeroSlider slides={banners.map((key) => ({ src: c[key], srcSet: s[key] }))} />
             </section>
 
             <section className="c2-intro">

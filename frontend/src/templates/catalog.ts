@@ -8,7 +8,8 @@
 export type ContentField = {
   key: string;
   label: string;
-  /** Path under /public: what shows until the store uploads its own. */
+  /** Path under /public: what shows until the store uploads its own. Empty
+   * for an optional picture: nothing shows until one is uploaded. */
   defaultUrl: string;
   /** Guidance for the upload, e.g. "1146×672 · JPG". */
   size: string;
@@ -104,6 +105,25 @@ const CAMPAIGN_PICTURES: ContentField[] = [
   },
 ];
 
+/** Extra hero banners for Bazar Campaign Gold. The banner and these rotate
+ * on their own at the top of the page; an empty one is simply left out. */
+export const EXTRA_BANNER_KEYS = ["banner_2", "banner_3", "banner_4", "banner_5"];
+
+const GOLD_PICTURES: ContentField[] = CAMPAIGN_PICTURES.flatMap((field) =>
+  field.key !== "banner"
+    ? [field]
+    : [
+        { ...field, hint: "First banner of the slider at the top of the page" },
+        ...EXTRA_BANNER_KEYS.map((key, i) => ({
+          key,
+          label: `Hero banner ${i + 2}`,
+          defaultUrl: "",
+          size: field.size,
+          hint: "Optional. Same size and style as the first; the banners take turns on their own",
+        })),
+      ],
+);
+
 export const TEMPLATE_CATALOG: Record<string, TemplateInfo> = {
   classic: {
     id: "classic",
@@ -147,10 +167,11 @@ export const TEMPLATE_CATALOG: Record<string, TemplateInfo> = {
     highlights: [
       "Dark green and gold, built to impress on a phone",
       "Pulsing order button, scroll-in sections",
-      "Same six pictures as Bazar Campaign",
+      "Same pictures as Bazar Campaign",
       "Headline and draw date written per store",
+      "Up to five hero banners that slide on their own",
     ],
-    content: CAMPAIGN_PICTURES,
+    content: GOLD_PICTURES,
     texts: [
       {
         key: "headline",

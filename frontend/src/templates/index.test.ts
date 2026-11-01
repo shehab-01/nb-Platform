@@ -59,6 +59,14 @@ describe("template registry", () => {
     expect(TEMPLATE_CATALOG.spotlight.singleVariant).toBe(false);
     expect(Object.keys(resolveContent("spotlight", {}))).toEqual(["logo", "spotlight"]);
   });
+  it("gold's extra hero banners are empty until uploaded", () => {
+    const c = resolveContent("campaign2", { banner_3: "/media/stores/2/b3.jpg" });
+    expect(c.banner).toBe("/campaign.jpg");
+    expect(c.banner_2).toBe("");
+    expect(c.banner_3).toBe("/media/stores/2/b3.jpg");
+    // The plain campaign template keeps its single banner.
+    expect("banner_2" in resolveContent("campaign", {})).toBe(false);
+  });
   it("loads a module with the two components", async () => {
     const tpl = await loadTemplate("classic");
     expect(typeof tpl.Storefront).toBe("function");

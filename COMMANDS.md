@@ -125,7 +125,7 @@ flood that fills the pipe, so make sure both are on.
 | `RATE_LIMIT_LOGINS` | 20 | `POST /api/auth/google` |
 | `RATE_LIMIT_WINDOW_SECONDS` | 600 | the window for the three above |
 | `RATE_LIMIT_TRACK` | 60 | `POST /api/track` (Meta event twins), per minute |
-| `ORDER_COOLDOWN_HOURS` | 0 | one storefront order per phone number per window; 0 = for good |
+| `ORDER_COOLDOWN_HOURS` | 168 | one storefront order per phone number per window (7 days); 0 = for good |
 
 Limits are deliberately loose: Bangladeshi mobile carriers put thousands of
 customers behind one shared IP (CGNAT), so a tight limit turns a campaign

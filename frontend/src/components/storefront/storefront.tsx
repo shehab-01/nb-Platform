@@ -161,7 +161,7 @@ export function Storefront({ product }: { product: StorefrontProduct }) {
         },
       });
     } catch (err) {
-      // 409: this number has already ordered from this store.
+      // 409: this number already ordered within the cooldown window (7 days).
       // 429: too many attempts from this connection right now.
       const status = err instanceof ApiError ? err.status : 0;
       setSubmitError(
@@ -327,7 +327,8 @@ export function Storefront({ product }: { product: StorefrontProduct }) {
               {submitError === "cooldown" && (
                 <p className="form-error">
                   আপনি ইতিমধ্যে এই নাম্বার থেকে অর্ডার করেছেন। আমাদের প্রতিনিধি
-                  শিগগিরই আপনার সাথে যোগাযোগ করবেন।
+                  শিগগিরই আপনার সাথে যোগাযোগ করবেন। নতুন অর্ডারের জন্য ৭ দিন পর আবার
+                  চেষ্টা করুন।
                 </p>
               )}
               {submitError === "throttled" && (

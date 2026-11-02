@@ -8,8 +8,8 @@
 const KEY = "nb_last_order";
 /**
  * How long this device shows the confirmation in place of the form. The API
- * refuses the number for good; this stays short so someone else on the same
- * phone can still order with their own number.
+ * refuses the number for ORDER_COOLDOWN_HOURS (7 days); this stays shorter so
+ * someone else on the same phone can still order with their own number.
  */
 const REMEMBER_MS = 24 * 60 * 60_000;
 

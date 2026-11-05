@@ -154,9 +154,9 @@ const GOLD_TEXTS: TextField[] = [
  * over a picture. Each is optional and shows only once its picture is
  * uploaded. The picture keys are Gold's, so uploads carry over. */
 export const CUSTOM_SECTIONS = [
-  { key: "how_it_works", group: "How to participate", title: "কিভাবে অংশগ্রহণ করবেন?" },
-  { key: "prizes", group: "Prizes", title: "পুরস্কার সমূহ" },
-  { key: "products", group: "Product showcase", title: "আমাদের স্পেশাল আচার কম্বো" },
+  { key: "how_it_works", group: "Section 01", title: "কিভাবে অংশগ্রহণ করবেন?" },
+  { key: "prizes", group: "Section 02", title: "পুরস্কার সমূহ" },
+  { key: "products", group: "Section 03", title: "আমাদের স্পেশাল আচার কম্বো" },
 ];
 
 const CUSTOM_PICTURES: ContentField[] = [
@@ -164,8 +164,9 @@ const CUSTOM_PICTURES: ContentField[] = [
   ...CUSTOM_SECTIONS.map(({ key, group }) => {
     const field = CAMPAIGN_PICTURES.find((f) => f.key === key)!;
     return {
-      // Keeps its own label: the store's Content page lists pictures ungrouped.
       ...field,
+      // Names its section: the store's Content page lists pictures ungrouped.
+      label: `${group} picture`,
       defaultUrl: "",
       hint: "Optional. Until a picture is uploaded the whole section stays off the page",
       group,
@@ -271,7 +272,7 @@ export const TEMPLATE_CATALOG: Record<string, TemplateInfo> = {
     id: "campaign3",
     name: "Bazar Gold Custom",
     description:
-      "Bazar Campaign Gold with more of it the store's to set: header, page and footer colours, the kicker and intro lines, and the how-to, prizes and product sections, each with its own title and colour and each left off until its picture is uploaded.",
+      "Bazar Campaign Gold with more of it the store's to set: header, page and footer colours, the kicker and intro lines, and three sections, each with its own title and colour and each left off until its picture is uploaded.",
     // No screenshot of its own yet: it looks like Gold until changed.
     preview: "/templates/campaign2.png",
     highlights: [

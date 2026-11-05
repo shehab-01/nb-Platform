@@ -4,6 +4,7 @@ import type { CSSProperties } from "react";
 
 import "./spotlight.css";
 import { Storefront as Classic } from "@/templates/classic/page";
+import { isLight } from "@/templates/color";
 import { rawImage } from "@/templates/raw-image";
 import type { StorefrontProps } from "@/templates/types";
 
@@ -41,14 +42,4 @@ export function Storefront(props: StorefrontProps) {
       />
     </div>
   );
-}
-
-/** Whether "#rrggbb" is light enough to want dark text (WCAG luminance). */
-function isLight(hex: string): boolean {
-  const channel = (i: number) => {
-    const c = parseInt(hex.slice(i, i + 2), 16) / 255;
-    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-  };
-  const luminance = 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
-  return luminance > 0.4;
 }

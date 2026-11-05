@@ -18,7 +18,7 @@ const SLIDE_MS = 4000;
  * opacity changes. Only the first is the LCP and loads eagerly. Stops while
  * the tab is hidden, so a background tab does not keep cycling.
  */
-function HeroSlider({ slides }: { slides: { src: string; srcSet?: string }[] }) {
+export function HeroSlider({ slides }: { slides: { src: string; srcSet?: string }[] }) {
   const [active, setActive] = useState(0);
   const count = slides.length;
   useEffect(() => {
@@ -48,13 +48,57 @@ function HeroSlider({ slides }: { slides: { src: string; srcSet?: string }[] }) 
 }
 
 /** The classic page's colour variables, retuned for a dark ground. */
-const GOLD_THEME: Record<string, string> = {
+export const GOLD_THEME: Record<string, string> = {
   "--nb-bg": "#0a3b22",
   "--deep": "#05200f",
   "--nb-gold": "#d9a537",
   "--nb-green": "#1e7a46",
   "--nb-price": "#14301f",
 };
+
+export function scrollToOrder() {
+  document.getElementById("order")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/**
+ * Gold's motion, shared with Bazar Gold Custom. Sections marked
+ * `data-c2-reveal` fade up the first time they scroll into view (visitors
+ * who ask for less motion get everything shown at once). Returns whether the
+ * page has scrolled past the top: then the logo slides to the left and a
+ * compact order button slides in on the right (see .nb-c2[data-scrolled]).
+ * `sections` names the sections on the page: when it changes (a section
+ * added in the admin preview) the new ones are watched too.
+ */
+export function useGoldMotion(sections = ""): boolean {
+  useEffect(() => {
+    const els = Array.from(document.querySelectorAll<HTMLElement>("[data-c2-reveal]:not([data-c2-reveal=in])"));
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || !("IntersectionObserver" in window)) {
+      for (const el of els) el.dataset.c2Reveal = "in";
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          (e.target as HTMLElement).dataset.c2Reveal = "in";
+          io.unobserve(e.target);
+        }
+      },
+      { threshold: 0.12, rootMargin: "0px 0px -8% 0px" },
+    );
+    for (const el of els) io.observe(el);
+    return () => io.disconnect();
+  }, [sections]);
+
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 40);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  return scrolled;
+}
 
 /**
  * Bazar Campaign Gold. The classic page under a dark green skin: banner,
@@ -75,42 +119,7 @@ export function Storefront(props: StorefrontProps) {
   // store's saved palette (made for the light classic page) should be able
   // to undo: the template's values win, anything else passes through.
   const store = { ...props.store, themeVars: { ...props.store.themeVars, ...GOLD_THEME } };
-
-  // Sections fade up the first time they scroll into view. Visitors who ask
-  // for less motion get everything shown at once.
-  useEffect(() => {
-    const els = Array.from(document.querySelectorAll<HTMLElement>("[data-c2-reveal]"));
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || !("IntersectionObserver" in window)) {
-      for (const el of els) el.dataset.c2Reveal = "in";
-      return;
-    }
-    const io = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) {
-          if (!e.isIntersecting) continue;
-          (e.target as HTMLElement).dataset.c2Reveal = "in";
-          io.unobserve(e.target);
-        }
-      },
-      { threshold: 0.12, rootMargin: "0px 0px -8% 0px" },
-    );
-    for (const el of els) io.observe(el);
-    return () => io.disconnect();
-  }, []);
-
-  // Once the page has scrolled past the top, the logo slides to the left and
-  // a compact order button slides in on the right (see .nb-c2[data-scrolled]).
-  const [scrolled, setScrolled] = useState(false);
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 40);
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
-
-  const scrollToOrder = () => {
-    document.getElementById("order")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
+  const scrolled = useGoldMotion();
 
   return (
     <div className="nb-c2" data-scrolled={scrolled || undefined}>

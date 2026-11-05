@@ -13,6 +13,7 @@ const registry: Record<string, () => Promise<TemplateModule>> = {
   classic: () => import("@/templates/classic"),
   campaign: () => import("@/templates/campaign"),
   campaign2: () => import("@/templates/campaign2"),
+  campaign3: () => import("@/templates/campaign3"),
   spotlight: () => import("@/templates/spotlight"),
 };
 

@@ -3,6 +3,19 @@
    buttons and footer sit on the dark ground. Scoped under .nb-c2 so nothing
    here can reach the classic or campaign templates. */
 
+/* The colours Bazar Gold Custom (campaign3) lets a store change, at Gold's own
+   values. On .nb-c2 itself, so an inline style on that element wins. */
+.nb-c2 {
+  --c2-nav: #05200f;
+  --c2-footer: #05200f;
+  --c2-footer-ink: rgba(247, 241, 227, 0.6);
+  --c2-footer-link: #d9a537;
+  --c2-kicker: #d9a537;
+  --c2-title: #fff;
+  --c2-text: rgba(247, 241, 227, 0.72);
+  --c2-heading: #f7f1e3;
+}
+
 .nb-c2 .nb-landing {
   --c2-gold: #d9a537;
   --c2-gold-2: #c99120;
@@ -87,7 +100,7 @@
    the right. Both are absolutely placed so the move is a plain transition. */
 .nb-c2 .nb-header {
   position: sticky;
-  background: rgba(5, 32, 15, 0.92);
+  background: color-mix(in srgb, var(--c2-nav) 92%, transparent);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border-bottom: 1px solid rgba(217, 165, 55, 0.25);
@@ -167,7 +180,7 @@
   position: absolute;
   inset: auto 0 0 0;
   height: 90px;
-  background: linear-gradient(to top, #0a3b22 15%, rgba(10, 59, 34, 0));
+  background: linear-gradient(to top, var(--nb-bg) 15%, transparent);
   pointer-events: none;
 }
 .c2-intro {
@@ -184,7 +197,7 @@
   font-weight: 600;
   /* No tracking: letter-spacing breaks Bangla conjunct shaping. */
   letter-spacing: 0;
-  color: var(--c2-gold);
+  color: var(--c2-kicker);
 }
 /* Tighter than the intro's gap: the kicker belongs to the heading. */
 .c2-kicker + h1 {
@@ -196,7 +209,7 @@
   font-size: clamp(22px, 7vw, 27px);
   line-height: 1.35;
   font-weight: 700;
-  color: #fff;
+  color: var(--c2-title);
 }
 /* Each heading line is fixed copy: never let one wrap into two. */
 .c2-intro h1 .c2-line {
@@ -206,7 +219,7 @@
   margin: 0;
   font-size: 15px;
   line-height: 1.7;
-  color: rgba(247, 241, 227, 0.72);
+  color: var(--c2-text);
 }
 .c2-cta {
   width: 100%;
@@ -231,7 +244,7 @@
   text-align: center;
   font-size: 22px;
   font-weight: 700;
-  color: var(--c2-cream);
+  color: var(--c2-heading);
 }
 .c2-frame {
   overflow: hidden;
@@ -350,15 +363,15 @@
 .nb-c2 .nb-footer {
   margin: 10px 0 0;
   padding: 26px 20px 34px;
-  background: #05200f;
+  background: var(--c2-footer);
   border: 0;
   border-top: 1px solid rgba(217, 165, 55, 0.2);
   border-radius: 0;
   box-shadow: none;
-  color: rgba(247, 241, 227, 0.6);
+  color: var(--c2-footer-ink);
   font-size: 13px;
 }
 .nb-c2 .nb-footer a {
-  color: var(--c2-gold);
+  color: var(--c2-footer-link);
   text-decoration: none;
 }

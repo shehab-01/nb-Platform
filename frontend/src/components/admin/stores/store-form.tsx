@@ -24,7 +24,15 @@ import {
 } from "@/lib/api";
 import type { Product } from "@/lib/products";
 import { cn } from "@/lib/utils";
-import { isHexColor, resolveContent, resolveOptions, templateInfo } from "@/templates/catalog";
+import {
+  isHexColor,
+  resolveContent,
+  resolveOptions,
+  templateInfo,
+  type ColorField,
+  type ContentField,
+  type TextField,
+} from "@/templates/catalog";
 
 /** "Nature Bazar" -> "NB", "Store One" -> "SO", "Honey" -> "HONEY". */
 export function suggestPrefix(name: string): string {
@@ -143,6 +151,15 @@ export function StoreForm({
   const slots = templateInfo(d.template).content;
   const textFields = templateInfo(d.template).texts;
   const colorFields = templateInfo(d.template).colors;
+  // Grouped fields (a section's picture, title and colour) get a card per
+  // group, in the order the template lists them; the rest go in the
+  // Pictures and Text & colours cards.
+  const pictureSlots = slots.filter((f) => !f.group);
+  const ownTexts = textFields.filter((f) => !f.group);
+  const ownColors = colorFields.filter((f) => !f.group);
+  const groups = [
+    ...new Set([...slots, ...textFields, ...colorFields].flatMap((f) => (f.group ? [f.group] : []))),
+  ];
   const badColor = colorFields.find((f) => opts[f.key] && !isHexColor(opts[f.key]));
   // Switching a store that offers several sizes onto a template without a
   // picker silently narrows the offer to the default size. Orders stay
@@ -189,7 +206,7 @@ export function StoreForm({
               : narrowing && !narrowingConfirmed
                 ? "Confirm the template change"
                 : null;
-  const customCount = slots.filter(
+  const customCount = pictureSlots.filter(
     (s) => pictures[s.key] || (existingPictures[s.key] && !resets.has(s.key)),
   ).length;
 
@@ -225,6 +242,126 @@ export function StoreForm({
     } finally {
       setBusy(false);
     }
+  };
+
+  // One row each for a picture, a text and a colour field, shared by the
+  // Pictures and Text & colours cards and the template's group cards.
+  const renderPicture = (slot: ContentField) => {
+    const file = pictures[slot.key];
+    const uploaded = !resets.has(slot.key) ? existingPictures[slot.key] : undefined;
+    const custom = Boolean(file || uploaded);
+    const src = previewUrls[slot.key] ?? uploaded ?? slot.defaultUrl;
+    return (
+      <div
+        key={slot.key}
+        className="flex flex-wrap items-center gap-x-5 gap-y-3 border-b px-5 py-3.5 last:border-b-0"
+      >
+        <div className="basis-36">
+          <p className="text-sm font-semibold">{slot.label}</p>
+          <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+            {slot.size}
+          </p>
+        </div>
+        {src ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={src}
+            alt=""
+            className={cn(
+              "h-14 w-26 shrink-0 rounded-lg border object-contain p-1",
+              custom ? "border-solid bg-background" : "border-dashed bg-muted/40",
+            )}
+          />
+        ) : (
+          // An optional picture with no default: nothing shows yet.
+          <div className="flex h-14 w-26 shrink-0 items-center justify-center rounded-lg border border-dashed bg-muted/40 text-xs text-muted-foreground">
+            None
+          </div>
+        )}
+        <p className="min-w-0 flex-1 basis-44 text-xs text-pretty text-muted-foreground">
+          {custom ? "This store's own picture." : slot.hint}
+        </p>
+        <div className="flex shrink-0 items-center gap-1">
+          <label className="inline-flex">
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/gif,image/webp"
+              className="sr-only"
+              onChange={(e) => {
+                const picked = e.target.files?.[0];
+                e.target.value = "";
+                if (picked) setPictures({ ...pictures, [slot.key]: picked });
+              }}
+            />
+            <Button type="button" variant="outline" size="sm" asChild>
+              <span className="cursor-pointer">{custom ? "Replace" : "Upload"}</span>
+            </Button>
+          </label>
+          {custom && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                const next = { ...pictures };
+                delete next[slot.key];
+                setPictures(next);
+                if (existingPictures[slot.key]) setResets(new Set(resets).add(slot.key));
+              }}
+            >
+              {slot.defaultUrl ? "Default" : "Remove"}
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  };
+  const renderText = (field: TextField) => (
+    <Row key={field.key} label={field.label} htmlFor={`opt-${field.key}`} hint={field.hint}>
+      <Input
+        id={`opt-${field.key}`}
+        className="w-90 max-w-full"
+        maxLength={field.maxLength}
+        placeholder={field.placeholder ?? field.defaultValue}
+        value={opts[field.key] ?? ""}
+        onChange={(e) => setOpts({ ...opts, [field.key]: e.target.value })}
+      />
+    </Row>
+  );
+  const renderColor = (field: ColorField) => {
+    const typed = opts[field.key] ?? "";
+    return (
+      <Row key={field.key} label={field.label} htmlFor={`opt-${field.key}`} hint={field.hint}>
+        <div className="flex items-center gap-2">
+          <input
+            type="color"
+            aria-label={`${field.label} picker`}
+            className="h-9 w-12 cursor-pointer rounded-md border bg-background p-1"
+            value={previewOptions[field.key]}
+            onChange={(e) => setOpts({ ...opts, [field.key]: e.target.value })}
+          />
+          <Input
+            id={`opt-${field.key}`}
+            className="w-28 font-mono"
+            maxLength={7}
+            placeholder={field.defaultValue}
+            value={typed}
+            aria-invalid={(typed !== "" && !isHexColor(typed)) || undefined}
+            onChange={(e) => setOpts({ ...opts, [field.key]: e.target.value.trim() })}
+          />
+          {typed && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setOpts({ ...opts, [field.key]: "" })}
+            >
+              Default
+            </Button>
+          )}
+        </div>
+      </Row>
+    );
   };
 
   return (
@@ -377,136 +514,32 @@ export function StoreForm({
           )}
         </Card>
 
-        {slots.length > 0 && (
+        {pictureSlots.length > 0 && (
           <Card
             title="Pictures"
-            aside={`${customCount} of ${slots.length} replaced`}
+            aside={`${customCount} of ${pictureSlots.length} replaced`}
             padded={false}
           >
-            {slots.map((slot) => {
-              const file = pictures[slot.key];
-              const uploaded = !resets.has(slot.key) ? existingPictures[slot.key] : undefined;
-              const custom = Boolean(file || uploaded);
-              const src = previewUrls[slot.key] ?? uploaded ?? slot.defaultUrl;
-              return (
-                <div
-                  key={slot.key}
-                  className="flex flex-wrap items-center gap-x-5 gap-y-3 border-b px-5 py-3.5 last:border-b-0"
-                >
-                  <div className="basis-36">
-                    <p className="text-sm font-semibold">{slot.label}</p>
-                    <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
-                      {slot.size}
-                    </p>
-                  </div>
-                  {src ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={src}
-                      alt=""
-                      className={cn(
-                        "h-14 w-26 shrink-0 rounded-lg border object-contain p-1",
-                        custom ? "border-solid bg-background" : "border-dashed bg-muted/40",
-                      )}
-                    />
-                  ) : (
-                    // An optional picture with no default: nothing shows yet.
-                    <div className="flex h-14 w-26 shrink-0 items-center justify-center rounded-lg border border-dashed bg-muted/40 text-xs text-muted-foreground">
-                      None
-                    </div>
-                  )}
-                  <p className="min-w-0 flex-1 basis-44 text-xs text-pretty text-muted-foreground">
-                    {custom ? "This store's own picture." : slot.hint}
-                  </p>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <label className="inline-flex">
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/gif,image/webp"
-                        className="sr-only"
-                        onChange={(e) => {
-                          const picked = e.target.files?.[0];
-                          e.target.value = "";
-                          if (picked) setPictures({ ...pictures, [slot.key]: picked });
-                        }}
-                      />
-                      <Button type="button" variant="outline" size="sm" asChild>
-                        <span className="cursor-pointer">{custom ? "Replace" : "Upload"}</span>
-                      </Button>
-                    </label>
-                    {custom && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          const next = { ...pictures };
-                          delete next[slot.key];
-                          setPictures(next);
-                          if (existingPictures[slot.key]) setResets(new Set(resets).add(slot.key));
-                        }}
-                      >
-                        {slot.defaultUrl ? "Default" : "Remove"}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+            {pictureSlots.map(renderPicture)}
           </Card>
         )}
 
-        {textFields.length + colorFields.length > 0 && (
+        {ownTexts.length + ownColors.length > 0 && (
           <Card title="Text & colours">
-            {textFields.map((field) => (
-              <Row key={field.key} label={field.label} htmlFor={`opt-${field.key}`} hint={field.hint}>
-                <Input
-                  id={`opt-${field.key}`}
-                  className="w-90 max-w-full"
-                  maxLength={field.maxLength}
-                  placeholder={field.placeholder ?? field.defaultValue}
-                  value={opts[field.key] ?? ""}
-                  onChange={(e) => setOpts({ ...opts, [field.key]: e.target.value })}
-                />
-              </Row>
-            ))}
-            {colorFields.map((field) => {
-              const typed = opts[field.key] ?? "";
-              return (
-                <Row key={field.key} label={field.label} htmlFor={`opt-${field.key}`} hint={field.hint}>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="color"
-                      aria-label={`${field.label} picker`}
-                      className="h-9 w-12 cursor-pointer rounded-md border bg-background p-1"
-                      value={previewOptions[field.key]}
-                      onChange={(e) => setOpts({ ...opts, [field.key]: e.target.value })}
-                    />
-                    <Input
-                      id={`opt-${field.key}`}
-                      className="w-28 font-mono"
-                      maxLength={7}
-                      placeholder={field.defaultValue}
-                      value={typed}
-                      aria-invalid={(typed !== "" && !isHexColor(typed)) || undefined}
-                      onChange={(e) => setOpts({ ...opts, [field.key]: e.target.value.trim() })}
-                    />
-                    {typed && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setOpts({ ...opts, [field.key]: "" })}
-                      >
-                        Default
-                      </Button>
-                    )}
-                  </div>
-                </Row>
-              );
-            })}
+            {ownTexts.map(renderText)}
+            {ownColors.map(renderColor)}
           </Card>
         )}
+
+        {groups.map((group) => (
+          <Card key={group} title={group} padded={false}>
+            {slots.filter((f) => f.group === group).map(renderPicture)}
+            <div className="px-5">
+              {textFields.filter((f) => f.group === group).map(renderText)}
+              {colorFields.filter((f) => f.group === group).map(renderColor)}
+            </div>
+          </Card>
+        ))}
 
         {error && <p className="text-sm text-destructive">{error}</p>}
 

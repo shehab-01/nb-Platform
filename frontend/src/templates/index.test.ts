@@ -67,6 +67,29 @@ describe("template registry", () => {
     // The plain campaign template keeps its single banner.
     expect("banner_2" in resolveContent("campaign", {})).toBe(false);
   });
+  it("gold custom drops the offer badge and keeps its sections off until uploaded", () => {
+    expect(TEMPLATE_CATALOG.campaign3.singleVariant).toBe(true);
+    const c = resolveContent("campaign3", { prizes: "/media/stores/2/p.jpg", offer_price: "/x.png" });
+    expect(c.banner).toBe("/campaign.jpg");
+    expect(c.how_it_works).toBe("");
+    expect(c.prizes).toBe("/media/stores/2/p.jpg");
+    expect(c.products).toBe("");
+    expect("offer_price" in c).toBe(false);
+  });
+  it("gold custom groups each section's picture, title and title colour", () => {
+    const info = TEMPLATE_CATALOG.campaign3;
+    for (const key of ["how_it_works", "prizes", "products"]) {
+      const group = info.content.find((f) => f.key === key)?.group;
+      expect(group).toBeTruthy();
+      expect(info.texts.find((f) => f.key === `${key}_title`)?.group).toBe(group);
+      expect(info.colors.find((f) => f.key === `${key}_title_color`)?.group).toBe(group);
+    }
+    const o = resolveOptions("campaign3", { body_color: "#FFFFFF", kicker: "নতুন ক্যাম্পেইন" });
+    expect(o.body_color).toBe("#ffffff");
+    expect(o.nav_color).toBe("#05200f");
+    expect(o.kicker).toBe("নতুন ক্যাম্পেইন");
+    expect(o.prizes_title).toBe("পুরস্কার সমূহ");
+  });
   it("loads a module with the two components", async () => {
     const tpl = await loadTemplate("classic");
     expect(typeof tpl.Storefront).toBe("function");

@@ -15,7 +15,13 @@ export type ContentField = {
   size: string;
   /** One line on where this picture shows up, for the upload row. */
   hint: string;
+  group?: string;
 };
+
+/* Any field may name a `group`: the store form edits a group's pictures,
+   texts and colours together in one card titled by it (a page section's
+   picture, title and title colour). Ungrouped fields go in the form's
+   Pictures and Text & colours cards. */
 
 /** A line of the template's copy a store may reword. Stored in the store's
  * theme under `key`; empty means the default. */
@@ -28,6 +34,7 @@ export type TextField = {
   /** What the empty input says, when the default is not a fixed text (an
    * empty default means the page decides, e.g. the product's own title). */
   placeholder?: string;
+  group?: string;
 };
 
 /** A colour of the template a store may change. Stored in the store's theme
@@ -37,6 +44,7 @@ export type ColorField = {
   label: string;
   defaultValue: string;
   hint: string;
+  group?: string;
 };
 
 export type TemplateInfo = {
@@ -124,6 +132,89 @@ const GOLD_PICTURES: ContentField[] = CAMPAIGN_PICTURES.flatMap((field) =>
       ],
 );
 
+/** Gold's two headline lines, written per store. */
+const GOLD_TEXTS: TextField[] = [
+  {
+    key: "headline",
+    label: "Headline",
+    defaultValue: "ফাইনাল ড্র",
+    maxLength: 40,
+    hint: "First line of the big gold headline under the banner",
+  },
+  {
+    key: "draw_date",
+    label: "Draw date",
+    defaultValue: "অক্টোবর ৩০ তারিখ",
+    maxLength: 40,
+    hint: "Second headline line. Keep it short so it fits one line on a phone",
+  },
+];
+
+/** Bazar Gold Custom's sections below the intro, in page order: a title
+ * over a picture. Each is optional and shows only once its picture is
+ * uploaded. The picture keys are Gold's, so uploads carry over. */
+export const CUSTOM_SECTIONS = [
+  { key: "how_it_works", group: "How to participate", title: "কিভাবে অংশগ্রহণ করবেন?" },
+  { key: "prizes", group: "Prizes", title: "পুরস্কার সমূহ" },
+  { key: "products", group: "Product showcase", title: "আমাদের স্পেশাল আচার কম্বো" },
+];
+
+const CUSTOM_PICTURES: ContentField[] = [
+  ...GOLD_PICTURES.filter((field) => field.key === "logo" || field.key.startsWith("banner")),
+  ...CUSTOM_SECTIONS.map(({ key, group }) => {
+    const field = CAMPAIGN_PICTURES.find((f) => f.key === key)!;
+    return {
+      // Keeps its own label: the store's Content page lists pictures ungrouped.
+      ...field,
+      defaultUrl: "",
+      hint: "Optional. Until a picture is uploaded the whole section stays off the page",
+      group,
+    };
+  }),
+];
+
+const CUSTOM_TEXTS: TextField[] = [
+  {
+    key: "kicker",
+    label: "Kicker",
+    defaultValue: "নেচার বাজার মিলিয়নিয়ার ক্যাম্পেইন",
+    maxLength: 60,
+    hint: "The small line above the headline",
+  },
+  ...GOLD_TEXTS,
+  {
+    key: "intro",
+    label: "Intro",
+    defaultValue:
+      "স্পেশাল আচার কম্বো অর্ডার করে অংশ নিন দশ লাখ টাকা ক্যাশ ও এক হাজার+ গিফট আইটেমের ক্যাম্পেইনে।",
+    maxLength: 200,
+    hint: "The sentence under the headline, above the order button",
+  },
+  ...CUSTOM_SECTIONS.map(({ key, group, title }) => ({
+    key: `${key}_title`,
+    label: "Title",
+    defaultValue: title,
+    maxLength: 60,
+    hint: "Above the picture",
+    group,
+  })),
+];
+
+const CUSTOM_COLORS: ColorField[] = [
+  // Same keys as Bazar Spotlight's, so the colours carry over between them.
+  { key: "nav_color", label: "Header colour", defaultValue: "#05200f", hint: "The bar with the logo" },
+  { key: "body_color", label: "Page colour", defaultValue: "#0a3b22", hint: "The green ground behind everything" },
+  { key: "footer_color", label: "Footer colour", defaultValue: "#05200f", hint: "The bar at the bottom" },
+  { key: "kicker_color", label: "Kicker colour", defaultValue: "#d9a537", hint: "The small line above the headline" },
+  ...CUSTOM_SECTIONS.map(({ key, group }) => ({
+    key: `${key}_title_color`,
+    label: "Title colour",
+    defaultValue: "#f7f1e3",
+    hint: "The title above the picture",
+    group,
+  })),
+];
+
 export const TEMPLATE_CATALOG: Record<string, TemplateInfo> = {
   classic: {
     id: "classic",
@@ -172,23 +263,26 @@ export const TEMPLATE_CATALOG: Record<string, TemplateInfo> = {
       "Up to five hero banners that slide on their own",
     ],
     content: GOLD_PICTURES,
-    texts: [
-      {
-        key: "headline",
-        label: "Headline",
-        defaultValue: "ফাইনাল ড্র",
-        maxLength: 40,
-        hint: "First line of the big gold headline under the banner",
-      },
-      {
-        key: "draw_date",
-        label: "Draw date",
-        defaultValue: "অক্টোবর ৩০ তারিখ",
-        maxLength: 40,
-        hint: "Second headline line. Keep it short so it fits one line on a phone",
-      },
-    ],
+    texts: GOLD_TEXTS,
     colors: [],
+    singleVariant: true,
+  },
+  campaign3: {
+    id: "campaign3",
+    name: "Bazar Gold Custom",
+    description:
+      "Bazar Campaign Gold with more of it the store's to set: header, page and footer colours, the kicker and intro lines, and the how-to, prizes and product sections, each with its own title and colour and each left off until its picture is uploaded.",
+    // No screenshot of its own yet: it looks like Gold until changed.
+    preview: "/templates/campaign2.png",
+    highlights: [
+      "Everything in Bazar Campaign Gold, minus the offer badge",
+      "Header, page and footer colours",
+      "Kicker, headline, draw date and intro written per store",
+      "Optional sections, each with its own title, colour and picture",
+    ],
+    content: CUSTOM_PICTURES,
+    texts: CUSTOM_TEXTS,
+    colors: CUSTOM_COLORS,
     singleVariant: true,
   },
   spotlight: {

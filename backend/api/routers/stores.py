@@ -77,6 +77,7 @@ async def storefront_config(
             store_id=store.id, order_prefix=store.order_prefix, meta=stores.MetaConfig(), pathao=stores.PathaoConfig()
         )).meta.pixel_id,
         order_prefix=store.order_prefix,
+        order_cooldown_hours=store.order_cooldown_hours,
     )
 
 
@@ -182,6 +183,7 @@ def _out(store: Store) -> StoreOut:
         currency=store.currency,
         order_prefix=store.order_prefix,
         theme=store.theme or {},
+        order_cooldown_hours=store.order_cooldown_hours,
         is_active=store.is_active,
         archived_at=store.archived_at,
         domains=domains,
@@ -285,6 +287,7 @@ async def create_store(
         template=payload.template,
         currency=payload.currency,
         theme=payload.theme,
+        order_cooldown_hours=payload.order_cooldown_hours,
         is_active=payload.is_active,
         domains=[],
     )
@@ -335,6 +338,8 @@ async def update_store(
         store.currency = payload.currency.upper()
     if payload.theme is not None:
         store.theme = payload.theme
+    if payload.order_cooldown_hours is not None:
+        store.order_cooldown_hours = payload.order_cooldown_hours
     if payload.is_active is not None:
         if payload.is_active and store.archived_at is not None:
             raise HTTPException(

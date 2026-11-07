@@ -27,6 +27,9 @@ export type StorePublicConfig = {
    * (templates/catalog.resolveOptions). Colours are always "#rrggbb". Every
    * key the template declares is present. */
   options: Record<string, string>;
+  /** How long a number that has ordered is refused another order; 0 means
+   * for good (templates/cooldown.ts words the refusal). */
+  orderCooldownHours: number;
 };
 
 export type StorefrontProps = {

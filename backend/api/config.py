@@ -37,11 +37,6 @@ class Settings:
     # this window while it is open.
     claim_ttl_minutes: int = int(os.getenv("CLAIM_TTL_MINUTES", "10"))
 
-    # One storefront order per phone number per this many hours: 168 (the
-    # default) is 7 days; 0 means ever. Stops double-taps and repeat orders
-    # without any state beyond the orders table itself.
-    order_cooldown_hours: int = int(os.getenv("ORDER_COOLDOWN_HOURS", "168"))
-
     # Per-IP limits on the public endpoints, per window; 0 disables one.
     # Generous on purpose: mobile carriers here put thousands of customers
     # behind one CGNAT address, and a campaign spike must not become 429s.

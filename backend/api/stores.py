@@ -51,6 +51,9 @@ class StoreConfig:
     # Field key -> public URL of the store's own picture (template default
     # applies for keys not present).
     content: dict = field(default_factory=dict)
+    # How long a number that has ordered is refused another storefront
+    # order; 0 means for good.
+    order_cooldown_hours: int = 0
     # The hostname the store was resolved from, or its primary domain when it
     # was resolved by slug.
     host: str | None = None
@@ -92,6 +95,7 @@ def _config(store: Store, host: str | None) -> StoreConfig:
         order_prefix=store.order_prefix or "NB",
         theme=dict(store.theme or {}),
         content={k: content_url(v) for k, v in (store.content or {}).items()},
+        order_cooldown_hours=store.order_cooldown_hours or 0,
         host=host or (domains[0] if domains else None),
         domains=domains,
     )

@@ -33,6 +33,7 @@ import {
   type ContentField,
   type TextField,
 } from "@/templates/catalog";
+import { COOLDOWN_CHOICES } from "@/templates/cooldown";
 
 /** "Nature Bazar" -> "NB", "Store One" -> "SO", "Honey" -> "HONEY". */
 export function suggestPrefix(name: string): string {
@@ -72,6 +73,8 @@ type Draft = {
   prefixTouched: boolean;
   domain: string;
   template: string;
+  /** Repeat-order block in hours; 0 means for good. */
+  orderCooldownHours: number;
   isActive: boolean;
 };
 
@@ -112,6 +115,7 @@ export function StoreForm({
     prefixTouched: store !== null,
     domain: store?.primaryDomain ?? store?.domains[0] ?? "",
     template: store?.template ?? "classic",
+    orderCooldownHours: store?.orderCooldownHours ?? 0,
     isActive: store?.isActive ?? true,
   });
   const [busy, setBusy] = React.useState(false);
@@ -224,6 +228,7 @@ export function StoreForm({
         currency: store?.currency ?? "BDT",
         orderPrefix: d.orderPrefix,
         theme: themeWithOptions(store?.theme ?? {}, d.template, opts),
+        orderCooldownHours: d.orderCooldownHours,
         domains: [d.domain.trim()],
         isActive: d.isActive,
       });
@@ -507,6 +512,27 @@ export function StoreForm({
               </label>
             </div>
           )}
+          <Row label="Repeat orders" hint="How long a phone number that ordered is refused another order">
+            <Select
+              value={String(d.orderCooldownHours)}
+              onValueChange={(v) => setD({ ...d, orderCooldownHours: Number(v) })}
+            >
+              <SelectTrigger className="w-56">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {/* A value set outside these choices still shows, as hours. */}
+                {(COOLDOWN_CHOICES.some((c) => c.hours === d.orderCooldownHours)
+                  ? COOLDOWN_CHOICES
+                  : [...COOLDOWN_CHOICES, { hours: d.orderCooldownHours, label: `${d.orderCooldownHours} hours` }]
+                ).map((c) => (
+                  <SelectItem key={c.hours} value={String(c.hours)}>
+                    {c.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Row>
           {!creating && (
             <Row label="Active" hint={d.isActive ? "Serving customers" : "Domain answers, nothing sells"}>
               <Switch checked={d.isActive} onCheckedChange={(v) => setD({ ...d, isActive: v })} />

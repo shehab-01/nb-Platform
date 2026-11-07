@@ -953,6 +953,9 @@ class StoreConfigOut(BaseModel):
     # Public by nature (it is in the page source); the browser pixel needs it.
     meta_pixel_id: str = ""
     order_prefix: str = "NB"
+    # How long a number that has ordered is refused another order; 0 = for
+    # good. The order form words its refusal from it.
+    order_cooldown_hours: int = 0
 
 
 class StoreCheckStore(BaseModel):
@@ -1037,6 +1040,7 @@ class StoreOut(BaseModel):
     currency: str
     order_prefix: str
     theme: dict
+    order_cooldown_hours: int
     is_active: bool
     archived_at: datetime | None = None
     domains: list[str]
@@ -1051,6 +1055,9 @@ _HOST_RE = r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,62}[a-z0
 
 _PREFIX_RE = r"^[A-Z][A-Z0-9]{0,7}$"
 
+# A year: past that a window is "for good" in all but name; use 0.
+MAX_COOLDOWN_HOURS = 24 * 365
+
 
 class StoreCreate(BaseModel):
     slug: str = Field(pattern=_SLUG_RE)
@@ -1062,6 +1069,8 @@ class StoreCreate(BaseModel):
     template: str = Field(default="classic", max_length=40)
     currency: str = Field(default="BDT", min_length=3, max_length=3)
     theme: dict[str, str] = Field(default_factory=dict)
+    # Repeat-order block for storefront orders, in hours; 0 means for good.
+    order_cooldown_hours: int = Field(default=0, ge=0, le=MAX_COOLDOWN_HOURS)
     # The first is the primary domain. Normalised (lowercased, port dropped)
     # before validation and storage.
     domains: list[str] = Field(default_factory=list, max_length=20)
@@ -1127,6 +1136,7 @@ class StoreUpdate(BaseModel):
     template: str | None = Field(default=None, max_length=40)
     currency: str | None = Field(default=None, min_length=3, max_length=3)
     theme: dict[str, str] | None = None
+    order_cooldown_hours: int | None = Field(default=None, ge=0, le=MAX_COOLDOWN_HOURS)
     domains: list[str] | None = Field(default=None, max_length=20)
     is_active: bool | None = None
 

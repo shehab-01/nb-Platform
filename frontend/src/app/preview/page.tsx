@@ -99,6 +99,8 @@ export default async function PreviewPage({ searchParams }: { searchParams: Sear
     content: resolveContent(templateName, content),
     contentSrcset,
     options: resolveOptions(templateName, theme),
+    // The preview's form is inert; nothing here is ever refused.
+    orderCooldownHours: 0,
   };
   // Rendered on the client so the store form can swap pictures live; the
   // order form is inert there (pointer events off).

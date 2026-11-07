@@ -1076,6 +1076,8 @@ export type Store = {
   /** "NB" in "NB-1042"; unique across stores. */
   orderPrefix: string;
   theme: Record<string, string>;
+  /** Repeat-order block in hours; 0 means for good. */
+  orderCooldownHours: number;
   isActive: boolean;
   /** Set while the store is archived (always inactive then); null otherwise. */
   archivedAt: string | null;
@@ -1094,6 +1096,7 @@ type ApiStore = {
   currency: string;
   order_prefix: string;
   theme: Record<string, string>;
+  order_cooldown_hours?: number;
   is_active: boolean;
   archived_at?: string | null;
   domains: string[];
@@ -1112,6 +1115,7 @@ function mapStore(s: ApiStore): Store {
     currency: s.currency,
     orderPrefix: s.order_prefix,
     theme: s.theme ?? {},
+    orderCooldownHours: s.order_cooldown_hours ?? 0,
     isActive: s.is_active,
     archivedAt: s.archived_at ?? null,
     domains: s.domains,
@@ -1130,6 +1134,7 @@ export type StoreInput = {
   currency: string;
   orderPrefix: string;
   theme: Record<string, string>;
+  orderCooldownHours: number;
   domains: string[];
   isActive: boolean;
 };
@@ -1143,6 +1148,7 @@ function storeBody(input: StoreInput) {
     currency: input.currency,
     order_prefix: input.orderPrefix,
     theme: input.theme,
+    order_cooldown_hours: input.orderCooldownHours,
     domains: input.domains,
     is_active: input.isActive,
   };
@@ -1406,7 +1412,6 @@ export type SystemOverview = {
   };
   rate_limits: {
     limiters: LimiterSnapshot[];
-    order_cooldown_hours: number;
     client_ip_header: string;
   };
   request: {

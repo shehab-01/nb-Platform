@@ -662,6 +662,9 @@ class Store(Base):
     # Per-store overrides of the template's pictures/copy, by field key
     # (see api.routers.store_content). Absent = template default.
     content: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # How long a phone number that has ordered is refused another storefront
+    # order; 0 means for good. Staff orders from the admin are never refused.
+    order_cooldown_hours: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     # Set when a super admin archives the store (only while inactive). An
     # archived store stays inactive until restored; its data is kept.

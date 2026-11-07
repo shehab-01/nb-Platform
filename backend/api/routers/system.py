@@ -227,7 +227,6 @@ async def overview(
                 limiter.snapshot()
                 for limiter in (orders_limiter, drafts_limiter, logins_limiter, track_limiter)
             ],
-            "order_cooldown_hours": settings.order_cooldown_hours,
             "client_ip_header": settings.client_ip_header,
         },
         "request": {

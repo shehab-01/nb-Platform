@@ -24,6 +24,8 @@ export type StoreConfig = {
   /** Public by nature (it is in the page source); "" when the store has none. */
   meta_pixel_id: string;
   order_prefix: string;
+  /** Repeat-order block in hours; 0 means for good. */
+  order_cooldown_hours: number;
 };
 
 /**

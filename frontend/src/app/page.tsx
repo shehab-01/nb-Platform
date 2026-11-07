@@ -45,6 +45,7 @@ export default async function Home() {
     content: resolveContent(resolveTemplateName(store.template), store.content),
     contentSrcset: store.content_srcset ?? {},
     options: resolveOptions(resolveTemplateName(store.template), store.theme),
+    orderCooldownHours: store.order_cooldown_hours ?? 0,
   };
   if (listing === null) return <template.Closed store={publicConfig} />;
   return <template.Storefront store={publicConfig} listing={listing} />;

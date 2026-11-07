@@ -453,21 +453,22 @@ async def create_order(
             else "Nothing is on sale right now",
         )
 
-    # One storefront order per number per cooldown window (ORDER_COOLDOWN_HOURS,
-    # 7 days by default; 0 means for good). Any earlier order from this number
-    # in this store inside the window, cancelled ones included, refuses the new
-    # one; staff can still take a repeat order from the admin. This is an index
-    # lookup on phone_key, so it stays fast however large the table grows.
-    # Incomplete rows don't count — an abandoned form isn't an order.
+    # One storefront order per number per the store's cooldown window
+    # (stores.order_cooldown_hours, set on the store form; 0 means for good).
+    # Any earlier order from this number in this store inside the window,
+    # cancelled ones included, refuses the new one; staff can still take a
+    # repeat order from the admin. This is an index lookup on phone_key, so it
+    # stays fast however large the table grows. Incomplete rows don't count —
+    # an abandoned form isn't an order.
     filters = [
         Order.store_id == store.id,
         Order.phone_key == key,
         Order.status != OrderStatus.incomplete.value,
     ]
-    if settings.order_cooldown_hours > 0:
+    if store.order_cooldown_hours > 0:
         filters.append(
             Order.created_at
-            >= datetime.now(timezone.utc) - timedelta(hours=settings.order_cooldown_hours)
+            >= datetime.now(timezone.utc) - timedelta(hours=store.order_cooldown_hours)
         )
     recent = await session.scalar(select(Order.id).where(*filters).limit(1))
     if recent is not None:

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ProductionOnly, useProductionLists } from "@/components/admin/production/access";
+import { CookingOnly, ProductionOnly, useProductionLists } from "@/components/admin/production/access";
 import { dhakaToday } from "@/components/admin/production/format";
 import { ProductionForm } from "@/components/admin/production/production-form";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,7 +12,9 @@ import { getProductionDay, listProductionDays, type ProductionDay } from "@/lib/
 export default function NewProductionPage() {
   return (
     <ProductionOnly>
-      <NewProduction />
+      <CookingOnly>
+        <NewProduction />
+      </CookingOnly>
     </ProductionOnly>
   );
 }

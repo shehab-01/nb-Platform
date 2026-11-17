@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, FileDown, Loader2, Lock, Pencil, Send, Trash2 } from "lucide-react";
 import { useAuth } from "@/components/admin/auth-context";
-import { ProductionOnly } from "@/components/admin/production/access";
+import { CookingOnly, ProductionOnly } from "@/components/admin/production/access";
 import { DayDashboard, ProductionHeader } from "@/components/admin/production/day-dashboard";
 import { DeleteProductionDialog } from "@/components/admin/production/delete-dialog";
 import { dayLabel, taka } from "@/components/admin/production/format";
@@ -35,7 +35,9 @@ import {
 export default function ProductionDayPage() {
   return (
     <ProductionOnly>
-      <ProductionView />
+      <CookingOnly>
+        <ProductionView />
+      </CookingOnly>
     </ProductionOnly>
   );
 }

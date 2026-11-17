@@ -7,7 +7,7 @@ import { StoreForm } from "@/components/admin/stores/store-form";
 import { createStore, listStores, listTemplates, type Store } from "@/lib/api";
 
 export default function NewStorePage() {
-  const { isSuperAdmin } = useAuth();
+  const { isSuperAdmin, refreshStores } = useAuth();
   const [templates, setTemplates] = React.useState<string[]>(["classic"]);
   const [stores, setStores] = React.useState<Store[]>([]);
 
@@ -21,6 +21,16 @@ export default function NewStorePage() {
     return <p className="text-sm text-muted-foreground">Super admin only.</p>;
   }
   return (
-    <StoreForm store={null} templates={templates} allStores={stores} onSave={createStore} />
+    <StoreForm
+      store={null}
+      templates={templates}
+      allStores={stores}
+      onSave={async (input) => {
+        const saved = await createStore(input);
+        // So the new store is in the switcher straight away.
+        await refreshStores();
+        return saved;
+      }}
+    />
   );
 }

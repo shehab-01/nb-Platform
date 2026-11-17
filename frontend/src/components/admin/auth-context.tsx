@@ -25,6 +25,9 @@ type AuthContextValue = {
   /** True when the current store role (or super admin) allows the action. */
   can: (permission: Permission) => boolean;
   selectStore: (storeId: number) => void;
+  /** Fetches the store list again, after a super admin changed a store
+   *  (its name, its production mode), so the admin follows without a reload. */
+  refreshStores: () => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -144,6 +147,28 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
     window.location.reload();
   }, []);
 
+  const refreshStores = React.useCallback(async () => {
+    let stores: StoreAccess[];
+    try {
+      stores = await getMyStores();
+    } catch {
+      // Best effort: the change is saved; a reload picks it up.
+      return;
+    }
+    const was = getAdminStoreId();
+    const store = pickStore(stores, was);
+    const now = store?.storeId ?? null;
+    if (was !== null && now !== was) {
+      // The store being worked in is gone (deactivated): start over in
+      // another, as switching does.
+      setAdminStoreId(now);
+      window.location.reload();
+      return;
+    }
+    setAdminStoreId(now);
+    setGate((g) => (g.kind === "ready" ? { ...g, stores, store } : g));
+  }, []);
+
   if (gate.kind === "checking") {
     return (
       <div className="flex min-h-svh items-center justify-center bg-background">
@@ -176,7 +201,7 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, isSuperAdmin, stores, store, can, selectStore, logout }}
+      value={{ user, isSuperAdmin, stores, store, can, selectStore, refreshStores, logout }}
     >
       {children}
     </AuthContext.Provider>

@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ProductionAdminOnly, useProductionLists } from "@/components/admin/production/access";
+import { CookingOnly, ProductionAdminOnly, useProductionLists } from "@/components/admin/production/access";
 import { ProductionForm } from "@/components/admin/production/production-form";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getProductionDay, type ProductionDay } from "@/lib/api";
@@ -13,7 +13,9 @@ import { getProductionDay, type ProductionDay } from "@/lib/api";
 export default function EditProductionPage() {
   return (
     <ProductionAdminOnly>
-      <EditProduction />
+      <CookingOnly>
+        <EditProduction />
+      </CookingOnly>
     </ProductionAdminOnly>
   );
 }

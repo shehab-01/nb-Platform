@@ -16,7 +16,7 @@ import {
 import type { Product } from "@/lib/products";
 
 export default function EditStorePage() {
-  const { isSuperAdmin } = useAuth();
+  const { isSuperAdmin, refreshStores } = useAuth();
   const params = useParams<{ id: string }>();
   const id = Number(params.id);
   const [store, setStore] = React.useState<Store | null>(null);
@@ -58,7 +58,13 @@ export default function EditStorePage() {
       allStores={all}
       existingPictures={pictures}
       liveProduct={liveProduct}
-      onSave={(input) => updateStore(store.id, input)}
+      onSave={async (input) => {
+        const saved = await updateStore(store.id, input);
+        // The switcher and the Production pages read the store list loaded
+        // at sign-in; bring it up to date with what was just saved.
+        await refreshStores();
+        return saved;
+      }}
     />
   );
 }

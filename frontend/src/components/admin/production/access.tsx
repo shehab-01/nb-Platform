@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/admin/auth-context";
 import {
   getProductionSuggestions,
@@ -24,6 +25,26 @@ export function ProductionOnly({ children }: { children: React.ReactNode }) {
     );
   }
   return <React.Fragment key={store.storeId}>{children}</React.Fragment>;
+}
+
+/** The by-day pages (add, view, edit a day) belong to stores in "cooking"
+ *  mode. A batch store reaching one through an old link or bookmark is sent
+ *  to the Production list, which shows its batch pages. */
+export function CookingOnly({ children }: { children: React.ReactNode }) {
+  const { store } = useAuth();
+  const router = useRouter();
+  const batch = store?.productionMode === "batch";
+  React.useEffect(() => {
+    if (batch) router.replace("/admin/crm/production");
+  }, [batch, router]);
+  if (batch) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        This store records production in batches. Opening its Production list…
+      </p>
+    );
+  }
+  return <>{children}</>;
 }
 
 /** For production admins only: correcting or deleting a saved production.

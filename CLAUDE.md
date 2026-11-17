@@ -60,13 +60,17 @@ are), `docs/ARCHITECTURE-V1.md` (what we inherited), `DEV.md` (running it),
 ```
 backend/   FastAPI. api/models.py, api/routers/*, api/services/* (meta_capi,
            pathao, pathao_address, carrybee, courier), api/stores.py (host → store), api/tenancy.py
-           (memberships, X-Admin-Store), alembic/versions (0001–0054), scripts/seed_dev.py,
-           tests/ (pytest, no DB)
+           (memberships, X-Admin-Store), alembic/versions (0001–0056), scripts/seed_dev.py,
+           tests/ (pytest, no DB). Production pages come in modes picked per
+           store (stores.production_mode, PRODUCTION_MODES): "cooking"
+           (routers/production.py, by day) and "batch" (routers/production_runs.py,
+           an order received in slots, services/production_invoice.py)
 frontend/  Next.js 16 App Router. src/proxy.ts (host routing), src/lib/store.ts
            (server-side store config), src/lib/admin-store.ts (+ lib/http.ts:
            X-Admin-Store), src/app/page.tsx (storefront root), src/templates/
            (registry; classic/ is template #1), src/app/admin/** (staff app),
-           src/lib/*.test.ts (vitest)
+           src/components/admin/production/ (modes.ts mirrors PRODUCTION_MODES;
+           batch/ is loaded only for a batch store), src/lib/*.test.ts (vitest)
 compose.yaml, .env(.example), DEV.md, docs/
 ```
 

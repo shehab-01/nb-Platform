@@ -21,6 +21,9 @@ export type StoreAccess = {
   /** May send a production to Expenses: a CRM admin, or someone assigned to
    *  Production here (a super admin too, but only when assigned). */
   productionSend: boolean;
+  /** Which Production pages the store uses: "cooking" (by day) or "batch"
+   *  (an order received in slots). See components/admin/production/modes.ts. */
+  productionMode: string;
 };
 
 const STORAGE_KEY = "nb_admin_store";

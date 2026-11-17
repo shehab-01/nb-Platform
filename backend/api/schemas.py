@@ -1019,6 +1019,8 @@ class StoreAccessOut(BaseModel):
     subtitle: str | None = None
     role: str
     template: str
+    # Which Production pages the store uses: "cooking" or "batch".
+    production_mode: str = "cooking"
     # May open this store's CRM (always true for a super admin).
     crm: bool = False
     # The Production pages: "admin", "write" or null (no access).
@@ -1041,6 +1043,7 @@ class StoreOut(BaseModel):
     order_prefix: str
     theme: dict
     order_cooldown_hours: int
+    production_mode: str = "cooking"
     is_active: bool
     archived_at: datetime | None = None
     domains: list[str]
@@ -1071,6 +1074,9 @@ class StoreCreate(BaseModel):
     theme: dict[str, str] = Field(default_factory=dict)
     # Repeat-order block for storefront orders, in hours; 0 means for good.
     order_cooldown_hours: int = Field(default=0, ge=0, le=MAX_COOLDOWN_HOURS)
+    # How the store records production: "cooking" or "batch" (checked
+    # against api.routers.stores.PRODUCTION_MODES).
+    production_mode: str = Field(default="cooking", max_length=20)
     # The first is the primary domain. Normalised (lowercased, port dropped)
     # before validation and storage.
     domains: list[str] = Field(default_factory=list, max_length=20)
@@ -1137,6 +1143,7 @@ class StoreUpdate(BaseModel):
     currency: str | None = Field(default=None, min_length=3, max_length=3)
     theme: dict[str, str] | None = None
     order_cooldown_hours: int | None = Field(default=None, ge=0, le=MAX_COOLDOWN_HOURS)
+    production_mode: str | None = Field(default=None, max_length=20)
     domains: list[str] | None = Field(default=None, max_length=20)
     is_active: bool | None = None
 
@@ -1532,7 +1539,9 @@ class ProductionProductOut(BaseModel):
 
 
 # The units a raw material can be bought in.
-ProductionUnit = Literal["kg", "g", "L", "ml", "pcs", "dozen", "packet", "bottle"]
+ProductionUnit = Literal[
+    "kg", "g", "L", "ml", "pcs", "dozen", "packet", "bottle", "ream", "roll"
+]
 
 
 class ProductionItemIn(BaseModel):
@@ -1581,3 +1590,169 @@ class MemberAccessOut(BaseModel):
 class MemberAccessIn(BaseModel):
     # May this member use the page (record productions; add expenses)?
     write: bool
+
+
+# --- Batch production (stores.production_mode = "batch") ---------------------
+
+
+class ProductionRunCostIn(BaseModel):
+    """Something bought for the whole order. A blank quantity costs nothing
+    yet; a line that follows_units takes the order's units as its quantity
+    whatever is sent."""
+
+    item: str = Field(min_length=1, max_length=120)
+    unit: ProductionUnit | None = None
+    quantity: Decimal | None = Field(default=None, ge=0, le=100_000_000, decimal_places=3)
+    unit_price: Decimal | None = Field(default=None, ge=0, le=10_000_000, decimal_places=2)
+    follows_units: bool = False
+
+    @field_validator("item")
+    @classmethod
+    def _clean(cls, v: str) -> str:
+        v = _squash(v) or ""
+        if not v:
+            raise ValueError("Item is empty")
+        return v
+
+
+class ProductionRunIn(BaseModel):
+    """Opening a batch production, or correcting it while it is open. The
+    slots are saved on their own."""
+
+    name: str = Field(min_length=1, max_length=120)
+    opened_on: date
+    # The order, in packets.
+    units: int = Field(ge=1, le=100_000_000)
+    pieces_per_packet: int = Field(default=20, ge=1, le=10_000)
+    # The raw material: so many kg bought for so much, in total.
+    raw_kg: Decimal | None = Field(default=None, ge=0, le=100_000_000, decimal_places=3)
+    raw_cost: int = Field(default=0, ge=0, le=1_000_000_000)
+    costs: list[ProductionRunCostIn] = Field(default_factory=list, max_length=50)
+    note: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("name")
+    @classmethod
+    def _clean_name(cls, v: str) -> str:
+        v = _squash(v) or ""
+        if not v:
+            raise ValueError("Name is empty")
+        return v
+
+    @field_validator("note")
+    @classmethod
+    def _clean_note(cls, v: str | None) -> str | None:
+        return (v or "").strip() or None
+
+
+SlotCostBasis = Literal["per_1000_pieces", "per_packet", "fixed"]
+
+
+class ProductionSlotCostIn(BaseModel):
+    """A cost of one delivery: a rate per 1,000 pieces or per packet, or a
+    typed amount ("fixed"). A rated line with no rate costs nothing."""
+
+    label: str = Field(min_length=1, max_length=80)
+    basis: SlotCostBasis
+    rate: Decimal | None = Field(default=None, ge=0, le=10_000_000, decimal_places=2)
+    amount: int | None = Field(default=None, ge=0, le=1_000_000_000)
+
+    @field_validator("label")
+    @classmethod
+    def _clean(cls, v: str) -> str:
+        v = _squash(v) or ""
+        if not v:
+            raise ValueError("Label is empty")
+        return v
+
+
+class ProductionSlotIn(BaseModel):
+    """A delivery of finished packets, and what it cost."""
+
+    received_on: date
+    packets: int = Field(ge=1, le=100_000_000)
+    costs: list[ProductionSlotCostIn] = Field(default_factory=list, max_length=30)
+    note: str | None = Field(default=None, max_length=300)
+
+    @field_validator("note")
+    @classmethod
+    def _clean_note(cls, v: str | None) -> str | None:
+        return _squash(v)
+
+
+class ProductionRunCloseIn(BaseModel):
+    # The raw material actually used, in kg; a record only for now.
+    raw_used_kg: Decimal | None = Field(default=None, ge=0, le=100_000_000, decimal_places=3)
+    # Close while packets are still pending (super admin only).
+    early: bool = False
+
+
+class ProductionRunCostOut(BaseModel):
+    item: str
+    unit: str | None = None
+    quantity: float | None = None
+    unit_price: float | None = None
+    follows_units: bool = False
+    amount: int
+
+
+class ProductionSlotCostOut(BaseModel):
+    label: str
+    basis: str
+    rate: float | None = None
+    amount: int
+
+
+class ProductionSlotOut(BaseModel):
+    id: int
+    number: int
+    received_on: date
+    packets: int
+    pieces: int
+    note: str | None = None
+    costs: list[ProductionSlotCostOut]
+    total_cost: int
+    updated_at: datetime
+
+
+class ProductionRunSummary(BaseModel):
+    """A batch production in the list, with its figures."""
+
+    id: int
+    name: str
+    opened_on: date
+    units: int
+    pieces_per_packet: int
+    slots: int
+    received: int
+    pending: int
+    materials_cost: int
+    slots_cost: int
+    total_cost: int
+    # Total cost over the packets received so far; null before any arrive.
+    cost_per_packet: float | None = None
+    closed: bool = False
+    closed_early: bool = False
+
+
+class ProductionRunOut(ProductionRunSummary):
+    """A batch production as saved, with every figure worked out here."""
+
+    raw_kg: float | None = None
+    raw_cost: int
+    raw_used_kg: float | None = None
+    note: str | None = None
+    costs: list[ProductionRunCostOut]
+    slot_list: list[ProductionSlotOut]
+    pieces_received: int
+    cost_per_piece: float | None = None
+    closed_at: datetime | None = None
+    updated_at: datetime
+
+
+class ProductionRunDefaults(BaseModel):
+    """What a new production, and a new slot, start from: the last ones'
+    lines and prices (quantities left blank), or the built-in list."""
+
+    pieces_per_packet: int
+    costs: list[ProductionRunCostOut]
+    slot_costs: list[ProductionSlotCostOut]

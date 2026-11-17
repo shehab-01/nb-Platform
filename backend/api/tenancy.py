@@ -79,6 +79,8 @@ class StoreAccess:
     # assigned to Production here (store_users.production_access) — a super
     # admin too, but only when assigned.
     production_send: bool = False
+    # Which Production pages the store uses: "cooking" or "batch".
+    production_mode: str = "cooking"
 
 
 @dataclass(frozen=True)
@@ -145,6 +147,7 @@ def accessible(user: User, memberships: list[StoreAccess], all_stores: list[Stor
                 True,
                 PRODUCTION_ADMIN,
                 crm or s.store_id in assigned,
+                s.production_mode,
             )
             for s in all_stores
             if s.is_active
@@ -175,6 +178,7 @@ async def load_memberships(session: AsyncSession, user_id: int) -> list[StoreAcc
             Store.subtitle,
             StoreUser.crm_access,
             StoreUser.production_access,
+            Store.production_mode,
         )
         .join(Store, Store.id == StoreUser.store_id)
         .where(StoreUser.user_id == user_id)
@@ -183,7 +187,10 @@ async def load_memberships(session: AsyncSession, user_id: int) -> list[StoreAcc
     # The flag reads as a writer; accessible() raises production admins.
     return [
         StoreAccess(
-            *row[:8], production=PRODUCTION_WRITE if row[8] else None, production_send=row[8]
+            *row[:8],
+            production=PRODUCTION_WRITE if row[8] else None,
+            production_send=row[8],
+            production_mode=row[9],
         )
         for row in rows
     ]
@@ -192,11 +199,26 @@ async def load_memberships(session: AsyncSession, user_id: int) -> list[StoreAcc
 async def load_all_stores(session: AsyncSession) -> list[StoreAccess]:
     rows = await session.execute(
         select(
-            Store.id, Store.slug, Store.name, Store.is_active, Store.template, Store.subtitle
+            Store.id,
+            Store.slug,
+            Store.name,
+            Store.is_active,
+            Store.template,
+            Store.subtitle,
+            Store.production_mode,
         ).order_by(Store.id)
     )
     return [
-        StoreAccess(r.id, r.slug, r.name, "", r.is_active, r.template, r.subtitle)
+        StoreAccess(
+            r.id,
+            r.slug,
+            r.name,
+            "",
+            r.is_active,
+            r.template,
+            r.subtitle,
+            production_mode=r.production_mode,
+        )
         for r in rows
     ]
 

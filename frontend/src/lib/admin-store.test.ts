@@ -12,6 +12,7 @@ const a: StoreAccess = {
   crm: false,
   production: null,
   productionSend: false,
+  productionMode: "cooking",
 };
 const b: StoreAccess = {
   storeId: 2,
@@ -23,6 +24,7 @@ const b: StoreAccess = {
   crm: false,
   production: null,
   productionSend: false,
+  productionMode: "cooking",
 };
 
 describe("storeTitle", () => {

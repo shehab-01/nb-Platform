@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 
+import { PRODUCTION_MODES, productionMode } from "@/components/admin/production/modes";
 import { TemplatePreview } from "@/components/admin/stores/template-preview";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -75,6 +76,8 @@ type Draft = {
   template: string;
   /** Repeat-order block in hours; 0 means for good. */
   orderCooldownHours: number;
+  /** Which Production pages the store uses (components/admin/production/modes). */
+  productionMode: string;
   isActive: boolean;
 };
 
@@ -116,6 +119,7 @@ export function StoreForm({
     domain: store?.primaryDomain ?? store?.domains[0] ?? "",
     template: store?.template ?? "classic",
     orderCooldownHours: store?.orderCooldownHours ?? 0,
+    productionMode: store?.productionMode ?? "cooking",
     isActive: store?.isActive ?? true,
   });
   const [busy, setBusy] = React.useState(false);
@@ -229,6 +233,7 @@ export function StoreForm({
         orderPrefix: d.orderPrefix,
         theme: themeWithOptions(store?.theme ?? {}, d.template, opts),
         orderCooldownHours: d.orderCooldownHours,
+        productionMode: d.productionMode,
         domains: [d.domain.trim()],
         isActive: d.isActive,
       });
@@ -528,6 +533,23 @@ export function StoreForm({
                 ).map((c) => (
                   <SelectItem key={c.hours} value={String(c.hours)}>
                     {c.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Row>
+          <Row label="Production" hint={productionMode(d.productionMode).description}>
+            <Select
+              value={productionMode(d.productionMode).id}
+              onValueChange={(v) => setD({ ...d, productionMode: v })}
+            >
+              <SelectTrigger className="w-56">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PRODUCTION_MODES.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.name}
                   </SelectItem>
                 ))}
               </SelectContent>

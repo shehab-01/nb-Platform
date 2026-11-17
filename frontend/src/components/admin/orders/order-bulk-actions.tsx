@@ -327,8 +327,9 @@ export function OrderBulkActions({
               )}
               {couriers.length === 0 && (
                 <p className="text-xs text-muted-foreground">
-                  No courier is switched on. An owner can turn on Pathao or
-                  Carrybee in Settings.
+                  No courier is ready. In Settings → Store, Pathao or Carrybee
+                  needs to be switched on, with an account and a pickup store ID
+                  saved.
                 </p>
               )}
               <ActionButton

@@ -204,16 +204,21 @@ export function SettingsForm({
   const metaStatus: SectionStatus = current.metaPixelId || current.metaCapiTokenSet
     ? { label: "Connected", tone: "good" }
     : { label: "Not set", tone: "neutral" };
+  // A courier is offered on Shipping only once it is on, has an account and
+  // has a pickup store (stores.Integrations.couriers); say which is missing.
   const courierStatus = (
     on: boolean,
     account: CourierAccountBrief | null,
+    pickupStore: string,
     tested: { error: string | null } | null
   ): SectionStatus =>
     !on
       ? { label: "Off", tone: "neutral" }
       : !account
         ? { label: "No account", tone: "warning" }
-        : tested
+        : !pickupStore.trim() || pickupStore.trim() === "0"
+          ? { label: "No pickup store", tone: "warning" }
+          : tested
           ? tested.error
             ? { label: "Connection failed", tone: "warning" }
             : { label: "Connected", tone: "good" }
@@ -239,7 +244,7 @@ export function SettingsForm({
       <Section
         title="Pathao"
         note="Courier"
-        status={courierStatus(d.pathaoEnabled, current.pathaoAccount, test)}
+        status={courierStatus(d.pathaoEnabled, current.pathaoAccount, d.pathaoStoreId, test)}
         toggle={{ checked: d.pathaoEnabled, onChange: (on) => set("pathaoEnabled", on), label: "Use Pathao" }}
       >
         <AccountField
@@ -315,7 +320,7 @@ export function SettingsForm({
       <Section
         title="Carrybee"
         note={`Courier${current.carrybeeSandbox ? " · sandbox" : ""}`}
-        status={courierStatus(d.carrybeeEnabled, current.carrybeeAccount, cbTest)}
+        status={courierStatus(d.carrybeeEnabled, current.carrybeeAccount, d.carrybeeStoreId, cbTest)}
         toggle={{ checked: d.carrybeeEnabled, onChange: (on) => set("carrybeeEnabled", on), label: "Use Carrybee" }}
       >
         <AccountField

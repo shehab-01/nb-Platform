@@ -39,6 +39,8 @@ UNIT_LABELS = {
     "dozen": "ডজন",
     "packet": "প্যাকেট",
     "bottle": "বোতল",
+    "ream": "রিম",
+    "roll": "রোল",
 }
 
 SLOTS = asyncio.Semaphore(2)

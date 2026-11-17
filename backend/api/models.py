@@ -665,6 +665,11 @@ class Store(Base):
     # How long a phone number that has ordered is refused another storefront
     # order; 0 means for good. Staff orders from the admin are never refused.
     order_cooldown_hours: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Which Production pages the store uses: "cooking" (production_days) or
+    # "batch" (production_runs). See api.routers.stores.PRODUCTION_MODES.
+    production_mode: Mapped[str] = mapped_column(
+        String(20), default="cooking", server_default="cooking"
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     # Set when a super admin archives the store (only while inactive). An
     # archived store stays inactive until restored; its data is kept.
@@ -1309,3 +1314,140 @@ class ProductionItem(Base):
     __table_args__ = (
         Index("ix_production_items_store_name", "store_id", "name", unique=True),
     )
+
+
+class ProductionRun(Base):
+    """
+    A batch production (stores.production_mode = "batch"): an order of
+    `units` packets, opened on a day, whose finished packets come back in
+    slots (ProductionSlot) until nothing is pending, when it is closed.
+
+    What it costs: the raw material (raw_cost, for raw_kg bought), the lines
+    bought for the whole order up front (ProductionRunCost), and every
+    slot's own costs. raw_used_kg is filled in on closing and is a record
+    only: cost per packet counts the whole raw_cost for now. Nothing here is
+    a total; api.routers.production_runs.figures works them out.
+    """
+
+    __tablename__ = "production_runs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
+    name: Mapped[str] = mapped_column(String(120))
+    opened_on: Mapped[date] = mapped_column(Date)
+    units: Mapped[int] = mapped_column(Integer)
+    pieces_per_packet: Mapped[int] = mapped_column(Integer, default=20, server_default="20")
+    raw_kg: Mapped[Decimal | None] = mapped_column(Numeric(12, 3))
+    raw_cost: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    raw_used_kg: Mapped[Decimal | None] = mapped_column(Numeric(12, 3))
+    note: Mapped[str | None] = mapped_column(Text)
+    # Set when it was closed; from then on it is read only until reopened.
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closed_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    # Closed by a super admin while packets were still pending.
+    closed_early: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    updated_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    costs: Mapped[list["ProductionRunCost"]] = relationship(
+        lazy="selectin", order_by="ProductionRunCost.position", cascade="all, delete-orphan"
+    )
+    slots: Mapped[list["ProductionSlot"]] = relationship(
+        lazy="selectin", order_by="ProductionSlot.number", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (Index("ix_production_runs_store_opened", "store_id", "opened_on"),)
+
+
+class ProductionRunCost(Base):
+    """Something bought for the whole of a batch production: quantity ×
+    unit price. A line that follows_units (the packets themselves) always
+    has the order's units as its quantity. A blank quantity costs nothing
+    yet: it is filled in once known."""
+
+    __tablename__ = "production_run_costs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
+    run_id: Mapped[int] = mapped_column(ForeignKey("production_runs.id", ondelete="CASCADE"))
+    position: Mapped[int] = mapped_column(Integer)
+    item: Mapped[str] = mapped_column(String(120))
+    unit: Mapped[str | None] = mapped_column(String(20))
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(12, 3))
+    unit_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    follows_units: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
+    amount: Mapped[int] = mapped_column(Integer)
+
+    __table_args__ = (Index("ix_production_run_costs_store_run", "store_id", "run_id"),)
+
+
+class ProductionSlot(Base):
+    """One delivery of finished packets for a batch production, numbered
+    1, 2, … within it, with what the delivery costs. Each prints as its own
+    invoice. total_cost is the sum of its lines, stored on save."""
+
+    __tablename__ = "production_slots"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
+    run_id: Mapped[int] = mapped_column(ForeignKey("production_runs.id", ondelete="CASCADE"))
+    number: Mapped[int] = mapped_column(Integer)
+    received_on: Mapped[date] = mapped_column(Date)
+    packets: Mapped[int] = mapped_column(Integer)
+    note: Mapped[str | None] = mapped_column(String(300))
+    total_cost: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    updated_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    costs: Mapped[list["ProductionSlotCost"]] = relationship(
+        lazy="selectin", order_by="ProductionSlotCost.position", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index("ix_production_slots_store_run_number", "store_id", "run_id", "number", unique=True),
+    )
+
+
+class ProductionSlotCost(Base):
+    """A cost of one slot. basis says how amount was worked out:
+    "per_1000_pieces" (labour: rate for every 1,000 pieces received),
+    "per_packet" (rate × packets) or "fixed" (the amount typed, rate null)."""
+
+    __tablename__ = "production_slot_costs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
+    slot_id: Mapped[int] = mapped_column(ForeignKey("production_slots.id", ondelete="CASCADE"))
+    position: Mapped[int] = mapped_column(Integer)
+    label: Mapped[str] = mapped_column(String(80))
+    basis: Mapped[str] = mapped_column(String(20))
+    rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    amount: Mapped[int] = mapped_column(Integer)
+
+    __table_args__ = (Index("ix_production_slot_costs_store_slot", "store_id", "slot_id"),)

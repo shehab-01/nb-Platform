@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, CookingPot, Plus, UserCog } from "lucide-react";
 import { useAuth } from "@/components/admin/auth-context";
@@ -13,19 +14,31 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { listProductionDays, type ProductionDaySummary } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+// A store in batch mode gets its own pages (components/admin/production/
+// modes.ts), loaded only when the store uses them.
+const BatchRunList = dynamic(() => import("@/components/admin/production/batch/run-list"), {
+  loading: () => <Skeleton className="h-64 w-full" />,
+});
+
 /**
  * Production Cost: every production of a month in a table, newest first,
  * with the month in figures above it. "Add production" opens the entry page;
  * a row opens that production's dashboard. The month is in the URL
  * (?month=YYYY-MM), so saving a production can come back to its month.
+ * A store in batch mode sees its batch productions instead.
  */
 export default function ProductionListPage() {
+  const { store } = useAuth();
   return (
     <ProductionOnly>
-      {/* useSearchParams needs a Suspense boundary above it. */}
-      <React.Suspense fallback={<Skeleton className="h-64 w-full" />}>
-        <ProductionList />
-      </React.Suspense>
+      {store?.productionMode === "batch" ? (
+        <BatchRunList />
+      ) : (
+        /* useSearchParams needs a Suspense boundary above it. */
+        <React.Suspense fallback={<Skeleton className="h-64 w-full" />}>
+          <ProductionList />
+        </React.Suspense>
+      )}
     </ProductionOnly>
   );
 }

@@ -52,6 +52,11 @@ health_router = APIRouter(prefix="/stores", tags=["Stores"])
 # frontend/src/templates/index.ts.
 TEMPLATES = ("classic", "campaign", "campaign2", "campaign3", "spotlight")
 
+# How a store records production (api.routers.production for "cooking",
+# api.routers.production_runs for "batch"). Keep in step with
+# frontend/src/components/admin/production/modes.ts.
+PRODUCTION_MODES = ("cooking", "batch")
+
 
 # --- public ------------------------------------------------------------------
 
@@ -160,6 +165,7 @@ async def my_stores(
             subtitle=a.subtitle,
             role=a.role,
             template=a.template,
+            production_mode=a.production_mode,
             crm=a.crm,
             production=a.production,
             production_send=a.production_send,
@@ -184,6 +190,7 @@ def _out(store: Store) -> StoreOut:
         order_prefix=store.order_prefix,
         theme=store.theme or {},
         order_cooldown_hours=store.order_cooldown_hours,
+        production_mode=store.production_mode,
         is_active=store.is_active,
         archived_at=store.archived_at,
         domains=domains,
@@ -213,6 +220,14 @@ async def _check_prefix(session: AsyncSession, prefix: str, own_id: int | None) 
     if taken:
         raise HTTPException(
             status_code=409, detail=f"Order prefix {prefix} is already used by {taken}"
+        )
+
+
+def _check_production_mode(mode: str) -> None:
+    if mode not in PRODUCTION_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown production mode {mode!r}; one of {', '.join(PRODUCTION_MODES)}",
         )
 
 
@@ -276,6 +291,7 @@ async def create_store(
     payload: StoreCreate, session: AsyncSession = Depends(get_session)
 ) -> StoreOut:
     _check_template(payload.template)
+    _check_production_mode(payload.production_mode)
     if await session.scalar(select(Store.id).where(Store.slug == payload.slug)):
         raise HTTPException(status_code=409, detail="Slug already in use")
     await _check_prefix(session, payload.order_prefix, None)
@@ -288,6 +304,7 @@ async def create_store(
         currency=payload.currency,
         theme=payload.theme,
         order_cooldown_hours=payload.order_cooldown_hours,
+        production_mode=payload.production_mode,
         is_active=payload.is_active,
         domains=[],
     )
@@ -340,6 +357,9 @@ async def update_store(
         store.theme = payload.theme
     if payload.order_cooldown_hours is not None:
         store.order_cooldown_hours = payload.order_cooldown_hours
+    if payload.production_mode is not None:
+        _check_production_mode(payload.production_mode)
+        store.production_mode = payload.production_mode
     if payload.is_active is not None:
         if payload.is_active and store.archived_at is not None:
             raise HTTPException(

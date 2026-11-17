@@ -12,6 +12,7 @@ from api.routers.auth import router as auth_router
 from api.routers.drive import router as drive_router
 from api.routers.expenses import router as expenses_router
 from api.routers.production import router as production_router
+from api.routers.production_runs import router as production_runs_router
 from api.routers.proof_drops import admin_router as proof_drops_router
 from api.routers.proof_drops import public_router as proof_drop_public_router
 from api.routers.orders import router as orders_router
@@ -70,6 +71,7 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(orders_router, prefix="/api")
 app.include_router(expenses_router, prefix="/api")
 app.include_router(production_router, prefix="/api")
+app.include_router(production_runs_router, prefix="/api")
 app.include_router(drive_router, prefix="/api")
 app.include_router(proof_drops_router, prefix="/api")
 app.include_router(proof_drop_public_router, prefix="/api")

@@ -1050,6 +1050,7 @@ export async function getMyStores(): Promise<StoreAccess[]> {
       crm?: boolean;
       production?: "admin" | "write" | null;
       production_send?: boolean;
+      production_mode?: string;
     }[]
   >("/api/me/stores");
   return rows.map((r) => ({
@@ -1062,6 +1063,7 @@ export async function getMyStores(): Promise<StoreAccess[]> {
     crm: r.crm ?? false,
     production: r.production ?? null,
     productionSend: r.production_send ?? false,
+    productionMode: r.production_mode ?? "cooking",
   }));
 }
 
@@ -1078,6 +1080,8 @@ export type Store = {
   theme: Record<string, string>;
   /** Repeat-order block in hours; 0 means for good. */
   orderCooldownHours: number;
+  /** How the store records production: "cooking" or "batch". */
+  productionMode: string;
   isActive: boolean;
   /** Set while the store is archived (always inactive then); null otherwise. */
   archivedAt: string | null;
@@ -1097,6 +1101,7 @@ type ApiStore = {
   order_prefix: string;
   theme: Record<string, string>;
   order_cooldown_hours?: number;
+  production_mode?: string;
   is_active: boolean;
   archived_at?: string | null;
   domains: string[];
@@ -1116,6 +1121,7 @@ function mapStore(s: ApiStore): Store {
     orderPrefix: s.order_prefix,
     theme: s.theme ?? {},
     orderCooldownHours: s.order_cooldown_hours ?? 0,
+    productionMode: s.production_mode ?? "cooking",
     isActive: s.is_active,
     archivedAt: s.archived_at ?? null,
     domains: s.domains,
@@ -1135,6 +1141,7 @@ export type StoreInput = {
   orderPrefix: string;
   theme: Record<string, string>;
   orderCooldownHours: number;
+  productionMode: string;
   domains: string[];
   isActive: boolean;
 };
@@ -1149,6 +1156,7 @@ function storeBody(input: StoreInput) {
     order_prefix: input.orderPrefix,
     theme: input.theme,
     order_cooldown_hours: input.orderCooldownHours,
+    production_mode: input.productionMode,
     domains: input.domains,
     is_active: input.isActive,
   };
@@ -2449,7 +2457,18 @@ export type ProductionDaySummary = {
  *  components/admin/production/product-icons.tsx. */
 export type ProductionProduct = { id: number; name: string; icon: string };
 
-export const PRODUCTION_UNITS = ["kg", "g", "L", "ml", "pcs", "dozen", "packet", "bottle"] as const;
+export const PRODUCTION_UNITS = [
+  "kg",
+  "g",
+  "L",
+  "ml",
+  "pcs",
+  "dozen",
+  "packet",
+  "bottle",
+  "ream",
+  "roll",
+] as const;
 export type ProductionUnit = (typeof PRODUCTION_UNITS)[number];
 
 /** How a unit reads on screen. The API stores and checks the code; the
@@ -2463,6 +2482,8 @@ export const UNIT_LABELS: Record<ProductionUnit, string> = {
   dozen: "ডজন",
   packet: "প্যাকেট",
   bottle: "বোতল",
+  ream: "রিম",
+  roll: "রোল",
 };
 
 /** A unit code in Bangla; an unknown code (a newer API) shows as it is. */
@@ -2613,4 +2634,327 @@ export async function setPageAccess(
 /** A production as a PDF report, made on the server from the Word template. */
 export async function getProductionReport(day: string): Promise<Blob> {
   return requestBlob(`/api/production/days/${day}/report`);
+}
+
+// ---- Batch production (stores.production_mode = "batch") ----
+// An order of so many packets, bought for up front, received in slots.
+// Every amount and figure is worked out by the server.
+
+/** Something bought for the whole order: quantity × unit price. The packet
+ *  line follows the order's units; a blank quantity costs nothing yet. */
+export type RunCost = {
+  item: string;
+  unit: string | null;
+  quantity: number | null;
+  unitPrice: number | null;
+  followsUnits: boolean;
+  amount: number;
+};
+
+export type SlotCostBasis = "per_1000_pieces" | "per_packet" | "fixed";
+
+/** A cost of one slot: a rate per 1,000 pieces or per packet, or a typed
+ *  amount ("fixed", rate null). */
+export type SlotCost = { label: string; basis: SlotCostBasis; rate: number | null; amount: number };
+
+/** One delivery of finished packets. */
+export type ProductionSlot = {
+  id: number;
+  number: number;
+  receivedOn: string;
+  packets: number;
+  pieces: number;
+  note: string | null;
+  costs: SlotCost[];
+  totalCost: number;
+  updatedAt: string;
+};
+
+/** A batch production in the list. */
+export type ProductionRunSummary = {
+  id: number;
+  name: string;
+  openedOn: string;
+  units: number;
+  piecesPerPacket: number;
+  slots: number;
+  received: number;
+  pending: number;
+  materialsCost: number;
+  slotsCost: number;
+  totalCost: number;
+  /** Total cost over the packets received so far; null before any arrive. */
+  costPerPacket: number | null;
+  closed: boolean;
+  closedEarly: boolean;
+};
+
+export type ProductionRun = ProductionRunSummary & {
+  rawKg: number | null;
+  rawCost: number;
+  /** Filled in on closing; a record only (cost counts all raw bought). */
+  rawUsedKg: number | null;
+  note: string | null;
+  costs: RunCost[];
+  slotList: ProductionSlot[];
+  piecesReceived: number;
+  costPerPiece: number | null;
+  closedAt: string | null;
+  updatedAt: string;
+};
+
+/** What a new production and a new slot start from. */
+export type ProductionRunDefaults = {
+  piecesPerPacket: number;
+  costs: RunCost[];
+  slotCosts: SlotCost[];
+};
+
+/** Opening or correcting a production. Decimals go as strings so nothing is
+ *  lost to floating point on the way. */
+export type ProductionRunInput = {
+  name: string;
+  openedOn: string;
+  units: number;
+  piecesPerPacket: number;
+  rawKg: string | null;
+  rawCost: number;
+  costs: {
+    item: string;
+    unit: string | null;
+    quantity: string | null;
+    unitPrice: string | null;
+    followsUnits: boolean;
+  }[];
+  note: string | null;
+};
+
+export type ProductionSlotInput = {
+  receivedOn: string;
+  packets: number;
+  costs: { label: string; basis: SlotCostBasis; rate: string | null; amount: number | null }[];
+  note: string | null;
+};
+
+type ApiRunCost = {
+  item: string;
+  unit: string | null;
+  quantity: number | null;
+  unit_price: number | null;
+  follows_units: boolean;
+  amount: number;
+};
+type ApiSlotCost = { label: string; basis: SlotCostBasis; rate: number | null; amount: number };
+type ApiSlot = {
+  id: number;
+  number: number;
+  received_on: string;
+  packets: number;
+  pieces: number;
+  note: string | null;
+  costs: ApiSlotCost[];
+  total_cost: number;
+  updated_at: string;
+};
+type ApiRunSummary = {
+  id: number;
+  name: string;
+  opened_on: string;
+  units: number;
+  pieces_per_packet: number;
+  slots: number;
+  received: number;
+  pending: number;
+  materials_cost: number;
+  slots_cost: number;
+  total_cost: number;
+  cost_per_packet: number | null;
+  closed: boolean;
+  closed_early: boolean;
+};
+type ApiRun = ApiRunSummary & {
+  raw_kg: number | null;
+  raw_cost: number;
+  raw_used_kg: number | null;
+  note: string | null;
+  costs: ApiRunCost[];
+  slot_list: ApiSlot[];
+  pieces_received: number;
+  cost_per_piece: number | null;
+  closed_at: string | null;
+  updated_at: string;
+};
+
+function mapRunCost(c: ApiRunCost): RunCost {
+  return {
+    item: c.item,
+    unit: c.unit,
+    quantity: c.quantity,
+    unitPrice: c.unit_price,
+    followsUnits: c.follows_units,
+    amount: c.amount,
+  };
+}
+
+function mapRunSummary(r: ApiRunSummary): ProductionRunSummary {
+  return {
+    id: r.id,
+    name: r.name,
+    openedOn: r.opened_on,
+    units: r.units,
+    piecesPerPacket: r.pieces_per_packet,
+    slots: r.slots,
+    received: r.received,
+    pending: r.pending,
+    materialsCost: r.materials_cost,
+    slotsCost: r.slots_cost,
+    totalCost: r.total_cost,
+    costPerPacket: r.cost_per_packet,
+    closed: r.closed,
+    closedEarly: r.closed_early,
+  };
+}
+
+function mapRun(r: ApiRun): ProductionRun {
+  return {
+    ...mapRunSummary(r),
+    rawKg: r.raw_kg,
+    rawCost: r.raw_cost,
+    rawUsedKg: r.raw_used_kg,
+    note: r.note,
+    costs: r.costs.map(mapRunCost),
+    slotList: r.slot_list.map((s) => ({
+      id: s.id,
+      number: s.number,
+      receivedOn: s.received_on,
+      packets: s.packets,
+      pieces: s.pieces,
+      note: s.note,
+      costs: s.costs,
+      totalCost: s.total_cost,
+      updatedAt: s.updated_at,
+    })),
+    piecesReceived: r.pieces_received,
+    costPerPiece: r.cost_per_piece,
+    closedAt: r.closed_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+function runBody(input: ProductionRunInput) {
+  return JSON.stringify({
+    name: input.name,
+    opened_on: input.openedOn,
+    units: input.units,
+    pieces_per_packet: input.piecesPerPacket,
+    raw_kg: input.rawKg,
+    raw_cost: input.rawCost,
+    costs: input.costs.map((c) => ({
+      item: c.item,
+      unit: c.unit,
+      quantity: c.quantity,
+      unit_price: c.unitPrice,
+      follows_units: c.followsUnits,
+    })),
+    note: input.note,
+  });
+}
+
+function slotBody(input: ProductionSlotInput) {
+  return JSON.stringify({
+    received_on: input.receivedOn,
+    packets: input.packets,
+    costs: input.costs,
+    note: input.note,
+  });
+}
+
+/** Productions opened between start and end (inclusive), newest first; with
+ *  open, every production still open whenever it was opened. */
+export async function listProductionRuns(
+  opts: { start?: string; end?: string; open?: boolean } = {}
+): Promise<ProductionRunSummary[]> {
+  const q = new URLSearchParams();
+  if (opts.start) q.set("start", opts.start);
+  if (opts.end) q.set("end", opts.end);
+  if (opts.open) q.set("open", "true");
+  const rows = await request<ApiRunSummary[]>(`/api/production/runs?${q}`);
+  return rows.map(mapRunSummary);
+}
+
+export async function getProductionRunDefaults(): Promise<ProductionRunDefaults> {
+  const d = await request<{
+    pieces_per_packet: number;
+    costs: ApiRunCost[];
+    slot_costs: ApiSlotCost[];
+  }>("/api/production/runs/defaults");
+  return {
+    piecesPerPacket: d.pieces_per_packet,
+    costs: d.costs.map(mapRunCost),
+    slotCosts: d.slot_costs,
+  };
+}
+
+export async function getProductionRun(id: number): Promise<ProductionRun> {
+  return mapRun(await request<ApiRun>(`/api/production/runs/${id}`));
+}
+
+/** Opens a production, or (with id) corrects an open one. */
+export async function saveProductionRun(
+  input: ProductionRunInput,
+  id?: number
+): Promise<ProductionRun> {
+  const run = await request<ApiRun>(
+    id === undefined ? "/api/production/runs" : `/api/production/runs/${id}`,
+    { method: id === undefined ? "POST" : "PUT", body: runBody(input) }
+  );
+  return mapRun(run);
+}
+
+export async function deleteProductionRun(id: number): Promise<void> {
+  await requestVoid(`/api/production/runs/${id}`, { method: "DELETE" });
+}
+
+/** Receives a slot, or (with slotId) corrects one; returns the production. */
+export async function saveProductionSlot(
+  runId: number,
+  input: ProductionSlotInput,
+  slotId?: number
+): Promise<ProductionRun> {
+  const run = await request<ApiRun>(
+    slotId === undefined
+      ? `/api/production/runs/${runId}/slots`
+      : `/api/production/runs/${runId}/slots/${slotId}`,
+    { method: slotId === undefined ? "POST" : "PUT", body: slotBody(input) }
+  );
+  return mapRun(run);
+}
+
+export async function deleteProductionSlot(runId: number, slotId: number): Promise<ProductionRun> {
+  return mapRun(
+    await request<ApiRun>(`/api/production/runs/${runId}/slots/${slotId}`, { method: "DELETE" })
+  );
+}
+
+/** Closes the production, recording the raw material used. early: close
+ *  with packets still pending (super admin only). */
+export async function closeProductionRun(
+  id: number,
+  input: { rawUsedKg: string | null; early: boolean }
+): Promise<ProductionRun> {
+  const run = await request<ApiRun>(`/api/production/runs/${id}/close`, {
+    method: "POST",
+    body: JSON.stringify({ raw_used_kg: input.rawUsedKg, early: input.early }),
+  });
+  return mapRun(run);
+}
+
+/** Opens a closed production again (super admin only). */
+export async function reopenProductionRun(id: number): Promise<ProductionRun> {
+  return mapRun(await request<ApiRun>(`/api/production/runs/${id}/reopen`, { method: "POST" }));
+}
+
+/** A slot as a PDF invoice. */
+export async function getProductionSlotInvoice(runId: number, slotId: number): Promise<Blob> {
+  return requestBlob(`/api/production/runs/${runId}/slots/${slotId}/invoice`);
 }

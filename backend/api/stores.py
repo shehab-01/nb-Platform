@@ -56,6 +56,8 @@ class StoreConfig:
     order_cooldown_hours: int = 0
     # Which Production pages the admin shows: "cooking" or "batch".
     production_mode: str = "cooking"
+    # Keeps a stock of packets (api.services.stock).
+    stock_enabled: bool = False
     # The hostname the store was resolved from, or its primary domain when it
     # was resolved by slug.
     host: str | None = None
@@ -99,6 +101,7 @@ def _config(store: Store, host: str | None) -> StoreConfig:
         content={k: content_url(v) for k, v in (store.content or {}).items()},
         order_cooldown_hours=store.order_cooldown_hours or 0,
         production_mode=store.production_mode or "cooking",
+        stock_enabled=bool(store.stock_enabled),
         host=host or (domains[0] if domains else None),
         domains=domains,
     )

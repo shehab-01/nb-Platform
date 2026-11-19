@@ -52,6 +52,7 @@ from api.services import (
     pathao,
     pathao_address,
     pathao_sync,
+    stock,
 )
 from api.schemas import (
     AddressParseIn,
@@ -1939,7 +1940,13 @@ async def bulk_update(
             continue
         changed = False
         if payload.status is not None:
-            changed |= _move_status(session, order, user, payload.status)
+            was = order.status
+            if _move_status(session, order, user, payload.status):
+                changed = True
+                # Into History takes the order's packets out of stock.
+                await stock.follow_status(
+                    session, ctx.store, order, was, payload.status.value, user.id
+                )
         for flag in ("printed", "courier"):
             value = getattr(payload, flag)
             if value is not None:
@@ -2429,7 +2436,12 @@ async def update_order(
         _reprice(session, order, user, payload.pricing)
 
     if payload.status is not None:
-        _move_status(session, order, user, payload.status)
+        was = order.status
+        if _move_status(session, order, user, payload.status):
+            # Into History takes the order's packets out of stock.
+            await stock.follow_status(
+                session, ctx.store, order, was, payload.status.value, user.id
+            )
 
     for flag in ("printed", "courier"):
         value = getattr(payload, flag)

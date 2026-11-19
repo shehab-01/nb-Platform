@@ -48,7 +48,7 @@ from api.schemas import (
     ProductionSlotIn,
     ProductionSlotOut,
 )
-from api.services import production_invoice, production_report
+from api.services import production_invoice, production_report, stock
 
 router = APIRouter(prefix="/production/runs", tags=["Production (batch)"])
 
@@ -535,21 +535,23 @@ async def add_slot(
     _open(run)
     _check_slot(run, body, keep=None)
     costs = _slot_cost_rows(body.costs, body.packets, run.pieces_per_packet, store_id)
-    run.slots.append(
-        ProductionSlot(
-            store_id=store_id,
-            number=max((s.number for s in run.slots), default=0) + 1,
-            received_on=body.received_on,
-            packets=body.packets,
-            note=body.note,
-            costs=costs,
-            total_cost=sum(c.amount for c in costs),
-            created_by_id=ctx.user.id,
-            updated_by_id=ctx.user.id,
-        )
+    slot = ProductionSlot(
+        store_id=store_id,
+        number=max((s.number for s in run.slots), default=0) + 1,
+        received_on=body.received_on,
+        packets=body.packets,
+        note=body.note,
+        costs=costs,
+        total_cost=sum(c.amount for c in costs),
+        created_by_id=ctx.user.id,
+        updated_by_id=ctx.user.id,
     )
+    run.slots.append(slot)
     run.updated_by_id = ctx.user.id
     try:
+        # Flushed first so the slot has an id for its stock row.
+        await session.flush()
+        await stock.follow_slot(session, ctx.store, slot, ctx.user.id)
         await session.commit()
     except IntegrityError:
         # Someone else added a slot to the same production at that moment.
@@ -579,6 +581,7 @@ async def edit_slot(
     slot.total_cost = sum(c.amount for c in slot.costs)
     slot.updated_by_id = ctx.user.id
     run.updated_by_id = ctx.user.id
+    await stock.follow_slot(session, ctx.store, slot, ctx.user.id)
     await session.commit()
     return await _reload(session, store_id, run_id)
 
@@ -591,7 +594,8 @@ async def delete_slot(
     ctx: tenancy.StoreContext = Depends(_admin),
 ) -> ProductionRunOut:
     """Remove a slot from an open production (production admins only). The
-    others keep their numbers, so an invoice already printed still matches."""
+    others keep their numbers, so an invoice already printed still matches.
+    Its stock row goes with it (stock_movements.slot_id cascades)."""
     store_id = ctx.store.id
     run = await _load(session, store_id, run_id)
     _open(run)

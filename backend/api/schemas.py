@@ -675,6 +675,8 @@ class VariantOut(BaseModel):
     product_id: int
     label: str
     default_quantity: int
+    # Packets one of this option takes out of stock (stores.stock_enabled).
+    stock_packets: int = 1
     unit_price: int
     sku: str
     is_default: bool
@@ -706,6 +708,7 @@ class VariantSave(BaseModel):
     id: int | None = None
     label: str = Field(default="", max_length=120)
     default_quantity: int = Field(default=1, ge=1, le=99)
+    stock_packets: int = Field(default=1, ge=1, le=1000)
     unit_price: int = Field(ge=1)
     sku: str = Field(min_length=1, max_length=64)
     is_default: bool = False
@@ -1021,6 +1024,8 @@ class StoreAccessOut(BaseModel):
     template: str
     # Which Production pages the store uses: "cooking" or "batch".
     production_mode: str = "cooking"
+    # Keeps a stock of packets: the Stock page and "Packets" on each option.
+    stock_enabled: bool = False
     # May open this store's CRM (always true for a super admin).
     crm: bool = False
     # The Production pages: "admin", "write" or null (no access).
@@ -1044,6 +1049,7 @@ class StoreOut(BaseModel):
     theme: dict
     order_cooldown_hours: int
     production_mode: str = "cooking"
+    stock_enabled: bool = False
     is_active: bool
     archived_at: datetime | None = None
     domains: list[str]
@@ -1077,6 +1083,8 @@ class StoreCreate(BaseModel):
     # How the store records production: "cooking" or "batch" (checked
     # against api.routers.stores.PRODUCTION_MODES).
     production_mode: str = Field(default="cooking", max_length=20)
+    # Keeps a stock of packets (api.services.stock).
+    stock_enabled: bool = False
     # The first is the primary domain. Normalised (lowercased, port dropped)
     # before validation and storage.
     domains: list[str] = Field(default_factory=list, max_length=20)
@@ -1144,6 +1152,7 @@ class StoreUpdate(BaseModel):
     theme: dict[str, str] | None = None
     order_cooldown_hours: int | None = Field(default=None, ge=0, le=MAX_COOLDOWN_HOURS)
     production_mode: str | None = Field(default=None, max_length=20)
+    stock_enabled: bool | None = None
     domains: list[str] | None = Field(default=None, max_length=20)
     is_active: bool | None = None
 
@@ -1756,3 +1765,102 @@ class ProductionRunDefaults(BaseModel):
     pieces_per_packet: int
     costs: list[ProductionRunCostOut]
     slot_costs: list[ProductionSlotCostOut]
+
+
+# --- Stock (stores.stock_enabled) --------------------------------------------
+
+
+class StockOptionOut(BaseModel):
+    """An option customers buy, with how many packets one of it holds: what
+    the return form offers, and what History takes off per order line."""
+
+    variant_id: int
+    name: str
+    stock_packets: int
+    is_active: bool
+
+
+class StockDayOut(BaseModel):
+    day: date
+    received: int
+    # Positive: packets that left in orders moved to History that day.
+    sent: int
+    returned: int
+    # Signed: admin corrections.
+    adjusted: int
+    closing: int
+
+
+class StockEntryOut(BaseModel):
+    """One movement typed or received — slots, returns, corrections. Sales
+    are many and come from History, so the days show them as totals."""
+
+    id: int
+    kind: str
+    on_day: date
+    packets: int
+    note: str | None = None
+    variant_name: str | None = None
+    combos: int | None = None
+    run_id: int | None = None
+    run_name: str | None = None
+    slot_number: int | None = None
+    created_by: str | None = None
+    created_at: datetime
+
+
+class StockOut(BaseModel):
+    on_hand: int
+    month: str
+    opening: int
+    received: int
+    sent: int
+    returned: int
+    adjusted: int
+    closing: int
+    days: list[StockDayOut]
+    entries: list[StockEntryOut]
+    options: list[StockOptionOut]
+
+
+class StockReturnIn(BaseModel):
+    """So many of one option came back from the courier."""
+
+    variant_id: int
+    combos: int = Field(ge=1, le=100_000)
+    # Today when left out; only a production admin may name another day.
+    on_day: date | None = None
+    note: str | None = Field(default=None, max_length=300)
+
+
+class StockAdjustIn(BaseModel):
+    """A correction: + packets found or recounted, − damaged, given away."""
+
+    packets: int = Field(ge=-1_000_000, le=1_000_000)
+    on_day: date | None = None
+    note: str = Field(min_length=1, max_length=300)
+
+    @field_validator("packets")
+    @classmethod
+    def _not_zero(cls, value: int) -> int:
+        if value == 0:
+            raise ValueError("A correction must change the stock")
+        return value
+
+    @field_validator("note")
+    @classmethod
+    def _reason(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Say why the stock is corrected")
+        return value
+
+
+class StockSyncOut(BaseModel):
+    slots_added: int
+    slots_updated: int
+    sales_added: int
+    sales_updated: int
+    sales_removed: int
+    unsized_orders: int
+    on_hand: int

@@ -166,6 +166,7 @@ async def my_stores(
             role=a.role,
             template=a.template,
             production_mode=a.production_mode,
+            stock_enabled=a.stock_enabled,
             crm=a.crm,
             production=a.production,
             production_send=a.production_send,
@@ -191,6 +192,7 @@ def _out(store: Store) -> StoreOut:
         theme=store.theme or {},
         order_cooldown_hours=store.order_cooldown_hours,
         production_mode=store.production_mode,
+        stock_enabled=store.stock_enabled,
         is_active=store.is_active,
         archived_at=store.archived_at,
         domains=domains,
@@ -305,6 +307,7 @@ async def create_store(
         theme=payload.theme,
         order_cooldown_hours=payload.order_cooldown_hours,
         production_mode=payload.production_mode,
+        stock_enabled=payload.stock_enabled,
         is_active=payload.is_active,
         domains=[],
     )
@@ -360,6 +363,8 @@ async def update_store(
     if payload.production_mode is not None:
         _check_production_mode(payload.production_mode)
         store.production_mode = payload.production_mode
+    if payload.stock_enabled is not None:
+        store.stock_enabled = payload.stock_enabled
     if payload.is_active is not None:
         if payload.is_active and store.archived_at is not None:
             raise HTTPException(

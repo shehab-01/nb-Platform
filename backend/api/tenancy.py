@@ -81,6 +81,8 @@ class StoreAccess:
     production_send: bool = False
     # Which Production pages the store uses: "cooking" or "batch".
     production_mode: str = "cooking"
+    # Keeps a stock of packets: the Stock page shows.
+    stock_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -148,6 +150,7 @@ def accessible(user: User, memberships: list[StoreAccess], all_stores: list[Stor
                 PRODUCTION_ADMIN,
                 crm or s.store_id in assigned,
                 s.production_mode,
+                s.stock_enabled,
             )
             for s in all_stores
             if s.is_active
@@ -179,6 +182,7 @@ async def load_memberships(session: AsyncSession, user_id: int) -> list[StoreAcc
             StoreUser.crm_access,
             StoreUser.production_access,
             Store.production_mode,
+            Store.stock_enabled,
         )
         .join(Store, Store.id == StoreUser.store_id)
         .where(StoreUser.user_id == user_id)
@@ -191,6 +195,7 @@ async def load_memberships(session: AsyncSession, user_id: int) -> list[StoreAcc
             production=PRODUCTION_WRITE if row[8] else None,
             production_send=row[8],
             production_mode=row[9],
+            stock_enabled=row[10],
         )
         for row in rows
     ]
@@ -206,6 +211,7 @@ async def load_all_stores(session: AsyncSession) -> list[StoreAccess]:
             Store.template,
             Store.subtitle,
             Store.production_mode,
+            Store.stock_enabled,
         ).order_by(Store.id)
     )
     return [
@@ -218,6 +224,7 @@ async def load_all_stores(session: AsyncSession) -> list[StoreAccess]:
             r.template,
             r.subtitle,
             production_mode=r.production_mode,
+            stock_enabled=r.stock_enabled,
         )
         for r in rows
     ]

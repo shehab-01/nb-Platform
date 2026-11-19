@@ -7,6 +7,7 @@ import {
   ChevronRight,
   ChevronsUpDown,
   Activity,
+  Boxes,
   Check,
   CookingPot,
   LayoutDashboard,
@@ -65,6 +66,8 @@ type NavItem = {
   permission?: Permission;
   /** superAdmin: shown to super admins only, whatever the store role. */
   children?: { title: string; url: string; superAdmin?: boolean }[];
+  /** Only for a store that keeps stock (stores.stock_enabled). */
+  stock?: boolean;
 };
 
 /** Everything about the store being worked in. */
@@ -117,6 +120,7 @@ const platformNav: NavItem[] = [
 const crmNav: NavItem[] = [
   { title: "Expenses", url: "/admin/crm/expenses", icon: Wallet, permission: "crm" },
   { title: "Production", url: "/admin/crm/production", icon: CookingPot, permission: "production" },
+  { title: "Stock", url: "/admin/crm/stock", icon: Boxes, permission: "production", stock: true },
 ];
 
 function roleLabel(role: string): string {
@@ -134,7 +138,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     ? storeNav.filter((item) => !item.permission || can(item.permission))
     : [];
   const crmItems = store
-    ? crmNav.filter((item) => !item.permission || can(item.permission))
+    ? crmNav.filter(
+        (item) =>
+          (!item.permission || can(item.permission)) && (!item.stock || store.stockEnabled)
+      )
     : [];
 
   return (

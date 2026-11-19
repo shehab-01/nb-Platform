@@ -16,6 +16,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { useAuth } from "@/components/admin/auth-context";
+import { packetsInLabel } from "@/lib/packets";
 import { uuid } from "@/lib/uuid";
 import type { ProductSaveInput } from "@/lib/api";
 import { variantTitle, type Product } from "@/lib/products";
@@ -28,6 +30,8 @@ type Row = {
   label: string;
   unitPrice: number;
   defaultQuantity: number;
+  /** Packets one of it takes out of stock (stores that keep stock). */
+  stockPackets: number;
   sku: string;
   isDefault: boolean;
   imageUrl: string | null;
@@ -43,6 +47,7 @@ function newRow(isDefault: boolean): Row {
     label: "",
     unitPrice: 0,
     defaultQuantity: 1,
+    stockPackets: 1,
     sku: "",
     isDefault,
     imageUrl: null,
@@ -63,6 +68,7 @@ function fromProduct(product: Product | null): Draft {
       label: v.label,
       unitPrice: v.unitPrice,
       defaultQuantity: v.defaultQuantity,
+      stockPackets: v.stockPackets,
       sku: v.sku,
       isDefault: v.isDefault,
       imageUrl: v.imageUrl,
@@ -81,6 +87,7 @@ function fingerprint(draft: Draft): string {
       label: r.label,
       unitPrice: r.unitPrice,
       defaultQuantity: r.defaultQuantity,
+      stockPackets: r.stockPackets,
       sku: r.sku,
       isDefault: r.isDefault,
       file: r.file ? r.file.name + r.file.size : null,
@@ -171,7 +178,8 @@ export function ProductEditor({
     draft.title.trim().length > 0 &&
     draft.rows.length > 0 &&
     draft.rows.every(
-      (r) => r.sku.trim().length > 0 && r.unitPrice > 0 && r.defaultQuantity >= 1
+      (r) =>
+        r.sku.trim().length > 0 && r.unitPrice > 0 && r.defaultQuantity >= 1 && r.stockPackets >= 1
     );
 
   const submit = async () => {
@@ -188,6 +196,7 @@ export function ProductEditor({
             label: r.label.trim(),
             unitPrice: r.unitPrice,
             defaultQuantity: r.defaultQuantity,
+            stockPackets: r.stockPackets,
             sku: r.sku.trim(),
             isDefault: r.isDefault,
           })),
@@ -348,6 +357,11 @@ function VersionRow({
   }, [row.file]);
   const shown = preview ?? row.imageUrl;
   const id = (field: string) => `pe-v${index}-${field}`;
+  // A store that keeps stock counts each option in packets; the size often
+  // already says how many ("৩ প্যাকেট"), so a mismatch is pointed out.
+  const { store } = useAuth();
+  const stock = store?.stockEnabled ?? false;
+  const named = stock ? packetsInLabel(row.label) : null;
 
   return (
     <div className="rounded-lg border p-3">
@@ -381,7 +395,13 @@ function VersionRow({
         </Button>
       </div>
 
-      <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_6rem_5rem_1fr]">
+      <div
+        className={
+          stock
+            ? "mt-3 grid gap-3 sm:grid-cols-[1fr_6rem_5rem_5.5rem_1fr]"
+            : "mt-3 grid gap-3 sm:grid-cols-[1fr_6rem_5rem_1fr]"
+        }
+      >
         <div className="grid gap-1.5">
           <Label htmlFor={id("label")} className="text-xs">
             Size
@@ -422,6 +442,23 @@ function VersionRow({
             }
           />
         </div>
+        {stock && (
+          <div className="grid gap-1.5">
+            <Label htmlFor={id("packets")} className="text-xs">
+              Packets
+            </Label>
+            <Input
+              id={id("packets")}
+              type="number"
+              min={1}
+              max={1000}
+              value={row.stockPackets}
+              onChange={(e) =>
+                onChange({ stockPackets: Math.max(1, Math.floor(Number(e.target.value)) || 1) })
+              }
+            />
+          </div>
+        )}
         <div className="grid gap-1.5">
           <Label htmlFor={id("sku")} className="text-xs">
             SKU
@@ -434,6 +471,28 @@ function VersionRow({
           />
         </div>
       </div>
+      {stock && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {named !== null && named !== row.stockPackets ? (
+            <span className="text-amber-700 dark:text-amber-400">
+              The size says {named} packets, but one of this takes {row.stockPackets} out of
+              stock.{" "}
+              <button
+                type="button"
+                className="font-medium underline underline-offset-2"
+                onClick={() => onChange({ stockPackets: named })}
+              >
+                Use {named}
+              </button>
+            </span>
+          ) : (
+            <>
+              One of this takes {row.stockPackets} {row.stockPackets === 1 ? "packet" : "packets"} out
+              of stock when its order goes to History.
+            </>
+          )}
+        </p>
+      )}
 
       <div className="mt-3 flex items-center gap-3">
         {shown ? (

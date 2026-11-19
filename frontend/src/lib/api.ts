@@ -1051,6 +1051,7 @@ export async function getMyStores(): Promise<StoreAccess[]> {
       production?: "admin" | "write" | null;
       production_send?: boolean;
       production_mode?: string;
+      stock_enabled?: boolean;
     }[]
   >("/api/me/stores");
   return rows.map((r) => ({
@@ -1064,6 +1065,7 @@ export async function getMyStores(): Promise<StoreAccess[]> {
     production: r.production ?? null,
     productionSend: r.production_send ?? false,
     productionMode: r.production_mode ?? "cooking",
+    stockEnabled: r.stock_enabled ?? false,
   }));
 }
 
@@ -1082,6 +1084,8 @@ export type Store = {
   orderCooldownHours: number;
   /** How the store records production: "cooking" or "batch". */
   productionMode: string;
+  /** Keeps a stock of packets (the Stock page). */
+  stockEnabled: boolean;
   isActive: boolean;
   /** Set while the store is archived (always inactive then); null otherwise. */
   archivedAt: string | null;
@@ -1102,6 +1106,7 @@ type ApiStore = {
   theme: Record<string, string>;
   order_cooldown_hours?: number;
   production_mode?: string;
+  stock_enabled?: boolean;
   is_active: boolean;
   archived_at?: string | null;
   domains: string[];
@@ -1122,6 +1127,7 @@ function mapStore(s: ApiStore): Store {
     theme: s.theme ?? {},
     orderCooldownHours: s.order_cooldown_hours ?? 0,
     productionMode: s.production_mode ?? "cooking",
+    stockEnabled: s.stock_enabled ?? false,
     isActive: s.is_active,
     archivedAt: s.archived_at ?? null,
     domains: s.domains,
@@ -1142,6 +1148,7 @@ export type StoreInput = {
   theme: Record<string, string>;
   orderCooldownHours: number;
   productionMode: string;
+  stockEnabled: boolean;
   domains: string[];
   isActive: boolean;
 };
@@ -1157,6 +1164,7 @@ function storeBody(input: StoreInput) {
     theme: input.theme,
     order_cooldown_hours: input.orderCooldownHours,
     production_mode: input.productionMode,
+    stock_enabled: input.stockEnabled,
     domains: input.domains,
     is_active: input.isActive,
   };
@@ -1482,6 +1490,7 @@ type ApiVariant = {
   label: string;
   image_url: string | null;
   default_quantity: number;
+  stock_packets?: number;
   unit_price: number;
   sku: string;
   is_default: boolean;
@@ -1504,6 +1513,7 @@ function mapVariant(v: ApiVariant): Variant {
     label: v.label,
     imageUrl: v.image_url,
     defaultQuantity: v.default_quantity,
+    stockPackets: v.stock_packets ?? 1,
     unitPrice: v.unit_price,
     sku: v.sku,
     isDefault: v.is_default,
@@ -1527,6 +1537,8 @@ export type VariantSaveInput = {
   id: number | null;
   label: string;
   defaultQuantity: number;
+  /** Packets one of this option takes out of stock. */
+  stockPackets: number;
   unitPrice: number;
   sku: string;
   isDefault: boolean;
@@ -1566,6 +1578,7 @@ export async function saveProduct(
       id: v.id,
       label: v.label,
       default_quantity: v.defaultQuantity,
+      stock_packets: v.stockPackets,
       unit_price: v.unitPrice,
       sku: v.sku,
       is_default: v.isDefault,
@@ -2957,4 +2970,192 @@ export async function reopenProductionRun(id: number): Promise<ProductionRun> {
 /** A slot as a PDF invoice. */
 export async function getProductionSlotInvoice(runId: number, slotId: number): Promise<Blob> {
   return requestBlob(`/api/production/runs/${runId}/slots/${slotId}/invoice`);
+}
+
+// ---- Stock (stores.stock_enabled) ----
+// Packets in hand: production slots received add them, orders moved to
+// History take them (each line × its option's packets), courier returns
+// put them back, an admin's correction moves them either way.
+
+export type StockKind = "slot" | "sale" | "return" | "adjust";
+
+export type StockOption = {
+  variantId: number;
+  name: string;
+  /** Packets one of this option holds. */
+  stockPackets: number;
+  isActive: boolean;
+};
+
+export type StockDay = {
+  day: string;
+  received: number;
+  /** Positive: packets that left in orders moved to History that day. */
+  sent: number;
+  returned: number;
+  /** Signed. */
+  adjusted: number;
+  closing: number;
+};
+
+export type StockEntry = {
+  id: number;
+  kind: StockKind;
+  onDay: string;
+  /** Signed: + in, − out. */
+  packets: number;
+  note: string | null;
+  variantName: string | null;
+  combos: number | null;
+  runId: number | null;
+  runName: string | null;
+  slotNumber: number | null;
+  createdBy: string | null;
+  createdAt: string;
+};
+
+export type StockMonth = {
+  onHand: number;
+  month: string;
+  opening: number;
+  received: number;
+  sent: number;
+  returned: number;
+  adjusted: number;
+  closing: number;
+  /** Newest first; only days that moved. */
+  days: StockDay[];
+  /** Slots, returns and corrections, newest first. */
+  entries: StockEntry[];
+  options: StockOption[];
+};
+
+type ApiStockMonth = {
+  on_hand: number;
+  month: string;
+  opening: number;
+  received: number;
+  sent: number;
+  returned: number;
+  adjusted: number;
+  closing: number;
+  days: StockDay[];
+  entries: {
+    id: number;
+    kind: StockKind;
+    on_day: string;
+    packets: number;
+    note: string | null;
+    variant_name: string | null;
+    combos: number | null;
+    run_id: number | null;
+    run_name: string | null;
+    slot_number: number | null;
+    created_by: string | null;
+    created_at: string;
+  }[];
+  options: { variant_id: number; name: string; stock_packets: number; is_active: boolean }[];
+};
+
+export async function getStock(month: string): Promise<StockMonth> {
+  const s = await request<ApiStockMonth>(`/api/stock?month=${encodeURIComponent(month)}`);
+  return {
+    onHand: s.on_hand,
+    month: s.month,
+    opening: s.opening,
+    received: s.received,
+    sent: s.sent,
+    returned: s.returned,
+    adjusted: s.adjusted,
+    closing: s.closing,
+    days: s.days,
+    entries: s.entries.map((e) => ({
+      id: e.id,
+      kind: e.kind,
+      onDay: e.on_day,
+      packets: e.packets,
+      note: e.note,
+      variantName: e.variant_name,
+      combos: e.combos,
+      runId: e.run_id,
+      runName: e.run_name,
+      slotNumber: e.slot_number,
+      createdBy: e.created_by,
+      createdAt: e.created_at,
+    })),
+    options: s.options.map((o) => ({
+      variantId: o.variant_id,
+      name: o.name,
+      stockPackets: o.stock_packets,
+      isActive: o.is_active,
+    })),
+  };
+}
+
+/** So many of one option came back from the courier. onDay null: today. */
+export async function addStockReturn(input: {
+  variantId: number;
+  combos: number;
+  onDay: string | null;
+  note: string;
+}): Promise<void> {
+  await request<unknown>("/api/stock/returns", {
+    method: "POST",
+    body: JSON.stringify({
+      variant_id: input.variantId,
+      combos: input.combos,
+      on_day: input.onDay,
+      note: input.note || null,
+    }),
+  });
+}
+
+/** A correction with its reason (production admins). */
+export async function addStockAdjustment(input: {
+  packets: number;
+  onDay: string | null;
+  note: string;
+}): Promise<void> {
+  await request<unknown>("/api/stock/adjustments", {
+    method: "POST",
+    body: JSON.stringify({ packets: input.packets, on_day: input.onDay, note: input.note }),
+  });
+}
+
+/** Removes a return or a correction (production admins). */
+export async function deleteStockEntry(id: number): Promise<void> {
+  await requestVoid(`/api/stock/entries/${id}`, { method: "DELETE" });
+}
+
+export type StockSyncResult = {
+  slotsAdded: number;
+  slotsUpdated: number;
+  salesAdded: number;
+  salesUpdated: number;
+  salesRemoved: number;
+  unsizedOrders: number;
+  onHand: number;
+};
+
+/** Fills stock from every slot received and every order in History, and
+ *  repairs any drift. Safe to repeat (production admins). */
+export async function syncStock(): Promise<StockSyncResult> {
+  const r = await request<{
+    slots_added: number;
+    slots_updated: number;
+    sales_added: number;
+    sales_updated: number;
+    sales_removed: number;
+    unsized_orders: number;
+    on_hand: number;
+  }>("/api/stock/sync", { method: "POST" });
+  return {
+    slotsAdded: r.slots_added,
+    slotsUpdated: r.slots_updated,
+    salesAdded: r.sales_added,
+    salesUpdated: r.sales_updated,
+    salesRemoved: r.sales_removed,
+    unsizedOrders: r.unsized_orders,
+    onHand: r.on_hand,
+  };
 }

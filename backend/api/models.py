@@ -563,6 +563,9 @@ class ProductVariant(Base):
     sku: Mapped[str] = mapped_column(String(64))
     # How many one storefront order of this variant places.
     default_quantity: Mapped[int] = mapped_column(Integer, default=1)
+    # How many packets one of this option takes out of stock: 3 for the
+    # 3-packet combo. Only read where the store keeps stock.
+    stock_packets: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     # The variant selected when the landing page loads, and what the old
     # storefront and an order that named no variant are priced against.
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -669,6 +672,11 @@ class Store(Base):
     # "batch" (production_runs). See api.routers.stores.PRODUCTION_MODES.
     production_mode: Mapped[str] = mapped_column(
         String(20), default="cooking", server_default="cooking"
+    )
+    # Keeps a stock of packets (stock_movements): received slots in, orders
+    # moved to History out, courier returns back in. Off unless switched on.
+    stock_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     # Set when a super admin archives the store (only while inactive). An
@@ -1451,3 +1459,66 @@ class ProductionSlotCost(Base):
     amount: Mapped[int] = mapped_column(Integer)
 
     __table_args__ = (Index("ix_production_slot_costs_store_slot", "store_id", "slot_id"),)
+
+
+class StockMovement(Base):
+    """
+    One change to a store's stock of packets (stores.stock_enabled). Stock in
+    hand is the sum of packets, signed: + in, − out. kind says why:
+
+      slot    a production slot received; one row per slot, kept in step
+              with it (and deleted with it, by the foreign key)
+      sale    an order moved to History, its lines' quantity × each option's
+              stock_packets; one row per order, removed if it leaves History
+      return  so many of one option the courier brought back
+      adjust  a correction an admin typed, with the reason in note
+
+    The partial unique indexes make one row per slot and one sale per order
+    a database rule, so syncing again never counts anything twice.
+    """
+
+    __tablename__ = "stock_movements"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="RESTRICT"))
+    kind: Mapped[str] = mapped_column(String(20))
+    # The Dhaka day it counts on.
+    on_day: Mapped[date] = mapped_column(Date)
+    packets: Mapped[int] = mapped_column(Integer)
+    slot_id: Mapped[int | None] = mapped_column(
+        ForeignKey("production_slots.id", ondelete="CASCADE")
+    )
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"))
+    variant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("product_variants.id", ondelete="SET NULL")
+    )
+    # A return's option and count, the name copied so it reads as entered.
+    variant_name: Mapped[str | None] = mapped_column(String(255))
+    combos: Mapped[int | None] = mapped_column(Integer)
+    note: Mapped[str | None] = mapped_column(String(300))
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    created_by: Mapped["User | None"] = relationship(lazy="joined")
+
+    __table_args__ = (
+        Index("ix_stock_movements_store_day", "store_id", "on_day"),
+        Index(
+            "uq_stock_movements_store_slot",
+            "store_id",
+            "slot_id",
+            unique=True,
+            postgresql_where=text("slot_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_stock_movements_store_sale",
+            "store_id",
+            "order_id",
+            unique=True,
+            postgresql_where=text("kind = 'sale'"),
+        ),
+    )

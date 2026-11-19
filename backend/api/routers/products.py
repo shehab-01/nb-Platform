@@ -128,6 +128,7 @@ async def _apply_variants(
             row.unit_price = spec.unit_price
             row.sku = spec.sku
             row.default_quantity = spec.default_quantity
+            row.stock_packets = spec.stock_packets
         else:
             row = ProductVariant(
                 product_id=product.id,
@@ -135,6 +136,7 @@ async def _apply_variants(
                 unit_price=spec.unit_price,
                 sku=spec.sku,
                 default_quantity=spec.default_quantity,
+                stock_packets=spec.stock_packets,
                 is_default=False,
             )
             session.add(row)

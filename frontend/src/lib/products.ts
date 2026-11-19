@@ -8,6 +8,9 @@ export type Variant = {
   label: string;
   imageUrl: string | null;
   defaultQuantity: number;
+  /** Packets one of this option takes out of stock: 3 for a 3-packet
+   *  combo. Only used where the store keeps stock. */
+  stockPackets: number;
   unitPrice: number;
   sku: string;
   isDefault: boolean;

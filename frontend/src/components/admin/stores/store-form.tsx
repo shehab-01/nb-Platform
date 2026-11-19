@@ -78,6 +78,7 @@ type Draft = {
   orderCooldownHours: number;
   /** Which Production pages the store uses (components/admin/production/modes). */
   productionMode: string;
+  stockEnabled: boolean;
   isActive: boolean;
 };
 
@@ -120,6 +121,7 @@ export function StoreForm({
     template: store?.template ?? "classic",
     orderCooldownHours: store?.orderCooldownHours ?? 0,
     productionMode: store?.productionMode ?? "cooking",
+    stockEnabled: store?.stockEnabled ?? false,
     isActive: store?.isActive ?? true,
   });
   const [busy, setBusy] = React.useState(false);
@@ -234,6 +236,7 @@ export function StoreForm({
         theme: themeWithOptions(store?.theme ?? {}, d.template, opts),
         orderCooldownHours: d.orderCooldownHours,
         productionMode: d.productionMode,
+        stockEnabled: d.stockEnabled,
         domains: [d.domain.trim()],
         isActive: d.isActive,
       });
@@ -554,6 +557,19 @@ export function StoreForm({
                 ))}
               </SelectContent>
             </Select>
+          </Row>
+          <Row
+            label="Stock"
+            hint={
+              d.stockEnabled
+                ? "Slots received add packets; History takes them; returns put them back"
+                : "No stock kept"
+            }
+          >
+            <Switch
+              checked={d.stockEnabled}
+              onCheckedChange={(v) => setD({ ...d, stockEnabled: v })}
+            />
           </Row>
           {!creating && (
             <Row label="Active" hint={d.isActive ? "Serving customers" : "Domain answers, nothing sells"}>

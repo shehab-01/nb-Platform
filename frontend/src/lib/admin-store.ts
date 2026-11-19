@@ -24,6 +24,9 @@ export type StoreAccess = {
   /** Which Production pages the store uses: "cooking" (by day) or "batch"
    *  (an order received in slots). See components/admin/production/modes.ts. */
   productionMode: string;
+  /** Keeps a stock of packets: the Stock page, and "Packets" on each
+   *  product option. */
+  stockEnabled: boolean;
 };
 
 const STORAGE_KEY = "nb_admin_store";

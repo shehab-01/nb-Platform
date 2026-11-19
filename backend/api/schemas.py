@@ -1809,6 +1809,18 @@ class StockEntryOut(BaseModel):
     created_at: datetime
 
 
+class StockWaitingOut(BaseModel):
+    """One option on the orders confirmed but not yet in History: what is
+    about to leave. variant_id is null for lines whose option is gone."""
+
+    variant_id: int | None
+    name: str
+    stock_packets: int
+    orders: int
+    combos: int
+    packets: int
+
+
 class StockOut(BaseModel):
     on_hand: int
     month: str
@@ -1821,6 +1833,9 @@ class StockOut(BaseModel):
     days: list[StockDayOut]
     entries: list[StockEntryOut]
     options: list[StockOptionOut]
+    # Confirmed and on the Shipping list, by option; gone once in History.
+    waiting: list[StockWaitingOut] = []
+    waiting_packets: int = 0
 
 
 class StockReturnIn(BaseModel):

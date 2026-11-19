@@ -34,6 +34,8 @@ class Sellable:
     sku: str
     product_id: int
     variant_id: int
+    # Packets one of it takes out of stock, copied onto the order line.
+    stock_packets: int = 1
 
 
 def variant_title(product_title: str, label: str) -> str:
@@ -49,6 +51,7 @@ def sellable(product: Product, variant: ProductVariant) -> Sellable:
         sku=variant.sku,
         product_id=product.id,
         variant_id=variant.id,
+        stock_packets=variant.stock_packets or 1,
     )
 
 

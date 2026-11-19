@@ -117,6 +117,9 @@ def _line(
         product_name=sold.title,
         unit_price=unit_price_override if unit_price_override is not None else sold.unit_price,
         quantity=quantity,
+        # Fixed now, like the name and price: editing the option later must
+        # not change what this order takes out of stock.
+        stock_packets=sold.stock_packets,
     )
 
 # "<prefix>-<id>" with any store's prefix (letters first, so a bare number

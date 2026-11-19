@@ -12,12 +12,15 @@ the courier, the sticker printed and the parcel handed over, and only then
 is the order moved to History. That move is the one step every dispatched
 order goes through exactly once, so it is the one that takes stock.
 
-How many packets an order takes: each line's quantity × its option's
-stock_packets (the 3-packet combo is 3). The count is worked out when the
-order goes to History and kept on the row, so the past reads as it was.
-sync() is the repair: it brings the ledger in line with the slots and the
-History list as they are now — rows that should be there and are not, and
-rows whose count has drifted — and never touches returns or adjustments.
+How many packets an order takes: each line's quantity × the packets one of
+it held when it was ordered (order_items.stock_packets, copied from the
+option, so the 3-packet combo is 3). Copied rather than looked up because
+options get edited and reused: Eco-Tine turned its 5-packet option into the
+10-packet one, and looking it up counted every earlier 5-packet order as
+10. sync() is the repair: it brings the ledger in line with the slots and
+the History list as they are now — rows that should be there and are not,
+and rows whose count has drifted — and never touches returns or
+adjustments.
 """
 from __future__ import annotations
 
@@ -32,9 +35,7 @@ from api.models import (
     Order,
     OrderEvent,
     OrderStatus,
-    Product,
     ProductionSlot,
-    ProductVariant,
     StockMovement,
 )
 
@@ -60,29 +61,18 @@ def dhaka_day(moment: datetime) -> date:
 # --- Pure rules -----------------------------------------------------------------
 
 
-def sale_packets(
-    lines: list[tuple[int, int | None]], packets_by_variant: dict[int, int]
-) -> tuple[int, int]:
-    """Packets an order takes, from its lines as (quantity, variant id), and
-    how many lines could not be sized (the option was deleted, or the line
-    names none) and were counted at one packet each."""
-    total = 0
-    unsized = 0
-    for quantity, variant_id in lines:
-        per = packets_by_variant.get(variant_id) if variant_id is not None else None
-        if per is None:
-            per = 1
-            unsized += 1
-        total += quantity * per
-    return total, unsized
+def sale_packets(lines: list[tuple[int, int]]) -> int:
+    """Packets an order takes, from its lines as (quantity, packets each)."""
+    return sum(quantity * max(per or 1, 1) for quantity, per in lines)
 
 
-def order_lines(order: Order) -> list[tuple[int, int | None]]:
-    """An order's lines as (quantity, variant id). An order from before
-    order_items has only its summary columns: one line of no known option."""
+def order_lines(order: Order) -> list[tuple[int, int]]:
+    """An order's lines as (quantity, packets each, as ordered). An order
+    from before order_items has only its summary columns: one packet a
+    piece, the most that can be said of it."""
     if order.items:
-        return [(item.quantity, item.variant_id) for item in order.items]
-    return [(order.quantity or 1, None)]
+        return [(item.quantity, item.stock_packets) for item in order.items]
+    return [(order.quantity or 1, 1)]
 
 
 def status_change(old: str, new: str) -> str | None:
@@ -131,16 +121,6 @@ def day_rows(opening: int, movements: list[tuple[date, str, int]]) -> list[DayRo
 # --- The ledger --------------------------------------------------------------------
 
 
-async def variant_packets(session: AsyncSession, store_id: int) -> dict[int, int]:
-    """Every option of the store's products, with its packets."""
-    rows = await session.execute(
-        select(ProductVariant.id, ProductVariant.stock_packets)
-        .join(Product, Product.id == ProductVariant.product_id)
-        .where(Product.store_id == store_id)
-    )
-    return {vid: packets for vid, packets in rows.all()}
-
-
 async def _sale_row(session: AsyncSession, store_id: int, order_id: int) -> StockMovement | None:
     return await session.scalar(
         select(StockMovement).where(
@@ -168,7 +148,7 @@ async def follow_status(
     if change == "take":
         if await _sale_row(session, store.id, order.id) is not None:
             return
-        packets, _ = sale_packets(order_lines(order), await variant_packets(session, store.id))
+        packets = sale_packets(order_lines(order))
         session.add(
             StockMovement(
                 store_id=store.id,
@@ -235,7 +215,7 @@ class SyncResult:
     sales_added: int = 0
     sales_updated: int = 0
     sales_removed: int = 0
-    # Orders with a line whose option is gone, counted at one packet a line.
+    # Orders from before order lines existed, counted at one packet a piece.
     unsized_orders: int = 0
 
 
@@ -284,7 +264,6 @@ async def sync(session: AsyncSession, store_id: int, user_id: int | None) -> Syn
             )
         )
     }
-    sizes = await variant_packets(session, store_id)
     # The day each order last went to History, from its status events.
     moved = dict(
         (
@@ -304,8 +283,8 @@ async def sync(session: AsyncSession, store_id: int, user_id: int | None) -> Syn
         select(Order).where(Order.store_id == store_id, Order.status == HISTORY)
     ):
         in_history.add(order.id)
-        packets, unsized = sale_packets(order_lines(order), sizes)
-        if unsized:
+        packets = sale_packets(order_lines(order))
+        if not order.items:
             result.unsized_orders += 1
         row = sale_rows.get(order.id)
         if row is None:
@@ -321,9 +300,8 @@ async def sync(session: AsyncSession, store_id: int, user_id: int | None) -> Syn
                 )
             )
             result.sales_added += 1
-        elif not unsized and row.packets != -packets:
-            # An option's packets corrected, or the order's lines changed.
-            # An order whose option is gone keeps what it was counted at.
+        elif row.packets != -packets:
+            # The order's lines, or their packets, were corrected.
             row.packets = -packets
             result.sales_updated += 1
     for order_id, row in sale_rows.items():

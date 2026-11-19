@@ -18,13 +18,22 @@ below zero — dispatch is never held up by it — and the page warns instead.
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import distinct, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import tenancy
 from api.db import get_session
-from api.models import Product, ProductionRun, ProductionSlot, ProductVariant, StockMovement
+from api.models import (
+    Order,
+    OrderItem,
+    OrderStatus,
+    Product,
+    ProductionRun,
+    ProductionSlot,
+    ProductVariant,
+    StockMovement,
+)
 from api.schemas import (
     StockAdjustIn,
     StockDayOut,
@@ -33,6 +42,7 @@ from api.schemas import (
     StockOut,
     StockReturnIn,
     StockSyncOut,
+    StockWaitingOut,
 )
 from api.services import stock
 
@@ -99,6 +109,60 @@ async def _options(session: AsyncSession, store_id: int) -> list[StockOptionOut]
     ]
 
 
+# Confirmed by phone and not yet dispatched: on the Confirmed list or the
+# Shipping list. Moving them to History takes them out of stock and off here.
+WAITING = (OrderStatus.confirmed.value, OrderStatus.shipped.value)
+
+
+async def _waiting(
+    session: AsyncSession, store_id: int, options: list[StockOptionOut]
+) -> list[StockWaitingOut]:
+    """What the confirmed orders not yet in History hold, by option: one
+    entry for every option of the live product (zero when none), then any
+    other option still on such an order."""
+    rows = await session.execute(
+        select(
+            OrderItem.variant_id,
+            func.count(distinct(Order.id)),
+            func.sum(OrderItem.quantity),
+            func.sum(OrderItem.quantity * OrderItem.stock_packets),
+        )
+        .join(Order, Order.id == OrderItem.order_id)
+        .where(Order.store_id == store_id, Order.status.in_(WAITING))
+        .group_by(OrderItem.variant_id)
+    )
+    found = {vid: (orders, combos, packets) for vid, orders, combos, packets in rows.all()}
+    out: list[StockWaitingOut] = []
+    for o in options:
+        if not o.is_active and o.variant_id not in found:
+            continue
+        orders, combos, packets = found.pop(o.variant_id, (0, 0, 0))
+        out.append(
+            StockWaitingOut(
+                variant_id=o.variant_id,
+                name=o.name,
+                stock_packets=o.stock_packets,
+                orders=orders,
+                combos=int(combos or 0),
+                packets=int(packets or 0),
+            )
+        )
+    for vid, (orders, combos, packets) in found.items():
+        # An option deleted since, or one of another store's products (not
+        # possible, but never hidden): shown as it is.
+        out.append(
+            StockWaitingOut(
+                variant_id=vid,
+                name="An option no longer sold",
+                stock_packets=0,
+                orders=orders,
+                combos=int(combos or 0),
+                packets=int(packets or 0),
+            )
+        )
+    return out
+
+
 @router.get("", response_model=StockOut)
 async def read_stock(
     month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
@@ -138,6 +202,8 @@ async def read_stock(
     sent = sum(d.sent for d in days)
     returned = sum(d.returned for d in days)
     adjusted = sum(d.adjusted for d in days)
+    options = await _options(session, store_id)
+    waiting = await _waiting(session, store_id, options)
     return StockOut(
         on_hand=await stock.on_hand(session, store_id),
         month=start.strftime("%Y-%m"),
@@ -165,7 +231,9 @@ async def read_stock(
             )
             for m, number, run_id, run_name in entries
         ],
-        options=await _options(session, store_id),
+        options=options,
+        waiting=waiting,
+        waiting_packets=sum(w.packets for w in waiting),
     )
 
 

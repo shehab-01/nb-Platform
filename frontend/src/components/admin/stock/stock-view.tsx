@@ -92,6 +92,12 @@ const fail = (err: unknown, fallback: string) => (err instanceof Error ? err.mes
 /** +1,200 / −30, for movements. */
 const signed = (n: number) => (n > 0 ? `+${count(n)}` : n < 0 ? `−${count(-n)}` : "0");
 
+/** What one combo averages, for "Approximate combos": the 3, 5 and
+ *  10-packet combos sell in a mix that works out at about 3.5 packets
+ *  each, by the client's reckoning. Rounded down: never promise more. */
+const PACKETS_PER_COMBO = 3.5;
+const approxCombos = (packets: number) => Math.max(Math.floor(packets / PACKETS_PER_COMBO), 0);
+
 const DAY_COLS = "grid grid-cols-[minmax(7rem,1fr)_6rem_6rem_6rem_6rem_7rem] gap-3 px-5";
 
 /**
@@ -173,23 +179,71 @@ function Stock() {
         </div>
       )}
 
-      {/* --- Now --- */}
+      {/* --- Now: in hand, as combos, and what is about to leave --- */}
       <Card className={cn("mt-6 gap-0 py-5", negative && "border-destructive/50 bg-destructive/5")}>
-        <CardContent className="flex flex-wrap items-end justify-between gap-4 px-5">
-          <div>
+        <CardContent className="grid gap-5 px-5 @4xl:grid-cols-[auto_auto_minmax(0,1fr)] @4xl:items-stretch">
+          <div className="min-w-40">
             <div className="text-sm text-muted-foreground">In stock now</div>
-            <div
-              className={cn(
-                "mt-1 text-4xl font-bold tabular-nums",
-                negative && "text-destructive"
-              )}
-            >
+            <div className={cn("mt-1 text-4xl font-bold tabular-nums", negative && "text-destructive")}>
               {data ? count(data.onHand) : <Skeleton className="h-10 w-32" />}
               {data && <span className="ml-2 text-base font-medium text-muted-foreground">packets</span>}
             </div>
           </div>
+
+          <div className="min-w-44 rounded-lg border bg-muted/30 px-4 py-3">
+            <div className="text-sm text-muted-foreground">Approximate combos</div>
+            <div className="mt-1 text-3xl font-semibold tabular-nums">
+              {data ? `≈ ${count(approxCombos(data.onHand))}` : <Skeleton className="h-9 w-20" />}
+            </div>
+            {data && (
+              <div className="mt-0.5 text-xs text-muted-foreground">
+                {count(data.onHand)} ÷ {PACKETS_PER_COMBO}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-lg border px-4 py-3">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <div className="text-sm text-muted-foreground">Confirmed, not yet in History</div>
+              {data && data.waitingPackets > 0 && (
+                <div className="text-xs text-muted-foreground">
+                  {count(data.waitingPackets)} packets to go out · stock after{" "}
+                  <span
+                    className={cn(
+                      "font-semibold text-foreground",
+                      data.onHand - data.waitingPackets < 0 && "text-destructive"
+                    )}
+                  >
+                    {count(data.onHand - data.waitingPackets)}
+                  </span>
+                </div>
+              )}
+            </div>
+            {data === null ? (
+              <Skeleton className="mt-2 h-14 w-full" />
+            ) : data.waiting.length === 0 ? (
+              <p className="mt-2 text-sm text-muted-foreground">No products yet.</p>
+            ) : (
+              <div className="mt-2 grid gap-3 @lg:grid-cols-3">
+                {data.waiting.map((w) => (
+                  <div key={w.variantId ?? "gone"} className="min-w-0 rounded-md bg-muted/40 px-3 py-2">
+                    <div className="truncate text-xs font-medium" title={w.name}>
+                      {w.stockPackets > 0 ? `${w.stockPackets}-packet combo` : w.name}
+                    </div>
+                    <div className="mt-0.5 text-2xl font-semibold tabular-nums">{count(w.combos)}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {w.combos === 0
+                        ? "none waiting"
+                        : `${count(w.orders)} ${w.orders === 1 ? "order" : "orders"} · ${count(w.packets)} packets`}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {negative && (
-            <div className="flex max-w-xl gap-2 text-sm text-destructive">
+            <div className="flex gap-2 text-sm text-destructive @4xl:col-span-3">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
               <p>
                 Below zero: more packets went to History than were received. If this store sold
@@ -346,8 +400,8 @@ function Stock() {
               </ul>
             )}
             <p className="mt-3 text-xs text-muted-foreground">
-              An order moved to History takes each line&rsquo;s quantity × its option&rsquo;s packets.
-              Change them under{" "}
+              An order moved to History takes each line&rsquo;s quantity × the packets it was
+              ordered with, so changing these affects new orders only. Change them under{" "}
               <Link href="/admin/products" className="font-medium text-primary hover:underline">
                 Products
               </Link>
@@ -730,8 +784,8 @@ function SyncDialog({
             </div>
             {result.unsizedOrders > 0 && (
               <div className="text-amber-700 dark:text-amber-400">
-                {count(result.unsizedOrders)} orders name an option that no longer exists; each of
-                their lines counted as one packet.
+                {count(result.unsizedOrders)} orders are from before order lines were kept; each
+                counted as one packet a piece.
               </div>
             )}
             <div className="font-semibold">In stock now: {count(result.onHand)} packets</div>
@@ -740,7 +794,10 @@ function SyncDialog({
           <div className="flex gap-3 rounded-lg border border-amber-400/60 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
             <AlertTriangle className="mt-0.5 size-4 shrink-0" />
             <div>
-              <p className="font-semibold">Check each option&rsquo;s packets first — History is counted with them:</p>
+              <p className="font-semibold">
+                Each order counts the packets its line was ordered with. For reference, the options
+                now hold:
+              </p>
               <ul className="mt-1.5 grid gap-0.5">
                 {options.map((o) => (
                   <li key={o.variantId}>

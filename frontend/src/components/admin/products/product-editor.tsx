@@ -488,7 +488,8 @@ function VersionRow({
           ) : (
             <>
               One of this takes {row.stockPackets} {row.stockPackets === 1 ? "packet" : "packets"} out
-              of stock when its order goes to History.
+              of stock when its order goes to History. Orders already placed keep what they were
+              ordered with, so make a new version for a new combo rather than changing this one.
             </>
           )}
         </p>

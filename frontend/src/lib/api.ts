@@ -3028,6 +3028,19 @@ export type StockMonth = {
   /** Slots, returns and corrections, newest first. */
   entries: StockEntry[];
   options: StockOption[];
+  /** Confirmed orders not yet in History, by option: about to leave. */
+  waiting: StockWaiting[];
+  waitingPackets: number;
+};
+
+export type StockWaiting = {
+  /** Null for lines whose option is gone. */
+  variantId: number | null;
+  name: string;
+  stockPackets: number;
+  orders: number;
+  combos: number;
+  packets: number;
 };
 
 type ApiStockMonth = {
@@ -3055,6 +3068,15 @@ type ApiStockMonth = {
     created_at: string;
   }[];
   options: { variant_id: number; name: string; stock_packets: number; is_active: boolean }[];
+  waiting?: {
+    variant_id: number | null;
+    name: string;
+    stock_packets: number;
+    orders: number;
+    combos: number;
+    packets: number;
+  }[];
+  waiting_packets?: number;
 };
 
 export async function getStock(month: string): Promise<StockMonth> {
@@ -3089,6 +3111,15 @@ export async function getStock(month: string): Promise<StockMonth> {
       stockPackets: o.stock_packets,
       isActive: o.is_active,
     })),
+    waiting: (s.waiting ?? []).map((w) => ({
+      variantId: w.variant_id,
+      name: w.name,
+      stockPackets: w.stock_packets,
+      orders: w.orders,
+      combos: w.combos,
+      packets: w.packets,
+    })),
+    waitingPackets: s.waiting_packets ?? 0,
   };
 }
 

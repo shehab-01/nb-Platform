@@ -60,14 +60,15 @@ are), `docs/ARCHITECTURE-V1.md` (what we inherited), `DEV.md` (running it),
 ```
 backend/   FastAPI. api/models.py, api/routers/*, api/services/* (meta_capi,
            pathao, pathao_address, carrybee, courier), api/stores.py (host → store), api/tenancy.py
-           (memberships, X-Admin-Store), alembic/versions (0001–0057), scripts/seed_dev.py,
+           (memberships, X-Admin-Store), alembic/versions (0001–0058), scripts/seed_dev.py,
            tests/ (pytest, no DB). Production pages come in modes picked per
            store (stores.production_mode, PRODUCTION_MODES): "cooking"
            (routers/production.py, by day) and "batch" (routers/production_runs.py,
            an order received in slots, services/production_invoice.py).
            Stock (stores.stock_enabled; routers/stock.py, services/stock.py):
            a ledger of packets — slots in, orders moved to History out
-           (line qty × product_variants.stock_packets), returns back in
+           (line qty × order_items.stock_packets, copied from the option when
+           ordered), returns back in
 frontend/  Next.js 16 App Router. src/proxy.ts (host routing), src/lib/store.ts
            (server-side store config), src/lib/admin-store.ts (+ lib/http.ts:
            X-Admin-Store), src/app/page.tsx (storefront root), src/templates/

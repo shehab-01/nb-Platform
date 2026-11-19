@@ -20,35 +20,46 @@ from api.schemas import StockAdjustIn, StockReturnIn, VariantSave
 from api.services import stock
 from api.stores import StoreConfig
 
-# The three options on Eco-Tine's page: 3, 5 and 10 packets.
-COMBOS = {11: 3, 12: 5, 13: 10}
-
-
 # --- Packets an order takes ---------------------------------------------------
 
 
 def test_each_combo_counts_its_packets():
-    assert stock.sale_packets([(1, 11)], COMBOS) == (3, 0)
-    assert stock.sale_packets([(1, 13)], COMBOS) == (10, 0)
+    # Lines as (quantity, packets each as ordered): 3, 5 and 10-packet combos.
+    assert stock.sale_packets([(1, 3)]) == 3
+    assert stock.sale_packets([(1, 10)]) == 10
     # Two of the 5-packet combo and one 3-packet combo on one order.
-    assert stock.sale_packets([(2, 12), (1, 11)], COMBOS) == (13, 0)
+    assert stock.sale_packets([(2, 5), (1, 3)]) == 13
 
 
 def test_75_orders_of_the_3_packet_combo_take_225():
-    total = sum(stock.sale_packets([(1, 11)], COMBOS)[0] for _ in range(75))
-    assert total == 225
+    assert sum(stock.sale_packets([(1, 3)]) for _ in range(75)) == 225
 
 
-def test_an_option_that_is_gone_counts_one_packet_a_piece_and_is_reported():
-    assert stock.sale_packets([(2, 99)], COMBOS) == (2, 1)
-    assert stock.sale_packets([(1, None), (1, 11)], COMBOS) == (4, 1)
+def test_a_line_counts_what_it_held_when_ordered_not_what_its_option_says_now():
+    # Eco-Tine turned its 5-packet option into the 10-packet one. A line
+    # ordered before keeps its own 5, whatever the option holds today.
+    old = SimpleNamespace(
+        items=[SimpleNamespace(quantity=1, variant_id=4, stock_packets=5)], quantity=1
+    )
+    assert stock.sale_packets(stock.order_lines(old)) == 5
 
 
-def test_an_order_from_before_order_items_uses_its_quantity():
+def test_an_order_from_before_order_items_counts_one_a_piece():
     old = SimpleNamespace(items=[], quantity=2)
-    assert stock.order_lines(old) == [(2, None)]
-    new = SimpleNamespace(items=[SimpleNamespace(quantity=1, variant_id=12)], quantity=1)
-    assert stock.order_lines(new) == [(1, 12)]
+    assert stock.order_lines(old) == [(2, 1)]
+    assert stock.sale_packets([(2, 0)]) == 2
+
+
+def test_the_order_line_copies_the_options_packets():
+    from api.catalogue import sellable
+    from api.routers.orders import _line
+
+    product = SimpleNamespace(id=1, title="হারবাল সিগারেট")
+    variant = SimpleNamespace(
+        id=9, label="৫ প্যাকেট", unit_price=1090, sku="eco-05", stock_packets=5
+    )
+    line = _line(sellable(product, variant), 2)
+    assert (line.variant_id, line.quantity, line.stock_packets) == (9, 2, 5)
 
 
 # --- When stock moves --------------------------------------------------------

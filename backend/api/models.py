@@ -616,6 +616,10 @@ class OrderItem(Base):
     product_name: Mapped[str] = mapped_column(String(255))
     unit_price: Mapped[int] = mapped_column(Integer)
     quantity: Mapped[int] = mapped_column(Integer, default=1)
+    # Packets one of it takes out of stock (stores.stock_enabled), copied
+    # from the option when ordered — a snapshot like the name and price, so
+    # reusing or editing the option later never rewrites what it took.
+    stock_packets: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
     @property
     def line_total(self) -> int:
